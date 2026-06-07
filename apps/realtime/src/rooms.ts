@@ -580,7 +580,15 @@ const DISCONNECT_GRACE_MS = 30 * 1000; // 30 seconds
 export function cleanupExpiredRooms(): void {
   const now = Date.now();
   for (const [roomCode, room] of rooms.entries()) {
-    if (room.status === "waiting" && now - room.lastActivityAt > ROOM_TTL_MS) {
+    const isAbandoned = [...room.players.values()].every(p => !p.connected);
+    const isFinished = room.status === "finished";
+
+    // Expire waiting rooms, finished rooms, and abandoned rooms
+    if (
+      (room.status === "waiting" && now - room.lastActivityAt > ROOM_TTL_MS) ||
+      (isFinished && now - room.lastActivityAt > ROOM_TTL_MS) ||
+      (isAbandoned && now - room.lastActivityAt > ROOM_TTL_MS)
+    ) {
       rooms.delete(roomCode);
     }
   }
