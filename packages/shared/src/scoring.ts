@@ -29,12 +29,22 @@ export function calculateProgress(progressIndex: number, promptLength: number): 
 }
 
 export function rankPlayers(players: PlayerState[], promptLength: number): PlayerResult[] {
-  return [...players]
-    .sort((a, b) => comparePlayers(a, b, promptLength))
-    .map((player, index) => ({
+  const sorted = [...players].sort((a, b) => comparePlayers(a, b, promptLength));
+  
+  const winner = sorted[0];
+  const winnerTime = winner?.finishTimeMs ?? 0;
+
+  return sorted.map((player, index): PlayerResult => {
+    const isFinished = player.progressIndex >= promptLength;
+    const finishGap = isFinished && winner && player.id !== winner.id ? (player.finishTimeMs ?? 0) - winnerTime : undefined;
+    
+    return {
       ...player,
-      rank: index + 1
-    }));
+      rank: index + 1,
+      maxStreak: 0,
+      finishGap
+    };
+  });
 }
 
 function comparePlayers(a: PlayerState, b: PlayerState, promptLength: number): number {

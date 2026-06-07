@@ -42,6 +42,8 @@ export type RoomState = {
 
 export type PlayerResult = PlayerState & {
   rank: number;
+  maxStreak: number;
+  finishGap: number | undefined;
 };
 
 export type MatchResult = {
