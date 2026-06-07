@@ -4,9 +4,21 @@
 
 ## 現在の状態
 
-このリポジトリは実装前の準備段階です。まず、必要情報の調査、ゲーム仕様、技術構成、GitHub 運用方針を `docs/` にまとめています。
+このリポジトリは MVP 実装の初期段階です。Next.js の Web UI、Socket.IO の realtime server、shared 型・スコア計算、CI、基本テストを追加しています。
 
 当面の目標は、友人・知人など内輪で遊べるオンラインタイピング対戦ゲームを作ることです。将来的には Web に公開し、知らない人同士でも遊べるサービスに拡張できるようにします。
+
+## 実装済み
+
+- room code による 2 人対戦 room 作成・参加
+- ロビーの参加者表示
+- ホスト開始、3 秒カウントダウン
+- タイピング進捗、WPM、正確率、ミスタイプ表示
+- 完走結果と再戦
+- shared event types / game state / scoring
+- Vitest unit / room flow tests
+- Playwright room join smoke E2E
+- GitHub Actions CI
 
 ## Docs
 
@@ -31,9 +43,37 @@
 
 Next.js 単体で WebSocket 常時接続を完結させるより、Web UI とリアルタイムサーバーを分ける構成を基本方針にします。理由は、対戦ルーム、切断復帰、スケールアウト、低遅延イベント処理をサーバー側で明確に管理できるためです。
 
+## 開発
+
+```bash
+npm install
+npm run dev
+```
+
+ローカルでは次の URL を使います。
+
+- Web: http://127.0.0.1:3000
+- Realtime health: http://127.0.0.1:3001/health
+
+品質チェック:
+
+```bash
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+```
+
+Playwright のブラウザを入れた後、E2E を実行できます。
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
+
 ## 次の作業
 
-1. Next.js + TypeScript の雛形を作る。
-2. Socket.IO サーバーを追加し、ルーム作成と 2 人対戦の最小機能を実装する。
-3. 内輪で遊べる private beta としてデプロイする。
-4. Playwright で 2 ブラウザ対戦の E2E テストを作る。
+1. Playwright で実際の 2 人タイピング完走 E2E を追加する。
+2. 切断・リロード時の復帰または失格ルールを固める。
+3. Private beta 用のデプロイ先を決める。
+4. ログ、rate limit、簡易 monitoring を追加する。

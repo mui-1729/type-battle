@@ -12,34 +12,35 @@
 
 ## Phase 1: プロジェクト雛形
 
-- [ ] monorepo 構成を作る
-- [ ] Next.js + TypeScript を追加する
-- [ ] realtime server を追加する
-- [ ] shared types package を追加する
-- [ ] lint / format / typecheck を整える
-- [ ] npm scripts 規定を実装する
+- [x] monorepo 構成を作る
+- [x] Next.js + TypeScript を追加する
+- [x] realtime server を追加する
+- [x] shared types package を追加する
+- [x] lint / format / typecheck を整える
+- [x] npm scripts 規定を実装する
 
 ## Phase 2: MVP 対戦
 
-- [ ] Home 画面
-- [ ] room 作成
-- [ ] room 参加
-- [ ] Lobby 画面
-- [ ] countdown
-- [ ] Match 画面
-- [ ] progress sync
-- [ ] finish validation
-- [ ] Result 画面
+- [x] Home 画面
+- [x] room 作成
+- [x] room 参加
+- [x] Lobby 画面
+- [x] countdown
+- [x] Match 画面
+- [x] progress sync
+- [x] finish validation
+- [x] Result 画面
 
 ## Phase 3: 品質
 
-- [ ] scoring unit tests
-- [ ] room state unit tests
-- [ ] Socket.IO integration tests
-- [ ] 2 player Playwright E2E
+- [x] scoring unit tests
+- [x] room state unit tests
+- [x] Socket.IO integration tests
+- [ ] 2 player typing completion Playwright E2E
 - [ ] disconnect / reconnect tests
-- [ ] GitHub Actions CI
-- [ ] local build check
+- [x] room join Playwright smoke E2E
+- [x] GitHub Actions CI
+- [x] local build check
 
 ## Phase 4: Private Beta
 
