@@ -1,6 +1,7 @@
 import type {
   AckResponse,
   MatchResult,
+  Prompt,
   PromptCategory,
   RoomState,
   TypingFinish,
@@ -61,6 +62,10 @@ export type ClientToServerEvents = {
   "match:rematch": (
     payload: RoomCodePayload,
     ack: (response: AckResponse<RoomState>) => void
+  ) => void;
+  "practice:start": (
+    payload: { nickname: string; category: PromptCategory },
+    ack: (response: AckResponse<{ practiceId: string; prompt: Prompt; startedAt: number }>) => void
   ) => void;
 };
 

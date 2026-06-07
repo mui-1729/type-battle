@@ -588,6 +588,16 @@ export function checkForForfeits(): void {
   }
 }
 
+export function startPractice(nickname: string, category: PromptCategory): { practiceId: string; prompt: Prompt; startedAt: number } {
+  const practiceId = createRoomCode(); // Reuse room code generator for practice ID
+  const prompt = pickPrompt(category, Date.now());
+  return {
+    practiceId,
+    prompt,
+    startedAt: Date.now()
+  };
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(Math.floor(value), min), max);
 }

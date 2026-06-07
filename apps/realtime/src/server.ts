@@ -4,7 +4,10 @@ import { createServer } from "node:http";
 import { Server } from "socket.io";
 import { validateNickname } from "@type-battle/shared";
 import type {
+  AckResponse,
   ClientToServerEvents,
+  Prompt,
+  PromptCategory,
   ServerToClientEvents,
   RoomState
 } from "@type-battle/shared";
@@ -22,6 +25,7 @@ import {
   setPromptCategory,
   setReady,
   startMatch,
+  startPractice,
   updateProgress
 } from "./rooms.js";
 
@@ -166,6 +170,11 @@ io.on("connection", (socket) => {
 
     ack({ ok: true, data: result.room });
     emitRoomState(result.room);
+  });
+
+  socket.on("practice:start", (payload: { nickname: string; category: PromptCategory }, ack: (response: AckResponse<{ practiceId: string; prompt: Prompt; startedAt: number }>) => void) => {
+    const practice = startPractice(payload.nickname, payload.category);
+    ack({ ok: true, data: practice });
   });
 
   socket.on("disconnect", () => {
