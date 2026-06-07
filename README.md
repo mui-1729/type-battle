@@ -30,6 +30,9 @@
 - [docs/requirements.md](docs/requirements.md): 要件定義
 - [docs/game-design.md](docs/game-design.md): ゲーム設計
 - [docs/architecture.md](docs/architecture.md): システム設計
+- [docs/features/README.md](docs/features/README.md): 機能別仕様
+- [docs/features/feature-catalog.md](docs/features/feature-catalog.md): 今後作る機能の一覧と優先度
+- [docs/features/feature-backlog.md](docs/features/feature-backlog.md): 実装 Issue 候補
 - [docs/quality-ci-cd.md](docs/quality-ci-cd.md): Test / Build / CI / CD 規定
 - [docs/github.md](docs/github.md): GitHub 連携・運用手順
 - [docs/roadmap.md](docs/roadmap.md): 開発ロードマップ
@@ -79,3 +82,6 @@ npm run test:e2e
 2. 切断が長引いた場合の失格または試合継続ルールを固める。
 3. Private beta 用のデプロイ先を決める。
 4. ログ、rate limit、簡易 monitoring を追加する。
+5. 再戦、課題文、結果分析、プレイヤー設定の仕様から実装順を決める。
+
+機能実装前の詳細仕様は [docs/features/README.md](docs/features/README.md) にまとめています。

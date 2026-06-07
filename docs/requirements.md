@@ -50,10 +50,13 @@
 
 - ゲスト参加だけで遊べる。
 - room code を知っている人だけが参加できる。
+- 人がいない場合は COM と遊べる。
 - 5-10 試合連続で大きな同期崩れなく遊べる。
 - デプロイ先で Web UI と realtime server が動く。
 - エラー、切断、試合開始、試合終了をログで追える。
 - room 作成、join、typing event に軽い rate limit がある。
+- room が無制限に残り続けない。
+- reload / short disconnect から復帰できる。
 
 ## Public Beta 要件
 
@@ -68,17 +71,29 @@
 
 ## MVP 後の拡張
 
+- COM 難易度
+- room 自動期限切れ
+- 再戦 / 連続試合
+- 課題文カテゴリ・難易度
+- 一人練習
+- 結果分析
+- プレイヤー設定
 - 3-8 人対戦
 - ランダムマッチ
+- 公開 lobby
+- 観戦
+- invite link / friends
 - ログイン
 - レート・ランキング
 - フレンド対戦
-- 観戦
 - 文章カテゴリ選択
 - 日本語入力モード
+- 通報 / block / moderation
+- 不正検知
 - 大会モード
 - リプレイ
 - チャットまたは定型リアクション
+- お知らせ / feedback 導線
 
 ## 未決定事項
 
@@ -86,3 +101,30 @@
 - 課題文を英語、日本語、コード、記号混在のどれから始めるか。
 - 初期リリースの GitHub リポジトリを public にするか private にするか。
 - ホスティング先をどこにするか。
+
+## 機能別仕様
+
+詳細は [features/README.md](features/README.md) に分けて管理する。
+
+- [機能カタログ](features/feature-catalog.md)
+- [COM 対戦](features/com-opponent.md)
+- [マッチメイキング](features/matchmaking.md)
+- [切断・再接続](features/disconnect-reconnect.md)
+- [Room lifecycle](features/room-lifecycle.md)
+- [再戦 / 連続試合](features/rematch-session.md)
+- [課題文ライブラリ](features/prompt-library.md)
+- [一人練習](features/practice-mode.md)
+- [結果分析](features/result-analytics.md)
+- [プレイヤー設定](features/player-settings.md)
+- [日本語タイピングモード](features/japanese-typing-mode.md)
+- [観戦](features/spectator-mode.md)
+- [公開 lobby](features/public-lobby.md)
+- [通報 / moderation](features/moderation-report.md)
+- [不正検知 / abuse prevention](features/anti-cheat-abuse.md)
+- [guest identity / profiles](features/profiles-guest-identity.md)
+- [ranking / rating](features/ranking-rating.md)
+- [friends / invites](features/friends-invites.md)
+- [大会](features/tournaments.md)
+- [Observability / Rate Limit](features/observability-rate-limit.md)
+- [Private Beta デプロイ](features/deployment-private-beta.md)
+- [お知らせ / feedback](features/notification-feedback.md)

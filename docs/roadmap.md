@@ -47,21 +47,36 @@
 
 ## Phase 4: Private Beta
 
-- [ ] PostgreSQL 保存
-- [ ] guest session
+- [ ] room lifecycle / TTL
+- [ ] long disconnect handling
+- [ ] COM difficulty
+- [ ] rematch / session flow
+- [ ] prompt category and length selection
+- [ ] result analytics
+- [ ] player settings
+- [ ] lightweight rate limit
+- [ ] structured logging
+- [ ] basic monitoring
 - [ ] deployment
 - [ ] CD smoke test
-- [ ] lightweight rate limit
-- [ ] basic monitoring
-- [ ] branch protection
 - [ ] private beta feedback issue flow
+- [ ] branch protection
+- [ ] PostgreSQL 保存
+- [ ] guest session
 
 ## Phase 5: Public Beta
 
 - [ ] Redis 導入
+- [ ] quick match with COM fallback
 - [ ] public lobby or random matchmaking
 - [ ] nickname moderation
 - [ ] report / block flow
+- [ ] anti-cheat / suspicious result handling
+- [ ] profiles / guest identity hardening
+- [ ] weekly ranking / simple rating
+- [ ] spectator mode
+- [ ] Japanese typing mode prototype
+- [ ] notification / feedback
 - [ ] terms / privacy / contact page
 - [ ] load testing
 - [ ] abuse monitoring
@@ -69,9 +84,11 @@
 ## Phase 6: 拡張
 
 - [ ] 3-8 player rooms
-- [ ] Japanese typing mode
 - [ ] authenticated users
-- [ ] ranking
-- [ ] rating
+- [ ] advanced ranking
+- [ ] advanced rating
 - [ ] friend matches
-- [ ] spectator mode
+- [ ] invite links / friends
+- [ ] tournaments
+- [ ] replay
+- [ ] chat or fixed reactions

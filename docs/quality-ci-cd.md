@@ -46,6 +46,9 @@ monorepo を使わない初期実装の場合でも、同じ script 名を維持
 - room code generation
 - nickname validation
 - rate limit helper
+- COM progress
+- room TTL / expiration
+- reconnect grace period
 
 基準:
 
@@ -63,6 +66,9 @@ monorepo を使わない初期実装の場合でも、同じ script 名を維持
 - progress sync
 - finish / result
 - disconnect / reconnect
+- COM match
+- rate limit behavior
+- room expiration cleanup
 
 基準:
 
@@ -79,6 +85,9 @@ monorepo を使わない初期実装の場合でも、同じ script 名を維持
 - room code 参加
 - countdown
 - 2 player typing
+- COM typing
+- reload rejoin
+- disconnect display
 - result 表示
 - rematch
 
@@ -87,6 +96,8 @@ monorepo を使わない初期実装の場合でも、同じ script 名を維持
 - Playwright の 2 browser context で対戦を再現する。
 - MVP 完了条件として、2 player E2E が 1 本以上 green であること。
 - private beta 前に disconnect / reload の E2E を追加する。
+- COM fallback を触る PR では COM match E2E を更新する。
+- room lifecycle を触る PR では reload / expiration E2E を更新する。
 
 ### Load / Smoke Test
 
@@ -96,6 +107,8 @@ private beta では軽い smoke test を行う。
 - Web UI 表示
 - Socket.IO 接続
 - room create / join
+- COM match
+- reload rejoin
 
 public beta 前に load test を追加する。
 
@@ -228,6 +241,9 @@ public beta を目指す段階で追加する。
 - 5-10 試合の手動確認で重大な同期崩れがない。
 - disconnect / reload の最低限の挙動が決まっている。
 - ログで room lifecycle を追える。
+- room TTL が設定されている。
+- room create / join / typing progress の rate limit がある。
+- COM match がデプロイ環境で動く。
 
 ### Public Beta 公開
 
