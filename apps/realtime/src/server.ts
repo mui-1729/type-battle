@@ -17,6 +17,7 @@ import {
   leaveBySocket,
   markPlaying,
   rematch,
+  setDifficulty,
   setReady,
   startMatch,
   updateProgress
@@ -99,6 +100,18 @@ io.on("connection", (socket) => {
     if (room) {
       emitRoomState(room);
     }
+  });
+
+  socket.on("room:setDifficulty", (payload, ack) => {
+    const result = setDifficulty(socket.id, payload.roomCode, payload.difficulty);
+
+    if ("error" in result) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+
+    emitRoomState(result.room);
+    ack({ ok: true, data: result.room });
   });
 
   socket.on("match:start", (payload, ack) => {

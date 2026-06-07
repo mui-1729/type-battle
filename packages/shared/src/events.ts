@@ -1,5 +1,6 @@
 import type {
   AckResponse,
+  BotDifficulty,
   MatchResult,
   RoomState,
   TypingFinish,
@@ -47,6 +48,10 @@ export type ClientToServerEvents = {
   ) => void;
   "room:leave": (payload: RoomCodePayload) => void;
   "player:ready": (payload: ReadyPayload) => void;
+  "room:setDifficulty": (
+    payload: RoomCodePayload & { difficulty: BotDifficulty },
+    ack: (response: AckResponse<RoomState>) => void
+  ) => void;
   "match:start": (
     payload: RoomCodePayload,
     ack: (response: AckResponse<RoomState>) => void
