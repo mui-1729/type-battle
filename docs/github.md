@@ -71,6 +71,16 @@ git checkout -b feat/mvp-room-match
 - ゲームルール変更は `docs/game-design.md` も更新する。
 - Test / Build / CI / CD の詳細は [quality-ci-cd.md](quality-ci-cd.md) に従う。
 
+## コミットメッセージ
+
+コミットメッセージは Conventional Commits v1.0.0 に準拠する。
+
+```txt
+<type>[optional scope]: <description>
+```
+
+Reference: https://www.conventionalcommits.org/en/v1.0.0/
+
 ## GitHub Actions 初期案
 
 実装開始後に次を追加します。
