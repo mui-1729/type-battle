@@ -133,6 +133,14 @@ describe("rooms", () => {
       guestId: "guest_alice_waiting_rejoin",
       socketId: "socket_alice_waiting_rejoin_1"
     });
+    
+    // Join another player so room is not deleted when Alice leaves
+    joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_waiting_rejoin",
+      socketId: "socket_bob_waiting_rejoin"
+    });
 
     leaveBySocket("socket_alice_waiting_rejoin_1");
 
@@ -150,7 +158,9 @@ describe("rooms", () => {
     }
 
     expect(rejoined.room.roomCode).toBe(created.room.roomCode);
-    expect(rejoined.room.players[0]?.connected).toBe(true);
+    // Find Alice in the players array (she's the one with guest_alice_waiting_rejoin)
+    const alice = rejoined.room.players.find(p => p.id === "guest_alice_waiting_rejoin");
+    expect(alice?.connected).toBe(true);
   });
 
   it("adds a COM player with difficulty in nickname when a host starts alone", () => {

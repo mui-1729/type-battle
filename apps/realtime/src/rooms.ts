@@ -12,6 +12,7 @@ import type {
   MatchStatus,
   PlayerState,
   Prompt,
+  PromptCategory,
   RoomState,
   TypingFinish,
   TypingProgress
@@ -163,6 +164,21 @@ export function leaveBySocket(socketId: string): RoomState | null {
   if (player) {
     player.connected = false;
     player.ready = false;
+  }
+
+  // Handle host leave
+  if (record.playerId === room.hostPlayerId) {
+    const activePlayers = [...room.players.values()].filter((p) => p.connected || p.isBot);
+    if (activePlayers.length === 0) {
+      rooms.delete(room.roomCode);
+      return null;
+    }
+    
+    // Transfer host to the first active human player, or remain if no humans
+    const nextHost = activePlayers.find(p => !p.isBot) || activePlayers[0];
+    if (nextHost) {
+      room.hostPlayerId = nextHost.id;
+    }
   }
 
   return toPublicRoom(room);
