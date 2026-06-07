@@ -7,6 +7,7 @@ import {
   rankPlayers
 } from "@type-battle/shared";
 import type {
+  BotDifficulty,
   MatchResult,
   MatchStatus,
   PlayerState,
@@ -20,8 +21,13 @@ const MAX_PLAYERS = 2;
 const COUNTDOWN_MS = 3_000;
 const BOT_PLAYER_ID = "bot_com_1";
 const BOT_NICKNAME = "COM";
-export const BOT_TICK_MS = 700;
-const BOT_CHARS_PER_TICK = 8;
+export const BOT_TICK_MS = 500;
+
+const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistakeChance: number }> = {
+  easy: { charsPerTick: 1, mistakeChance: 0.05 },
+  normal: { charsPerTick: 2, mistakeChance: 0.02 },
+  hard: { charsPerTick: 3, mistakeChance: 0.01 }
+};
 
 type InternalPlayer = PlayerState & {
   socketId: string;
@@ -41,6 +47,8 @@ type InternalRoom = {
   roomCode: string;
   hostPlayerId: string;
   status: MatchStatus;
+  botDifficulty: BotDifficulty;
+  promptCategory: PromptCategory;
   prompt?: Prompt;
   serverStartAt?: number;
   result?: MatchResult;
@@ -61,6 +69,8 @@ export function createRoom(input: { nickname: string; guestId: string; socketId:
     roomCode,
     hostPlayerId: player.id,
     status: "waiting",
+    botDifficulty: "normal",
+    promptCategory: "standard",
     players: new Map([[player.id, player]]),
     createdAt: Date.now()
   };
@@ -106,6 +116,29 @@ export function joinRoom(input: {
   socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: player.id });
 
   return { room: toPublicRoom(room), playerId: player.id };
+}
+
+export function setPromptCategory(
+  socketId: string,
+  roomCode: string,
+  category: PromptCategory
+): { room: RoomState } | { error: string } {
+  const context = getContext(socketId, roomCode);
+
+  if (!context) {
+    return { error: "ルームに参加していません。" };
+  }
+
+  if (context.player.id !== context.room.hostPlayerId) {
+    return { error: "ホストだけが課題カテゴリを変更できます。" };
+  }
+
+  if (context.room.status !== "waiting") {
+    return { error: "試合中は課題カテゴリを変更できません。" };
+  }
+
+  context.room.promptCategory = category;
+  return { room: toPublicRoom(context.room) };
 }
 
 export function leaveBySocket(socketId: string): RoomState | null {
@@ -177,7 +210,7 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
   }
 
   room.status = "countdown";
-  room.prompt = pickPrompt(Date.now());
+  room.prompt = pickPrompt(room.promptCategory, Date.now());
   room.serverStartAt = Date.now() + COUNTDOWN_MS;
   delete room.result;
   resetPlayers(room);
@@ -196,6 +229,23 @@ export function markPlaying(roomCode: string): RoomState | null {
   return toPublicRoom(room);
 }
 
+function areHumansFinished(room: InternalRoom): boolean {
+  const promptLength = room.prompt?.text.length ?? 0;
+  return [...room.players.values()]
+    .filter((p) => !p.isBot)
+    .every((p) => p.progressIndex >= promptLength || !p.connected);
+}
+
+function finalizeUnfinishedBots(room: InternalRoom): void {
+  const promptLength = room.prompt?.text.length ?? 0;
+  for (const bot of [...room.players.values()].filter((p) => p.isBot)) {
+    if (bot.progressIndex < promptLength) {
+      bot.finishedAt = Date.now();
+      bot.finishTimeMs = Infinity;
+    }
+  }
+}
+
 export function advanceBot(roomCode: string): BotTickOutcome | null {
   const room = rooms.get(roomCode.toUpperCase());
 
@@ -209,35 +259,39 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
     return null;
   }
 
+  const settings = DIFFICULTY_SETTINGS[room.botDifficulty] ?? DIFFICULTY_SETTINGS.normal;
+  const isMistake = Math.random() < settings.mistakeChance;
+
+  // Add random speed variation: -1, 0, or +1 (ensuring minimum speed of 1)
+  const variance = Math.floor(Math.random() * 3) - 1;
+  const speed = Math.max(1, settings.charsPerTick + variance);
+  const charsToAdd = isMistake ? 0 : speed;
+
   applyProgress(bot, room, {
     roomCode: room.roomCode,
-    progressIndex: bot.progressIndex + BOT_CHARS_PER_TICK,
-    correctCharacters: bot.correctCharacters + BOT_CHARS_PER_TICK,
-    totalTypedCharacters: bot.totalTypedCharacters + BOT_CHARS_PER_TICK,
-    mistakes: bot.mistakes
+    progressIndex: bot.progressIndex + charsToAdd,
+    correctCharacters: bot.correctCharacters + charsToAdd,
+    totalTypedCharacters: bot.totalTypedCharacters + speed,
+    mistakes: bot.mistakes + (isMistake ? speed : 0)
   });
 
   const promptLength = room.prompt.text.length;
 
-  if (bot.progressIndex < promptLength) {
-    return { type: "progress", room: toPublicRoom(room) };
+  if (bot.progressIndex >= promptLength) {
+    bot.finishedAt = Date.now();
+    bot.finishTimeMs = bot.finishedAt - (room.serverStartAt ?? bot.finishedAt);
   }
 
-  const now = Date.now();
-  bot.finishedAt = now;
-  bot.finishTimeMs = now - (room.serverStartAt ?? now);
-
-  const allFinished = [...room.players.values()].every(
-    (player) => player.progressIndex >= promptLength || !player.connected
-  );
-
-  if (!allFinished) {
-    return { type: "progress", room: toPublicRoom(room) };
+  if (bot.progressIndex >= promptLength || areHumansFinished(room)) {
+    if (bot.progressIndex < promptLength) {
+      finalizeUnfinishedBots(room);
+    }
+    room.status = "finished";
+    room.result = toMatchResult(room);
+    return { type: "result", result: room.result };
   }
 
-  room.status = "finished";
-  room.result = toMatchResult(room);
-  return { type: "result", result: room.result };
+  return { type: "progress", room: toPublicRoom(room) };
 }
 
 export function updateProgress(socketId: string, payload: TypingProgress): RoomState | null {
@@ -262,25 +316,20 @@ export function finishTyping(socketId: string, payload: TypingFinish): MatchResu
 
   const promptLength = context.room.prompt.text.length;
 
-  if (context.player.progressIndex < promptLength) {
-    return toPublicRoom(context.room);
+  if (context.player.progressIndex >= promptLength) {
+    const now = Date.now();
+    context.player.finishedAt = now;
+    context.player.finishTimeMs = now - (context.room.serverStartAt ?? now);
   }
 
-  const now = Date.now();
-  context.player.finishedAt = now;
-  context.player.finishTimeMs = now - (context.room.serverStartAt ?? now);
-
-  const allFinished = [...context.room.players.values()].every(
-    (player) => player.progressIndex >= promptLength || !player.connected
-  );
-
-  if (!allFinished) {
-    return toPublicRoom(context.room);
+  if (areHumansFinished(context.room)) {
+    finalizeUnfinishedBots(context.room);
+    context.room.status = "finished";
+    context.room.result = toMatchResult(context.room);
+    return context.room.result;
   }
 
-  context.room.status = "finished";
-  context.room.result = toMatchResult(context.room);
-  return context.room.result;
+  return toPublicRoom(context.room);
 }
 
 export function rematch(socketId: string, roomCode: string): { room: RoomState } | { error: string } {
@@ -371,6 +420,8 @@ function toPublicRoom(room: InternalRoom): RoomState {
     roomCode: room.roomCode,
     hostPlayerId: room.hostPlayerId,
     status: room.status,
+    botDifficulty: room.botDifficulty,
+    promptCategory: room.promptCategory,
     players: toPublicPlayers(room),
     maxPlayers: MAX_PLAYERS
   };
@@ -426,10 +477,13 @@ function addBotPlayer(room: InternalRoom): void {
     return;
   }
 
+  const difficultyLabel = room.botDifficulty.charAt(0).toUpperCase() + room.botDifficulty.slice(1);
+  const nickname = `${BOT_NICKNAME} (${difficultyLabel})`;
+
   room.players.set(BOT_PLAYER_ID, {
     id: BOT_PLAYER_ID,
     socketId: BOT_PLAYER_ID,
-    nickname: BOT_NICKNAME,
+    nickname: nickname,
     connected: true,
     ready: true,
     isHost: false,

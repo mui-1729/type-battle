@@ -153,7 +153,7 @@ describe("rooms", () => {
     expect(rejoined.room.players[0]?.connected).toBe(true);
   });
 
-  it("adds a COM player when a host starts alone", () => {
+  it("adds a COM player with difficulty in nickname when a host starts alone", () => {
     const created = createRoom({
       nickname: "Alice",
       guestId: "guest_alice_com",
@@ -168,7 +168,7 @@ describe("rooms", () => {
     }
 
     expect(started.room.players).toHaveLength(2);
-    expect(started.room.players.some((player) => player.isBot && player.nickname === "COM")).toBe(true);
+    expect(started.room.players.some((player) => player.isBot && player.nickname === "COM (Normal)")).toBe(true);
   });
 
   it("advances the COM player during a playing match", () => {
@@ -182,14 +182,18 @@ describe("rooms", () => {
     expect("error" in started).toBe(false);
     expect(markPlaying(created.room.roomCode)?.status).toBe("playing");
 
-    const outcome = advanceBot(created.room.roomCode);
-    expect(outcome?.type).toBe("progress");
-
-    if (!outcome || outcome.type !== "progress") {
-      return;
+    let progressIndex = 0;
+    for (let i = 0; i < 10; i++) {
+        const outcome = advanceBot(created.room.roomCode);
+        if (outcome && outcome.type === "progress") {
+            const bot = outcome.room.players.find((player) => player.isBot);
+            if (bot && bot.progressIndex > progressIndex) {
+                progressIndex = bot.progressIndex;
+                break;
+            }
+        }
     }
-
-    const bot = outcome.room.players.find((player) => player.isBot);
-    expect(bot?.progressIndex).toBeGreaterThan(0);
+    
+    expect(progressIndex).toBeGreaterThan(0);
   });
 });
