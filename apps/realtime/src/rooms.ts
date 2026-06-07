@@ -56,6 +56,7 @@ type InternalRoom = {
   players: Map<string, InternalPlayer>;
   createdAt: number;
   lastActivityAt: number;
+  round: number;
 };
 
 const rooms = new Map<string, InternalRoom>();
@@ -75,7 +76,8 @@ export function createRoom(input: { nickname: string; guestId: string; socketId:
     promptCategory: "standard",
     players: new Map([[player.id, player]]),
     createdAt: Date.now(),
-    lastActivityAt: Date.now()
+    lastActivityAt: Date.now(),
+    round: 1
   };
 
   rooms.set(roomCode, room);
@@ -360,7 +362,8 @@ export function rematch(socketId: string, roomCode: string): { room: RoomState }
   }
 
   room.status = "waiting";
-  delete room.prompt;
+  room.round += 1;
+  room.prompt = pickPrompt(room.promptCategory, Date.now() + room.round);
   delete room.serverStartAt;
   delete room.result;
   resetPlayers(room);
