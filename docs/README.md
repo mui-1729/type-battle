@@ -9,6 +9,7 @@
 - [requirements.md](requirements.md): MVP と将来要件
 - [game-design.md](game-design.md): ルール、画面、ゲーム体験
 - [architecture.md](architecture.md): 技術構成、データ、リアルタイム同期
+- [quality-ci-cd.md](quality-ci-cd.md): Test / Build / CI / CD 規定
 - [github.md](github.md): GitHub 連携、ブランチ、Issue、PR 運用
 - [roadmap.md](roadmap.md): 段階的な開発計画
 

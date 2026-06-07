@@ -66,8 +66,10 @@ git checkout -b feat/mvp-room-match
 
 - 1 PR は 1 つの目的に絞る。
 - 実装 PR には最低限のテストを含める。
+- 実装 PR は lint、typecheck、test、build を通す。
 - Socket.IO event payload を変更する場合は `packages/shared` の型も更新する。
 - ゲームルール変更は `docs/game-design.md` も更新する。
+- Test / Build / CI / CD の詳細は [quality-ci-cd.md](quality-ci-cd.md) に従う。
 
 ## GitHub Actions 初期案
 
@@ -77,6 +79,18 @@ git checkout -b feat/mvp-room-match
 - lint
 - typecheck
 - unit tests
+- integration tests
+- build
 - Playwright E2E
+- private beta deploy smoke
 
 Node.js は LTS を使います。2026-06-07 時点では Node.js 24 LTS を第一候補にします。
+
+## Branch Protection 初期案
+
+実装開始後、private beta 前に `main` に次を設定します。
+
+- pull request 必須
+- CI 成功必須
+- force push 禁止
+- branch deletion 禁止

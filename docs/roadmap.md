@@ -17,6 +17,7 @@
 - [ ] realtime server を追加する
 - [ ] shared types package を追加する
 - [ ] lint / format / typecheck を整える
+- [ ] npm scripts 規定を実装する
 
 ## Phase 2: MVP 対戦
 
@@ -37,14 +38,18 @@
 - [ ] Socket.IO integration tests
 - [ ] 2 player Playwright E2E
 - [ ] disconnect / reconnect tests
+- [ ] GitHub Actions CI
+- [ ] local build check
 
 ## Phase 4: Private Beta
 
 - [ ] PostgreSQL 保存
 - [ ] guest session
 - [ ] deployment
+- [ ] CD smoke test
 - [ ] lightweight rate limit
 - [ ] basic monitoring
+- [ ] branch protection
 - [ ] private beta feedback issue flow
 
 ## Phase 5: Public Beta

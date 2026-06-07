@@ -16,6 +16,7 @@
 - [docs/requirements.md](docs/requirements.md): 要件定義
 - [docs/game-design.md](docs/game-design.md): ゲーム設計
 - [docs/architecture.md](docs/architecture.md): システム設計
+- [docs/quality-ci-cd.md](docs/quality-ci-cd.md): Test / Build / CI / CD 規定
 - [docs/github.md](docs/github.md): GitHub 連携・運用手順
 - [docs/roadmap.md](docs/roadmap.md): 開発ロードマップ
 
