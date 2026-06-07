@@ -30,6 +30,7 @@
 - [x] progress sync
 - [x] finish validation
 - [x] Result 画面
+- [x] COM 対戦
 
 ## Phase 3: 品質
 
@@ -37,6 +38,7 @@
 - [x] room state unit tests
 - [x] Socket.IO integration tests
 - [x] 2 player typing completion Playwright E2E
+- [x] COM match Playwright E2E
 - [x] reload rejoin tests
 - [ ] long disconnect handling tests
 - [x] room join Playwright smoke E2E

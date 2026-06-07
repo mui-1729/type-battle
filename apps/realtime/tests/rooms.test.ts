@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  advanceBot,
   createRoom,
   finishTyping,
   joinRoom,
@@ -150,5 +151,45 @@ describe("rooms", () => {
 
     expect(rejoined.room.roomCode).toBe(created.room.roomCode);
     expect(rejoined.room.players[0]?.connected).toBe(true);
+  });
+
+  it("adds a COM player when a host starts alone", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_com",
+      socketId: "socket_alice_com"
+    });
+
+    const started = startMatch("socket_alice_com", created.room.roomCode);
+    expect("error" in started).toBe(false);
+
+    if ("error" in started) {
+      return;
+    }
+
+    expect(started.room.players).toHaveLength(2);
+    expect(started.room.players.some((player) => player.isBot && player.nickname === "COM")).toBe(true);
+  });
+
+  it("advances the COM player during a playing match", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_com_advance",
+      socketId: "socket_alice_com_advance"
+    });
+
+    const started = startMatch("socket_alice_com_advance", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    expect(markPlaying(created.room.roomCode)?.status).toBe("playing");
+
+    const outcome = advanceBot(created.room.roomCode);
+    expect(outcome?.type).toBe("progress");
+
+    if (!outcome || outcome.type !== "progress") {
+      return;
+    }
+
+    const bot = outcome.room.players.find((player) => player.isBot);
+    expect(bot?.progressIndex).toBeGreaterThan(0);
   });
 });

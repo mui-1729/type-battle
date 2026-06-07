@@ -9,6 +9,8 @@ import type {
   RoomState
 } from "@type-battle/shared";
 import {
+  BOT_TICK_MS,
+  advanceBot,
   createRoom,
   finishTyping,
   joinRoom,
@@ -176,6 +178,32 @@ function scheduleMatchStart(room: RoomState): void {
 
     if (playingRoom) {
       io.to(playingRoom.roomCode).emit("match:started", playingRoom);
+      scheduleBotProgress(playingRoom);
     }
   }, delay);
+}
+
+function scheduleBotProgress(room: RoomState): void {
+  const hasBot = room.players.some((player) => player.isBot);
+
+  if (!hasBot) {
+    return;
+  }
+
+  const interval = setInterval(() => {
+    const outcome = advanceBot(room.roomCode);
+
+    if (!outcome) {
+      clearInterval(interval);
+      return;
+    }
+
+    if (outcome.type === "result") {
+      io.to(outcome.result.roomCode).emit("match:result", outcome.result);
+      clearInterval(interval);
+      return;
+    }
+
+    io.to(outcome.room.roomCode).emit("player:progress", outcome.room);
+  }, BOT_TICK_MS);
 }

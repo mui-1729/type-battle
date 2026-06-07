@@ -15,10 +15,11 @@
 - ホスト開始、3 秒カウントダウン
 - タイピング進捗、WPM、正確率、ミスタイプ表示
 - 完走結果と再戦
+- 1 人で開始した場合の COM 対戦
 - リロード後の同一 guest room 復帰
 - shared event types / game state / scoring
 - Vitest unit / room flow tests
-- Playwright room join / complete match / reload rejoin E2E
+- Playwright room join / complete match / COM match / reload rejoin E2E
 - GitHub Actions CI
 
 ## Docs
@@ -74,7 +75,7 @@ npm run test:e2e
 
 ## 次の作業
 
-1. 切断が長引いた場合の失格または試合継続ルールを固める。
-2. Private beta 用のデプロイ先を決める。
-3. ログ、rate limit、簡易 monitoring を追加する。
-4. ルームの自動期限切れを実装する。
+1. COM の難易度選択を追加する。
+2. 切断が長引いた場合の失格または試合継続ルールを固める。
+3. Private beta 用のデプロイ先を決める。
+4. ログ、rate limit、簡易 monitoring を追加する。

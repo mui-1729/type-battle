@@ -18,10 +18,24 @@ import type {
 
 const MAX_PLAYERS = 2;
 const COUNTDOWN_MS = 3_000;
+const BOT_PLAYER_ID = "bot_com_1";
+const BOT_NICKNAME = "COM";
+export const BOT_TICK_MS = 700;
+const BOT_CHARS_PER_TICK = 8;
 
 type InternalPlayer = PlayerState & {
   socketId: string;
 };
+
+export type BotTickOutcome =
+  | {
+      type: "progress";
+      room: RoomState;
+    }
+  | {
+      type: "result";
+      result: MatchResult;
+    };
 
 type InternalRoom = {
   roomCode: string;
@@ -155,10 +169,10 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
   const players = [...room.players.values()];
 
   if (players.length < MAX_PLAYERS) {
-    return { error: "2人そろうまで開始できません。" };
+    addBotPlayer(room);
   }
 
-  if (!players.every((player) => player.connected)) {
+  if (![...room.players.values()].every((player) => player.connected || player.isBot)) {
     return { error: "切断中のプレイヤーがいます。" };
   }
 
@@ -180,6 +194,50 @@ export function markPlaying(roomCode: string): RoomState | null {
 
   room.status = "playing";
   return toPublicRoom(room);
+}
+
+export function advanceBot(roomCode: string): BotTickOutcome | null {
+  const room = rooms.get(roomCode.toUpperCase());
+
+  if (!room || room.status !== "playing" || !room.prompt) {
+    return null;
+  }
+
+  const bot = [...room.players.values()].find((player) => player.isBot);
+
+  if (!bot || bot.progressIndex >= room.prompt.text.length) {
+    return null;
+  }
+
+  applyProgress(bot, room, {
+    roomCode: room.roomCode,
+    progressIndex: bot.progressIndex + BOT_CHARS_PER_TICK,
+    correctCharacters: bot.correctCharacters + BOT_CHARS_PER_TICK,
+    totalTypedCharacters: bot.totalTypedCharacters + BOT_CHARS_PER_TICK,
+    mistakes: bot.mistakes
+  });
+
+  const promptLength = room.prompt.text.length;
+
+  if (bot.progressIndex < promptLength) {
+    return { type: "progress", room: toPublicRoom(room) };
+  }
+
+  const now = Date.now();
+  bot.finishedAt = now;
+  bot.finishTimeMs = now - (room.serverStartAt ?? now);
+
+  const allFinished = [...room.players.values()].every(
+    (player) => player.progressIndex >= promptLength || !player.connected
+  );
+
+  if (!allFinished) {
+    return { type: "progress", room: toPublicRoom(room) };
+  }
+
+  room.status = "finished";
+  room.result = toMatchResult(room);
+  return { type: "result", result: room.result };
 }
 
 export function updateProgress(socketId: string, payload: TypingProgress): RoomState | null {
@@ -343,6 +401,7 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     connected: player.connected,
     ready: player.ready,
     isHost: player.id === hostPlayerId,
+    isBot: player.isBot,
     progressIndex: player.progressIndex,
     correctCharacters: player.correctCharacters,
     totalTypedCharacters: player.totalTypedCharacters,
@@ -362,6 +421,28 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
   return publicPlayer;
 }
 
+function addBotPlayer(room: InternalRoom): void {
+  if (room.players.has(BOT_PLAYER_ID)) {
+    return;
+  }
+
+  room.players.set(BOT_PLAYER_ID, {
+    id: BOT_PLAYER_ID,
+    socketId: BOT_PLAYER_ID,
+    nickname: BOT_NICKNAME,
+    connected: true,
+    ready: true,
+    isHost: false,
+    isBot: true,
+    progressIndex: 0,
+    correctCharacters: 0,
+    totalTypedCharacters: 0,
+    mistakes: 0,
+    wpm: 0,
+    accuracy: 100
+  });
+}
+
 function createPlayer(
   id: string,
   nickname: string,
@@ -375,6 +456,7 @@ function createPlayer(
     connected: true,
     ready: false,
     isHost,
+    isBot: false,
     progressIndex: 0,
     correctCharacters: 0,
     totalTypedCharacters: 0,

@@ -62,8 +62,8 @@ export default function HomePage() {
   const canStart =
     room?.status === "waiting" &&
     currentPlayer?.isHost &&
-    room.players.length === room.maxPlayers &&
-    room.players.every((player) => player.connected);
+    room.players.length >= 1 &&
+    room.players.every((player) => player.connected || player.isBot);
 
   const resetTyping = useCallback(() => {
     setLocalProgress({
@@ -439,9 +439,11 @@ export default function HomePage() {
                 <div className="playerRow" key={player.id}>
                   <div>
                     <strong>{player.nickname}</strong>
-                    <span>{player.isHost ? "host" : player.ready ? "ready" : "waiting"}</span>
+                    <span>
+                      {player.isBot ? "com" : player.isHost ? "host" : player.ready ? "ready" : "waiting"}
+                    </span>
                   </div>
-                  <small>{player.connected ? "connected" : "offline"}</small>
+                  <small>{player.isBot ? "bot" : player.connected ? "connected" : "offline"}</small>
                 </div>
               ))}
             </div>
@@ -454,7 +456,7 @@ export default function HomePage() {
               </button>
               <button className="primaryButton" type="button" onClick={startMatch} disabled={!canStart}>
                 <Play size={18} />
-                Start
+                {room.players.length < room.maxPlayers ? "Start vs COM" : "Start"}
               </button>
             </div>
           ) : null}

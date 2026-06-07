@@ -78,3 +78,25 @@ test("rejoins the room after reload", async ({ browser }) => {
 
   await hostContext.close();
 });
+
+test("starts a match against COM when alone", async ({ browser }) => {
+  const hostContext = await browser.newContext();
+  const host = await hostContext.newPage();
+
+  await host.goto("/");
+  await host.getByLabel("Nickname").fill("Alice");
+  await host.getByRole("button", { name: "Create room" }).click();
+  await expect(host.getByRole("button", { name: "Start vs COM" })).toBeEnabled();
+
+  await host.getByRole("button", { name: "Start vs COM" }).click();
+  await expect(host.getByLabel("Room controls").getByText("COM")).toBeVisible();
+  await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const promptText = await host.getByLabel("Typing prompt").innerText();
+  await host.keyboard.type(promptText, { delay: 1 });
+
+  await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 8_000 });
+  await expect(host.locator(".resultPanel").getByText("COM")).toBeVisible();
+
+  await hostContext.close();
+});

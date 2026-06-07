@@ -8,6 +8,7 @@ const basePlayer: PlayerState = {
   connected: true,
   ready: true,
   isHost: false,
+  isBot: false,
   progressIndex: 0,
   correctCharacters: 0,
   totalTypedCharacters: 0,

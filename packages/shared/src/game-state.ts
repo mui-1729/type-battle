@@ -6,6 +6,7 @@ export type PlayerState = {
   connected: boolean;
   ready: boolean;
   isHost: boolean;
+  isBot: boolean;
   progressIndex: number;
   correctCharacters: number;
   totalTypedCharacters: number;
