@@ -65,6 +65,21 @@ export default function HomePage() {
     room.players.length >= 1 &&
     room.players.every((player) => player.connected || player.isBot);
 
+  const setBotDifficulty = useCallback(
+    (difficulty: "easy" | "normal" | "hard") => {
+      if (!room || !socketRef.current || !currentPlayer?.isHost) {
+        return;
+      }
+
+      socketRef.current.emit("room:setDifficulty", { roomCode: room.roomCode, difficulty }, (response) => {
+        if (!response.ok) {
+          setError(response.error);
+        }
+      });
+    },
+    [room, currentPlayer]
+  );
+
   const resetTyping = useCallback(() => {
     setLocalProgress({
       progressIndex: 0,
@@ -446,6 +461,25 @@ export default function HomePage() {
                   <small>{player.isBot ? "bot" : player.connected ? "connected" : "offline"}</small>
                 </div>
               ))}
+            </div>
+          ) : null}
+
+          {room?.status === "waiting" && room.players.length < room.maxPlayers ? (
+            <div className="difficultySelector">
+              <span>COM Difficulty</span>
+              <div className="difficultyButtons">
+                {(["easy", "normal", "hard"] as const).map((d) => (
+                  <button
+                    key={d}
+                    className={room.botDifficulty === d ? "active" : ""}
+                    type="button"
+                    onClick={() => setBotDifficulty(d)}
+                    disabled={!currentPlayer?.isHost}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
 
