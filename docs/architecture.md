@@ -60,21 +60,19 @@ docs/
 - `room:join`
 - `room:leave`
 - `player:ready`
+- `room:setPromptCategory`
 - `match:start`
 - `typing:progress`
 - `typing:finish`
 - `match:rematch`
+- `practice:start`
 
 ### Server to Client
 
-- `room:created`
 - `room:state`
-- `player:joined`
-- `player:left`
 - `match:countdown`
 - `match:started`
 - `player:progress`
-- `player:finished`
 - `match:result`
 - `match:error`
 
@@ -85,31 +83,50 @@ type MatchStatus =
   | "waiting"
   | "countdown"
   | "playing"
-  | "finished"
-  | "cancelled";
+  | "finished";
+
+type BotDifficulty = "easy" | "normal" | "hard";
+
+type PromptCategory = "short" | "standard" | "long";
 
 type PlayerState = {
   id: string;
   nickname: string;
   connected: boolean;
   ready: boolean;
+  isHost: boolean;
+  isBot: boolean;
   progressIndex: number;
   correctCharacters: number;
   totalTypedCharacters: number;
   mistakes: number;
+  wpm: number;
+  accuracy: number;
   finishedAt?: number;
+  finishTimeMs?: number;
 };
 
 type RoomState = {
   roomCode: string;
   hostPlayerId: string;
   status: MatchStatus;
-  promptId?: string;
-  promptText?: string;
+  botDifficulty: BotDifficulty;
+  promptCategory: PromptCategory;
+  prompt?: Prompt;
   serverStartAt?: number;
   players: PlayerState[];
+  maxPlayers: number;
+  result?: MatchResult;
 };
 ```
+
+## 現在の実装メモ
+
+- room state は realtime server の in-memory Map で管理する。
+- waiting room は TTL cleanup される。
+- reload rejoin は localStorage の guest id / room code を使う。
+- playing 中の long disconnect は server state で forfeit 判定できる。
+- practice は server event だけ先に実装してあり、UI は未実装。
 
 ## サーバー authoritative 方針
 

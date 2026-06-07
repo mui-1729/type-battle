@@ -40,19 +40,26 @@
 - [x] 2 player typing completion Playwright E2E
 - [x] COM match Playwright E2E
 - [x] reload rejoin tests
-- [ ] long disconnect handling tests
+- [x] long disconnect handling unit tests
+- [ ] long disconnect handling E2E
 - [x] room join Playwright smoke E2E
 - [x] GitHub Actions CI
 - [x] local build check
 
 ## Phase 4: Private Beta
 
-- [ ] room lifecycle / TTL
-- [ ] long disconnect handling
-- [ ] COM difficulty
-- [ ] rematch / session flow
-- [ ] prompt category and length selection
-- [ ] result analytics
+- [x] room lifecycle / TTL
+- [x] reload rejoin
+- [x] host leave transfer
+- [x] rematch / session flow
+- [x] prompt category and length selection
+- [x] COM fallback and server-side progress
+- [x] long disconnect forfeit server判定
+- [x] result finish gap field
+- [ ] long disconnect forfeit broadcast / UI / E2E
+- [ ] COM difficulty selector
+- [ ] result analytics UI
+- [ ] practice mode Web UI
 - [ ] player settings
 - [ ] lightweight rate limit
 - [ ] structured logging

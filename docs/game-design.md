@@ -24,7 +24,9 @@
 - room code
 - 参加者一覧
 - ready 状態
+- prompt category
 - ホスト用 start ボタン
+- 1 人時の Start vs COM
 - 退出ボタン
 
 ### Match
@@ -44,9 +46,21 @@
 - WPM
 - 正確率
 - ミスタイプ数
+- finish gap
 - 完走時間
 - 再戦ボタン
 - ホームへ戻るボタン
+
+### Practice
+
+実装は未完了。将来の画面要素。
+
+- prompt category
+- 一人で開始するボタン
+- WPM
+- 正確率
+- ミスタイプ数
+- retry / next prompt
 
 ## 入力判定
 
@@ -87,4 +101,4 @@ progress = currentIndex / promptLength
 
 ## 文章データ
 
-初期は 30-120 文字程度の英語文章を使う。日本語タイピングは IME、かな漢字変換、ローマ字入力方式の違いがあるため、MVP 後に別モードとして設計する。
+現在は `short | standard | long` の英語 prompt を static list で使う。日本語タイピングは IME、かな漢字変換、ローマ字入力方式の違いがあるため、MVP 後に別モードとして設計する。

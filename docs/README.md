@@ -6,6 +6,7 @@
 
 - [research.md](research.md): 調査結果と採用判断
 - [product-direction.md](product-direction.md): 内輪向けから一般公開までのプロダクト方針
+- [current-implementation.md](current-implementation.md): 現在の実装状態
 - [requirements.md](requirements.md): MVP と将来要件
 - [game-design.md](game-design.md): ルール、画面、ゲーム体験
 - [architecture.md](architecture.md): 技術構成、データ、リアルタイム同期
@@ -33,19 +34,39 @@ MVP では次を優先します。
 
 認証、ランキング、課金、フレンド、観戦、大会機能は MVP 後に追加します。
 
+## 現在の実装状態
+
+詳細は [current-implementation.md](current-implementation.md) にまとめる。
+
+実装済み:
+
+- room code による 2 人対戦
+- COM 対戦
+- reload rejoin
+- waiting room TTL
+- host transfer
+- rematch
+- prompt category
+- long disconnect forfeit の server 判定
+
+部分実装:
+
+- COM difficulty
+- practice mode
+- result analytics
+- long disconnect forfeit の UI / broadcast / E2E
+
 ## 次に仕様化・実装する機能
 
 Private beta 前に優先する機能は次です。
 
-1. [room lifecycle](features/room-lifecycle.md)
-2. [disconnect / reconnect](features/disconnect-reconnect.md)
-3. [observability / rate limit](features/observability-rate-limit.md)
-4. [private beta deployment](features/deployment-private-beta.md)
-5. [COM difficulty](features/com-opponent.md)
-6. [rematch / session flow](features/rematch-session.md)
-7. [prompt library](features/prompt-library.md)
-8. [result analytics](features/result-analytics.md)
-9. [player settings](features/player-settings.md)
+1. [COM difficulty](features/com-opponent.md)
+2. [practice mode](features/practice-mode.md)
+3. [result analytics](features/result-analytics.md)
+4. [disconnect / reconnect](features/disconnect-reconnect.md)
+5. [observability / rate limit](features/observability-rate-limit.md)
+6. [private beta deployment](features/deployment-private-beta.md)
+7. [player settings](features/player-settings.md)
 
 Public beta 以降に検討する主な機能は次です。
 

@@ -4,7 +4,7 @@
 
 ## 現在の状態
 
-このリポジトリは MVP 実装の初期段階です。Next.js の Web UI、Socket.IO の realtime server、shared 型・スコア計算、CI、基本テストを追加しています。
+このリポジトリは MVP の基本対戦に加えて、Private Beta に向けた機能を一部実装している段階です。Next.js の Web UI、Socket.IO の realtime server、shared 型・スコア計算、CI、基本テストを追加しています。
 
 当面の目標は、友人・知人など内輪で遊べるオンラインタイピング対戦ゲームを作ることです。将来的には Web に公開し、知らない人同士でも遊べるサービスに拡張できるようにします。
 
@@ -16,17 +16,29 @@
 - タイピング進捗、WPM、正確率、ミスタイプ表示
 - 完走結果と再戦
 - 1 人で開始した場合の COM 対戦
+- COM の server-side progress、速度揺らぎ、miss simulation
 - リロード後の同一 guest room 復帰
+- playing 中の長時間 disconnect forfeit 判定
+- waiting room TTL cleanup
+- host leave 時の host transfer
+- short / standard / long の prompt category
+- host による prompt category 選択
+- room code を維持した rematch
+- practice prompt 発行 event
+- result stats の `finishGap` field
 - shared event types / game state / scoring
 - Vitest unit / room flow tests
 - Playwright room join / complete match / COM match / reload rejoin E2E
 - GitHub Actions CI
+
+実装済み・部分実装・未実装の詳しい状態は [docs/current-implementation.md](docs/current-implementation.md) にまとめています。
 
 ## Docs
 
 - [docs/README.md](docs/README.md): ドキュメント目次
 - [docs/research.md](docs/research.md): 技術調査メモ
 - [docs/product-direction.md](docs/product-direction.md): プロダクト方針
+- [docs/current-implementation.md](docs/current-implementation.md): 現在の実装状態
 - [docs/requirements.md](docs/requirements.md): 要件定義
 - [docs/game-design.md](docs/game-design.md): ゲーム設計
 - [docs/architecture.md](docs/architecture.md): システム設計
@@ -78,10 +90,10 @@ npm run test:e2e
 
 ## 次の作業
 
-1. COM の難易度選択を追加する。
-2. 切断が長引いた場合の失格または試合継続ルールを固める。
-3. Private beta 用のデプロイ先を決める。
-4. ログ、rate limit、簡易 monitoring を追加する。
-5. 再戦、課題文、結果分析、プレイヤー設定の仕様から実装順を決める。
+1. COM の難易度選択 UI / event を追加する。
+2. Practice mode の Web UI と result を追加する。
+3. long disconnect forfeit の broadcast と E2E を固める。
+4. Result UI に finish gap / max streak などを表示する。
+5. Private beta 用のログ、rate limit、monitoring、デプロイを追加する。
 
 機能実装前の詳細仕様は [docs/features/README.md](docs/features/README.md) にまとめています。
