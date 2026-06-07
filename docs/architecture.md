@@ -28,7 +28,7 @@ Redis
 PostgreSQL
 ```
 
-MVP では Next.js と Socket.IO server を同じ Node.js プロジェクト内で管理してもよい。ただしデプロイとスケールを考え、Web UI と realtime server は分離可能な構成にする。
+MVP では Next.js と Socket.IO server を同じ Node.js プロジェクト内で管理してもよい。ただし内輪向け private beta から public beta へ広げる可能性があるため、Web UI と realtime server は分離可能な構成にする。
 
 ## 推奨ディレクトリ構成
 
@@ -128,19 +128,32 @@ type RoomState = {
 
 - 単一 realtime server
 - in-memory room state
-- PostgreSQL に試合結果保存
+- guest id を発行
+- room code 参加
+- 基本ログ
 
-### Beta
+### Private Beta
+
+- PostgreSQL に試合結果保存
+- 軽い rate limit
+- デプロイ環境
+- エラー、切断、試合 lifecycle のログ
+- 管理者だけがログを確認できる運用
+
+### Public Beta
 
 - Redis に room state の一部を保存
 - Socket.IO Redis Adapter を導入
 - 複数 realtime server
+- 公開ロビーまたはランダムマッチ
+- 荒らし対策、禁止語、通報導線
 
 ### Production
 
 - matchmaking queue を Redis で管理
 - replay / audit 用に match events を保存
 - observability: logs, metrics, tracing
+- バックアップ、障害対応、コスト監視
 
 ## セキュリティ
 

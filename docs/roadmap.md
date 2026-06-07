@@ -7,7 +7,8 @@
 - [x] ゲーム設計
 - [x] アーキテクチャ設計
 - [x] GitHub 運用方針
-- [ ] GitHub remote 接続
+- [x] GitHub remote 接続
+- [x] プロダクト方針
 
 ## Phase 1: プロジェクト雛形
 
@@ -37,21 +38,31 @@
 - [ ] 2 player Playwright E2E
 - [ ] disconnect / reconnect tests
 
-## Phase 4: Beta
+## Phase 4: Private Beta
 
 - [ ] PostgreSQL 保存
-- [ ] Redis 導入
-- [ ] ranking
 - [ ] guest session
 - [ ] deployment
+- [ ] lightweight rate limit
 - [ ] basic monitoring
+- [ ] private beta feedback issue flow
 
-## Phase 5: 拡張
+## Phase 5: Public Beta
 
-- [ ] random matchmaking
+- [ ] Redis 導入
+- [ ] public lobby or random matchmaking
+- [ ] nickname moderation
+- [ ] report / block flow
+- [ ] terms / privacy / contact page
+- [ ] load testing
+- [ ] abuse monitoring
+
+## Phase 6: 拡張
+
 - [ ] 3-8 player rooms
 - [ ] Japanese typing mode
 - [ ] authenticated users
+- [ ] ranking
 - [ ] rating
 - [ ] friend matches
 - [ ] spectator mode
