@@ -171,12 +171,13 @@ export function leaveBySocket(socketId: string): RoomState | null {
     player.disconnectedAt = Date.now();
   }
 
+  room.lastActivityAt = Date.now();
+
   // Handle host leave
   if (record.playerId === room.hostPlayerId) {
     const activePlayers = [...room.players.values()].filter((p) => p.connected || p.isBot);
     if (activePlayers.length === 0) {
-      rooms.delete(room.roomCode);
-      return null;
+      return toPublicRoom(room);
     }
     
     // Transfer host to the first active human player, or remain if no humans

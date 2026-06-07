@@ -163,6 +163,35 @@ describe("rooms", () => {
     expect(alice?.connected).toBe(true);
   });
 
+  it("keeps a single-host waiting room available for reload rejoin", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_solo_waiting_rejoin",
+      socketId: "socket_alice_solo_waiting_rejoin_1"
+    });
+
+    leaveBySocket("socket_alice_solo_waiting_rejoin_1");
+
+    const rejoined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Alice",
+      guestId: "guest_alice_solo_waiting_rejoin",
+      socketId: "socket_alice_solo_waiting_rejoin_2"
+    });
+
+    expect("error" in rejoined).toBe(false);
+
+    if ("error" in rejoined) {
+      return;
+    }
+
+    expect(rejoined.playerId).toBe("guest_alice_solo_waiting_rejoin");
+    expect(rejoined.room.roomCode).toBe(created.room.roomCode);
+    expect(rejoined.room.players).toHaveLength(1);
+    expect(rejoined.room.players[0]?.connected).toBe(true);
+    expect(rejoined.room.players[0]?.isHost).toBe(true);
+  });
+
   it("adds a COM player with difficulty in nickname when a host starts alone", () => {
     const created = createRoom({
       nickname: "Alice",

@@ -140,7 +140,7 @@ export default function HomePage() {
   }, [resetTyping]);
 
   useEffect(() => {
-    if (!connected || resumeAttempted) {
+    if (!connected || !guestId || resumeAttempted) {
       return;
     }
 
