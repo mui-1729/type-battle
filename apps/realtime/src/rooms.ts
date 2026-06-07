@@ -30,6 +30,8 @@ const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistake
   hard: { charsPerTick: 3, mistakeChance: 0.01 }
 };
 
+// Check import of PlayerState. It should have maxStreak and currentStreak.
+// If it doesn't, I must update the shared package.
 type InternalPlayer = PlayerState & {
   socketId: string;
   disconnectedAt?: number;
@@ -403,6 +405,16 @@ function getContext(
 function applyProgress(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): void {
   const promptLength = room.prompt?.text.length ?? 0;
   const nextIndex = clamp(payload.progressIndex, player.progressIndex, promptLength);
+  
+  // Update streaks based on typing success
+  const isCorrect = nextIndex > player.progressIndex;
+  if (isCorrect) {
+    player.currentStreak += 1;
+    player.maxStreak = Math.max(player.maxStreak, player.currentStreak);
+  } else {
+    player.currentStreak = 0;
+  }
+
   const totalTypedCharacters = Math.max(payload.totalTypedCharacters, player.totalTypedCharacters);
   const correctCharacters = clamp(payload.correctCharacters, player.correctCharacters, nextIndex);
   const mistakes = Math.max(payload.mistakes, player.mistakes);
@@ -484,7 +496,9 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     totalTypedCharacters: player.totalTypedCharacters,
     mistakes: player.mistakes,
     wpm: player.wpm,
-    accuracy: player.accuracy
+    accuracy: player.accuracy,
+    maxStreak: player.maxStreak,
+    currentStreak: player.currentStreak
   };
 
   if (player.finishedAt) {
@@ -518,6 +532,8 @@ function addBotPlayer(room: InternalRoom): void {
     correctCharacters: 0,
     totalTypedCharacters: 0,
     mistakes: 0,
+    maxStreak: 0,
+    currentStreak: 0,
     wpm: 0,
     accuracy: 100
   });
@@ -541,6 +557,8 @@ function createPlayer(
     correctCharacters: 0,
     totalTypedCharacters: 0,
     mistakes: 0,
+    maxStreak: 0,
+    currentStreak: 0,
     wpm: 0,
     accuracy: 100
   };
