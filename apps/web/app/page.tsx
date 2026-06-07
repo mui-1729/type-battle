@@ -65,13 +65,13 @@ export default function HomePage() {
     room.players.length >= 1 &&
     room.players.every((player) => player.connected || player.isBot);
 
-  const setBotDifficulty = useCallback(
-    (difficulty: "easy" | "normal" | "hard") => {
+  const setPromptCategory = useCallback(
+    (category: "short" | "standard" | "long") => {
       if (!room || !socketRef.current || !currentPlayer?.isHost) {
         return;
       }
 
-      socketRef.current.emit("room:setDifficulty", { roomCode: room.roomCode, difficulty }, (response) => {
+      socketRef.current.emit("room:setPromptCategory", { roomCode: room.roomCode, category }, (response) => {
         if (!response.ok) {
           setError(response.error);
         }
@@ -466,17 +466,17 @@ export default function HomePage() {
 
           {room?.status === "waiting" && room.players.length < room.maxPlayers ? (
             <div className="difficultySelector">
-              <span>COM Difficulty</span>
+              <span>Prompt Category</span>
               <div className="difficultyButtons">
-                {(["easy", "normal", "hard"] as const).map((d) => (
+                {(["short", "standard", "long"] as const).map((c) => (
                   <button
-                    key={d}
-                    className={room.botDifficulty === d ? "active" : ""}
+                    key={c}
+                    className={room.promptCategory === c ? "active" : ""}
                     type="button"
-                    onClick={() => setBotDifficulty(d)}
+                    onClick={() => setPromptCategory(c)}
                     disabled={!currentPlayer?.isHost}
                   >
-                    {d}
+                    {c}
                   </button>
                 ))}
               </div>

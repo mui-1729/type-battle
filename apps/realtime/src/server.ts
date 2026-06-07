@@ -18,7 +18,7 @@ import {
   leaveBySocket,
   markPlaying,
   rematch,
-  setDifficulty,
+  setPromptCategory,
   setReady,
   startMatch,
   updateProgress
@@ -103,8 +103,8 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("room:setDifficulty", (payload, ack) => {
-    const result = setDifficulty(socket.id, payload.roomCode, payload.difficulty);
+  socket.on("room:setPromptCategory", (payload, ack) => {
+    const result = setPromptCategory(socket.id, payload.roomCode, payload.category);
 
     if ("error" in result) {
       ack({ ok: false, error: result.error });

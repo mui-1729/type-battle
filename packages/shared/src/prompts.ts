@@ -1,4 +1,4 @@
-import type { Prompt } from "./game-state.js";
+import type { Prompt, PromptCategory } from "./game-state.js";
 
 export const PROMPTS: Prompt[] = [
   { id: "s1", text: "Go.", category: "short" },
