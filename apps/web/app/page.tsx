@@ -568,7 +568,8 @@ export default function HomePage() {
                         <span>#{player.rank}</span>
                         <strong>{player.nickname}</strong>
                         <small>
-                          {player.wpm} WPM / {player.accuracy}% / {player.mistakes} miss
+                          {player.wpm} WPM / {player.accuracy}% / {player.mistakes} miss / Streak: {player.maxStreak}
+                          {player.finishGap !== undefined ? ` / Gap: ${player.finishGap}ms` : ""}
                         </small>
                       </div>
                     ))}
