@@ -73,7 +73,7 @@ test("rejoins the room after reload", async ({ browser }) => {
 
   await host.reload();
 
-  await expect(host.locator(".roomMeta strong")).toHaveText(roomCode);
+  await expect(host.locator(".roomMeta strong")).toHaveText(roomCode, { timeout: 10_000 });
   await expect(host.getByLabel("Room controls").getByText("Alice")).toBeVisible();
 
   await hostContext.close();

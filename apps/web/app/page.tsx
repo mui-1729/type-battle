@@ -140,18 +140,19 @@ export default function HomePage() {
   }, [resetTyping]);
 
   useEffect(() => {
-    if (!connected || resumeAttempted || !guestId || room) {
+    if (!connected || resumeAttempted) {
       return;
     }
 
     const storedRoomCode = window.localStorage.getItem(ROOM_CODE_KEY);
-    const storedNickname = window.localStorage.getItem(NICKNAME_KEY) ?? nickname;
-
-    if (!storedRoomCode) {
+    
+    // Only attempt to resume if we have a room code and we are not currently in a room
+    if (!storedRoomCode || room) {
       setResumeAttempted(true);
       return;
     }
 
+    const storedNickname = window.localStorage.getItem(NICKNAME_KEY) ?? nickname;
     const socket = socketRef.current;
 
     if (!socket) {
