@@ -11,6 +11,7 @@ import type {
 import {
   BOT_TICK_MS,
   advanceBot,
+  cleanupExpiredRooms,
   createRoom,
   finishTyping,
   joinRoom,
@@ -178,6 +179,8 @@ io.on("connection", (socket) => {
 httpServer.listen(PORT, "127.0.0.1", () => {
   console.log(`Realtime server listening on http://127.0.0.1:${PORT}`);
 });
+
+setInterval(cleanupExpiredRooms, 10000);
 
 function emitRoomState(room: RoomState): void {
   io.to(room.roomCode).emit("room:state", room);

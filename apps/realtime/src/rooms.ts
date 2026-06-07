@@ -54,6 +54,7 @@ type InternalRoom = {
   result?: MatchResult;
   players: Map<string, InternalPlayer>;
   createdAt: number;
+  lastActivityAt: number;
 };
 
 const rooms = new Map<string, InternalRoom>();
@@ -72,7 +73,8 @@ export function createRoom(input: { nickname: string; guestId: string; socketId:
     botDifficulty: "normal",
     promptCategory: "standard",
     players: new Map([[player.id, player]]),
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    lastActivityAt: Date.now()
   };
 
   rooms.set(roomCode, room);
@@ -93,6 +95,7 @@ export function joinRoom(input: {
     return { error: "ルームが見つかりません。" };
   }
 
+  room.lastActivityAt = Date.now();
   const existing = room.players.get(input.guestId);
 
   if (existing) {
@@ -528,6 +531,17 @@ function createUniqueRoomCode(): string {
   }
 
   return roomCode;
+}
+
+const ROOM_TTL_MS = 60 * 1000; // 1 minute
+
+export function cleanupExpiredRooms(): void {
+  const now = Date.now();
+  for (const [roomCode, room] of rooms.entries()) {
+    if (room.status === "waiting" && now - room.lastActivityAt > ROOM_TTL_MS) {
+      rooms.delete(roomCode);
+    }
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {
