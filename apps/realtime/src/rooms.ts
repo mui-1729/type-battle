@@ -29,6 +29,7 @@ type InternalRoom = {
   status: MatchStatus;
   prompt?: Prompt;
   serverStartAt?: number;
+  result?: MatchResult;
   players: Map<string, InternalPlayer>;
   createdAt: number;
 };
@@ -68,10 +69,6 @@ export function joinRoom(input: {
     return { error: "ルームが見つかりません。" };
   }
 
-  if (room.status !== "waiting") {
-    return { error: "試合中のルームには参加できません。" };
-  }
-
   const existing = room.players.get(input.guestId);
 
   if (existing) {
@@ -80,6 +77,10 @@ export function joinRoom(input: {
     existing.nickname = normalizeNickname(input.nickname);
     socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: existing.id });
     return { room: toPublicRoom(room), playerId: existing.id };
+  }
+
+  if (room.status !== "waiting") {
+    return { error: "試合中のルームには参加できません。" };
   }
 
   if (room.players.size >= MAX_PLAYERS) {
@@ -112,11 +113,6 @@ export function leaveBySocket(socketId: string): RoomState | null {
   if (player) {
     player.connected = false;
     player.ready = false;
-  }
-
-  if (room.status === "waiting" && allPlayersDisconnected(room)) {
-    rooms.delete(room.roomCode);
-    return null;
   }
 
   return toPublicRoom(room);
@@ -169,6 +165,7 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
   room.status = "countdown";
   room.prompt = pickPrompt(Date.now());
   room.serverStartAt = Date.now() + COUNTDOWN_MS;
+  delete room.result;
   resetPlayers(room);
 
   return { room: toPublicRoom(room) };
@@ -224,7 +221,8 @@ export function finishTyping(socketId: string, payload: TypingFinish): MatchResu
   }
 
   context.room.status = "finished";
-  return toMatchResult(context.room);
+  context.room.result = toMatchResult(context.room);
+  return context.room.result;
 }
 
 export function rematch(socketId: string, roomCode: string): { room: RoomState } | { error: string } {
@@ -238,6 +236,7 @@ export function rematch(socketId: string, roomCode: string): { room: RoomState }
   room.status = "waiting";
   delete room.prompt;
   delete room.serverStartAt;
+  delete room.result;
   resetPlayers(room);
 
   return { room: toPublicRoom(room) };
@@ -326,6 +325,10 @@ function toPublicRoom(room: InternalRoom): RoomState {
     publicRoom.serverStartAt = room.serverStartAt;
   }
 
+  if (room.result) {
+    publicRoom.result = room.result;
+  }
+
   return publicRoom;
 }
 
@@ -389,10 +392,6 @@ function createUniqueRoomCode(): string {
   }
 
   return roomCode;
-}
-
-function allPlayersDisconnected(room: InternalRoom): boolean {
-  return [...room.players.values()].every((player) => !player.connected);
 }
 
 function clamp(value: number, min: number, max: number): number {

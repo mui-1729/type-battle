@@ -36,8 +36,9 @@
 - [x] scoring unit tests
 - [x] room state unit tests
 - [x] Socket.IO integration tests
-- [ ] 2 player typing completion Playwright E2E
-- [ ] disconnect / reconnect tests
+- [x] 2 player typing completion Playwright E2E
+- [x] reload rejoin tests
+- [ ] long disconnect handling tests
 - [x] room join Playwright smoke E2E
 - [x] GitHub Actions CI
 - [x] local build check

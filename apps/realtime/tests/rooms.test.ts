@@ -3,6 +3,7 @@ import {
   createRoom,
   finishTyping,
   joinRoom,
+  leaveBySocket,
   markPlaying,
   startMatch,
   updateProgress
@@ -86,5 +87,68 @@ describe("rooms", () => {
     });
 
     expect(result && "players" in result && "prompt" in result).toBe(true);
+  });
+
+  it("allows an existing guest to rejoin a playing room", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_rejoin",
+      socketId: "socket_alice_rejoin_1"
+    });
+
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_rejoin",
+      socketId: "socket_bob_rejoin"
+    });
+
+    expect("error" in joined).toBe(false);
+
+    const started = startMatch("socket_alice_rejoin_1", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    expect(markPlaying(created.room.roomCode)?.status).toBe("playing");
+
+    const rejoined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Alice",
+      guestId: "guest_alice_rejoin",
+      socketId: "socket_alice_rejoin_2"
+    });
+
+    expect("error" in rejoined).toBe(false);
+
+    if ("error" in rejoined) {
+      return;
+    }
+
+    expect(rejoined.playerId).toBe("guest_alice_rejoin");
+    expect(rejoined.room.status).toBe("playing");
+  });
+
+  it("keeps a waiting room available for reload rejoin", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_waiting_rejoin",
+      socketId: "socket_alice_waiting_rejoin_1"
+    });
+
+    leaveBySocket("socket_alice_waiting_rejoin_1");
+
+    const rejoined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Alice",
+      guestId: "guest_alice_waiting_rejoin",
+      socketId: "socket_alice_waiting_rejoin_2"
+    });
+
+    expect("error" in rejoined).toBe(false);
+
+    if ("error" in rejoined) {
+      return;
+    }
+
+    expect(rejoined.room.roomCode).toBe(created.room.roomCode);
+    expect(rejoined.room.players[0]?.connected).toBe(true);
   });
 });

@@ -23,6 +23,9 @@ import type {
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL ?? "http://127.0.0.1:3001";
+const GUEST_ID_KEY = "type-battle:guest-id";
+const ROOM_CODE_KEY = "type-battle:room-code";
+const NICKNAME_KEY = "type-battle:nickname";
 
 export default function HomePage() {
   const socketRef = useRef<ClientSocket | null>(null);
@@ -35,6 +38,7 @@ export default function HomePage() {
   const [result, setResult] = useState<MatchResult | null>(null);
   const [error, setError] = useState("");
   const [countdownMs, setCountdownMs] = useState(0);
+  const [resumeAttempted, setResumeAttempted] = useState(false);
   const [localProgress, setLocalProgress] = useState({
     progressIndex: 0,
     correctCharacters: 0,
@@ -72,9 +76,14 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    const storedGuestId = window.localStorage.getItem("type-battle:guest-id") ?? createGuestId();
-    window.localStorage.setItem("type-battle:guest-id", storedGuestId);
+    const storedGuestId = window.localStorage.getItem(GUEST_ID_KEY) ?? createGuestId();
+    const storedNickname = window.localStorage.getItem(NICKNAME_KEY);
+    window.localStorage.setItem(GUEST_ID_KEY, storedGuestId);
     setGuestId(storedGuestId);
+
+    if (storedNickname) {
+      setNickname(storedNickname);
+    }
 
     const socket: ClientSocket = io(REALTIME_URL, {
       transports: ["websocket"]
@@ -83,17 +92,25 @@ export default function HomePage() {
 
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
-    socket.on("room:state", (nextRoom) => setRoom(nextRoom));
-    socket.on("player:progress", (nextRoom) => setRoom(nextRoom));
+    socket.on("room:state", (nextRoom) => {
+      setRoom(nextRoom);
+      setResult(nextRoom.result ?? null);
+    });
+    socket.on("player:progress", (nextRoom) => {
+      setRoom(nextRoom);
+      setResult(nextRoom.result ?? null);
+    });
     socket.on("match:countdown", ({ room: nextRoom, serverStartAt }) => {
       resetTyping();
       setRoom(nextRoom);
+      setResult(nextRoom.result ?? null);
       setCountdownMs(Math.max(serverStartAt - Date.now(), 0));
     });
     socket.on("match:started", (nextRoom) => {
       resetTyping();
       setCountdownMs(0);
       setRoom(nextRoom);
+      setResult(nextRoom.result ?? null);
     });
     socket.on("match:result", (nextResult) => {
       setResult(nextResult);
@@ -106,6 +123,66 @@ export default function HomePage() {
       socketRef.current = null;
     };
   }, [resetTyping]);
+
+  useEffect(() => {
+    if (!connected || resumeAttempted || !guestId || room) {
+      return;
+    }
+
+    const storedRoomCode = window.localStorage.getItem(ROOM_CODE_KEY);
+    const storedNickname = window.localStorage.getItem(NICKNAME_KEY) ?? nickname;
+
+    if (!storedRoomCode) {
+      setResumeAttempted(true);
+      return;
+    }
+
+    const socket = socketRef.current;
+
+    if (!socket) {
+      return;
+    }
+
+    setResumeAttempted(true);
+    socket.emit(
+      "room:join",
+      {
+        roomCode: storedRoomCode,
+        nickname: normalizeNickname(storedNickname),
+        guestId
+      },
+      (response) => {
+        if (!response.ok) {
+          window.localStorage.removeItem(ROOM_CODE_KEY);
+          return;
+        }
+
+        setError("");
+        setPlayerId(response.data.playerId);
+        setRoom(response.data.room);
+        setResult(response.data.room.result ?? null);
+      }
+    );
+  }, [connected, guestId, nickname, resumeAttempted, room]);
+
+  useEffect(() => {
+    if (!currentPlayer) {
+      return;
+    }
+
+    setLocalProgress((previous) => {
+      if (currentPlayer.progressIndex <= previous.progressIndex) {
+        return previous;
+      }
+
+      return {
+        progressIndex: currentPlayer.progressIndex,
+        correctCharacters: currentPlayer.correctCharacters,
+        totalTypedCharacters: currentPlayer.totalTypedCharacters,
+        mistakes: currentPlayer.mistakes
+      };
+    });
+  }, [currentPlayer]);
 
   useEffect(() => {
     if (!room?.serverStartAt || room.status !== "countdown") {
@@ -196,6 +273,8 @@ export default function HomePage() {
         setError("");
         setPlayerId(response.data.playerId);
         setRoom(response.data.room);
+        window.localStorage.setItem(ROOM_CODE_KEY, response.data.roomCode);
+        window.localStorage.setItem(NICKNAME_KEY, normalizeNickname(nickname));
         resetTyping();
       }
     );
@@ -226,6 +305,8 @@ export default function HomePage() {
         setError("");
         setPlayerId(response.data.playerId);
         setRoom(response.data.room);
+        window.localStorage.setItem(ROOM_CODE_KEY, response.data.room.roomCode);
+        window.localStorage.setItem(NICKNAME_KEY, normalizeNickname(nickname));
         resetTyping();
       }
     );
@@ -239,6 +320,7 @@ export default function HomePage() {
     setRoom(null);
     setResult(null);
     setPlayerId("");
+    window.localStorage.removeItem(ROOM_CODE_KEY);
     resetTyping();
   };
 
@@ -273,7 +355,11 @@ export default function HomePage() {
     socketRef.current.emit("match:rematch", { roomCode: room.roomCode }, (response) => {
       if (!response.ok) {
         setError(response.error);
+        return;
       }
+
+      setResult(null);
+      resetTyping();
     });
   };
 

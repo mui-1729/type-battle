@@ -29,6 +29,7 @@ export type RoomState = {
   serverStartAt?: number;
   players: PlayerState[];
   maxPlayers: number;
+  result?: MatchResult;
 };
 
 export type PlayerResult = PlayerState & {
