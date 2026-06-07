@@ -32,6 +32,7 @@ const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistake
 
 type InternalPlayer = PlayerState & {
   socketId: string;
+  disconnectedAt?: number;
 };
 
 export type BotTickOutcome =
@@ -104,6 +105,7 @@ export function joinRoom(input: {
   if (existing) {
     existing.socketId = input.socketId;
     existing.connected = true;
+    delete existing.disconnectedAt;
     existing.nickname = normalizeNickname(input.nickname);
     socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: existing.id });
     return { room: toPublicRoom(room), playerId: existing.id };
@@ -166,6 +168,7 @@ export function leaveBySocket(socketId: string): RoomState | null {
   if (player) {
     player.connected = false;
     player.ready = false;
+    player.disconnectedAt = Date.now();
   }
 
   // Handle host leave
