@@ -11,6 +11,7 @@ import type {
 import {
   BOT_TICK_MS,
   advanceBot,
+  checkForForfeits,
   cleanupExpiredRooms,
   createRoom,
   finishTyping,
@@ -181,6 +182,7 @@ httpServer.listen(PORT, "127.0.0.1", () => {
 });
 
 setInterval(cleanupExpiredRooms, 10000);
+setInterval(checkForForfeits, 5000); // Check for forfeits every 5 seconds
 
 function emitRoomState(room: RoomState): void {
   io.to(room.roomCode).emit("room:state", room);

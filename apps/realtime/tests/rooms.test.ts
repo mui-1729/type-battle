@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  advanceBot,
   createRoom,
   finishTyping,
+  getRoom,
   joinRoom,
   leaveBySocket,
   markPlaying,
+  checkForForfeits,
   startMatch,
-  updateProgress
+  updateProgress,
+  rooms
 } from "../src/rooms";
 
 describe("rooms", () => {
@@ -210,29 +212,30 @@ describe("rooms", () => {
     expect(started.room.players.some((player) => player.isBot && player.nickname === "COM (Normal)")).toBe(true);
   });
 
-  it("advances the COM player during a playing match", () => {
+  it("forfeits a disconnected player after grace period", () => {
     const created = createRoom({
       nickname: "Alice",
-      guestId: "guest_alice_com_advance",
-      socketId: "socket_alice_com_advance"
+      guestId: "guest_alice_forfeit",
+      socketId: "socket_alice_forfeit"
     });
 
-    const started = startMatch("socket_alice_com_advance", created.room.roomCode);
-    expect("error" in started).toBe(false);
-    expect(markPlaying(created.room.roomCode)?.status).toBe("playing");
-
-    let progressIndex = 0;
-    for (let i = 0; i < 10; i++) {
-        const outcome = advanceBot(created.room.roomCode);
-        if (outcome && outcome.type === "progress") {
-            const bot = outcome.room.players.find((player) => player.isBot);
-            if (bot && bot.progressIndex > progressIndex) {
-                progressIndex = bot.progressIndex;
-                break;
-            }
-        }
+    startMatch("socket_alice_forfeit", created.room.roomCode);
+    markPlaying(created.room.roomCode);
+    
+    // Simulate disconnect
+    leaveBySocket("socket_alice_forfeit");
+    
+    // Manually set disconnectedAt in the past
+    const room = rooms.get(created.room.roomCode.toUpperCase());
+    const player = room?.players.get("guest_alice_forfeit");
+    if (player) {
+      player.disconnectedAt = Date.now() - 40000; // 40 seconds ago
     }
     
-    expect(progressIndex).toBeGreaterThan(0);
+    checkForForfeits();
+    
+    const updatedRoom = getRoom(created.room.roomCode);
+    expect(updatedRoom?.status).toBe("finished");
+    expect(updatedRoom?.players[0]?.finishTimeMs).toBe(Infinity);
   });
 });

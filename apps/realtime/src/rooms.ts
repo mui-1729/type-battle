@@ -60,7 +60,7 @@ type InternalRoom = {
   round: number;
 };
 
-const rooms = new Map<string, InternalRoom>();
+export const rooms = new Map<string, InternalRoom>();
 const socketIndex = new Map<string, { roomCode: string; playerId: string }>();
 
 export function createRoom(input: { nickname: string; guestId: string; socketId: string }): {
@@ -557,12 +557,33 @@ function createUniqueRoomCode(): string {
 }
 
 const ROOM_TTL_MS = 60 * 1000; // 1 minute
+const DISCONNECT_GRACE_MS = 30 * 1000; // 30 seconds
 
 export function cleanupExpiredRooms(): void {
   const now = Date.now();
   for (const [roomCode, room] of rooms.entries()) {
     if (room.status === "waiting" && now - room.lastActivityAt > ROOM_TTL_MS) {
       rooms.delete(roomCode);
+    }
+  }
+}
+
+export function checkForForfeits(): void {
+  const now = Date.now();
+  for (const room of rooms.values()) {
+    if (room.status === "playing") {
+      for (const player of room.players.values()) {
+        if (!player.connected && player.disconnectedAt && now - player.disconnectedAt > DISCONNECT_GRACE_MS) {
+          player.finishedAt = now;
+          player.finishTimeMs = Infinity; // Represent forfeit
+          // If all humans are finished now, finish the match
+          if (areHumansFinished(room)) {
+            finalizeUnfinishedBots(room);
+            room.status = "finished";
+            room.result = toMatchResult(room);
+          }
+        }
+      }
     }
   }
 }
