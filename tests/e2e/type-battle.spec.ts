@@ -91,7 +91,7 @@ test("starts a match against COM when alone", async ({ browser }) => {
   await expect(host.getByRole("button", { name: "Start vs COM" })).toBeEnabled();
 
   await host.getByRole("button", { name: "Start vs COM" }).click();
-  await expect(host.getByLabel("Room controls").getByText("COM")).toBeVisible();
+  await expect(host.getByLabel("Room controls").getByText("COM", { exact: false })).toBeVisible();
   await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
   const promptText = await host.getByLabel("Typing prompt").innerText();
