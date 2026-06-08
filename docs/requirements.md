@@ -66,24 +66,26 @@
 - ゲスト参加だけで遊べる。
 - room code を知っている人だけが参加できる。
 - 人がいない場合は COM と遊べる。
+- COM difficulty selector を UI から変更できる。
 - reload 後に同じ room へ復帰できる。
 - waiting room は TTL cleanup される。
 - host leave 時に active human がいれば host transfer される。
 - prompt category を `short | standard | long` から選べる。
 - room code を維持して rematch できる。
 - COM は server-side で進行する。
+- practice mode の Web UI と result 表示を実装する。
 - long disconnect の forfeit 判定が server 側にある。
 - result に finish gap を保持している。
+- result analytics UI で finish gap と max streak を確認できる。
+- long disconnect の状態変化が room state に反映される。
 
 ### まだ足りない要件
 
 - デプロイ先で Web UI と realtime server を動かす。
 - エラー、切断、試合開始、試合終了を structured log で追えるようにする。
 - room 作成、join、typing event に軽い rate limit を入れる。
-- COM difficulty selector を UI と event として実装する。
-- practice mode の Web UI と result 表示を実装する。
-- long disconnect forfeit の broadcast / UI / E2E を固める。
-- result analytics UI を表示する。
+- long disconnect forfeit の dedicated E2E と明示 UI を固める。
+- player settings を実装する。
 
 ## Public Beta 要件
 

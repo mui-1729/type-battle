@@ -42,31 +42,30 @@ MVP では次を優先します。
 
 - room code による 2 人対戦
 - COM 対戦
+- COM difficulty selector
 - reload rejoin
 - waiting room TTL
 - host transfer
 - rematch
 - prompt category
 - long disconnect forfeit の server 判定
+- long disconnect forfeit の room state 反映
+- result stats の finish gap と max streak
+- result analytics UI
+- practice mode
 
 部分実装:
 
-- COM difficulty
-- practice mode
-- result analytics
-- long disconnect forfeit の UI / broadcast / E2E
+- long disconnect forfeit の専用 E2E / 明示 UI
 
 ## 次に仕様化・実装する機能
 
 Private beta 前に優先する機能は次です。
 
-1. [COM difficulty](features/com-opponent.md)
-2. [practice mode](features/practice-mode.md)
-3. [result analytics](features/result-analytics.md)
-4. [disconnect / reconnect](features/disconnect-reconnect.md)
-5. [observability / rate limit](features/observability-rate-limit.md)
-6. [private beta deployment](features/deployment-private-beta.md)
-7. [player settings](features/player-settings.md)
+1. [disconnect / reconnect](features/disconnect-reconnect.md)
+2. [observability / rate limit](features/observability-rate-limit.md)
+3. [private beta deployment](features/deployment-private-beta.md)
+4. [player settings](features/player-settings.md)
 
 Public beta 以降に検討する主な機能は次です。
 

@@ -13,6 +13,8 @@ const basePlayer: PlayerState = {
   correctCharacters: 0,
   totalTypedCharacters: 0,
   mistakes: 0,
+  maxStreak: 0,
+  currentStreak: 0,
   wpm: 0,
   accuracy: 100
 };
@@ -46,15 +48,18 @@ describe("scoring", () => {
     expect(players[0]?.id).toBe("fast");
   });
 
-  it("ranks unfinished players by progress before speed", () => {
+  it("ranks players and includes streak and gap", () => {
     const players = rankPlayers(
       [
-        { ...basePlayer, id: "fast", progressIndex: 4, wpm: 100 },
-        { ...basePlayer, id: "ahead", progressIndex: 7, wpm: 20 }
+        { ...basePlayer, id: "winner", progressIndex: 10, finishTimeMs: 1000 },
+        { ...basePlayer, id: "loser", progressIndex: 10, finishTimeMs: 1500 }
       ],
       10
     );
 
-    expect(players[0]?.id).toBe("ahead");
+    expect(players[0]?.id).toBe("winner");
+    expect(players[0]?.finishGap).toBeUndefined();
+    expect(players[1]?.id).toBe("loser");
+    expect(players[1]?.finishGap).toBe(500);
   });
 });

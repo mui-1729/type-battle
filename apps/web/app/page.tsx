@@ -15,17 +15,46 @@ import {
 import type {
   ClientToServerEvents,
   MatchResult,
+  PlayerResult,
+  Prompt,
+  PromptCategory,
   RoomState,
   ServerToClientEvents,
   TypingProgress
 } from "@type-battle/shared";
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+type ProgressState = {
+  progressIndex: number;
+  correctCharacters: number;
+  totalTypedCharacters: number;
+  mistakes: number;
+  currentStreak: number;
+  maxStreak: number;
+};
+
+type PracticeSession = {
+  practiceId: string;
+  prompt: Prompt;
+  startedAt: number;
+  category: PromptCategory;
+};
 
 const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL ?? "http://127.0.0.1:3001";
 const GUEST_ID_KEY = "type-battle:guest-id";
 const ROOM_CODE_KEY = "type-battle:room-code";
 const NICKNAME_KEY = "type-battle:nickname";
+
+function createEmptyProgress(): ProgressState {
+  return {
+    progressIndex: 0,
+    correctCharacters: 0,
+    totalTypedCharacters: 0,
+    mistakes: 0,
+    currentStreak: 0,
+    maxStreak: 0
+  };
+}
 
 export default function HomePage() {
   const socketRef = useRef<ClientSocket | null>(null);
@@ -36,29 +65,37 @@ export default function HomePage() {
   const [joinCode, setJoinCode] = useState("");
   const [room, setRoom] = useState<RoomState | null>(null);
   const [result, setResult] = useState<MatchResult | null>(null);
+  const [practiceSession, setPracticeSession] = useState<PracticeSession | null>(null);
+  const [practiceResult, setPracticeResult] = useState<MatchResult | null>(null);
+  const [practiceCategory, setPracticeCategory] = useState<PromptCategory>("standard");
   const [error, setError] = useState("");
   const [countdownMs, setCountdownMs] = useState(0);
   const [resumeAttempted, setResumeAttempted] = useState(false);
-  const [localProgress, setLocalProgress] = useState({
-    progressIndex: 0,
-    correctCharacters: 0,
-    totalTypedCharacters: 0,
-    mistakes: 0
-  });
+  const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
+  const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
 
   const currentPlayer = useMemo(
     () => room?.players.find((player) => player.id === playerId) ?? null,
     [playerId, room]
   );
-  const promptText = room?.prompt?.text ?? result?.prompt.text ?? "";
-  const progressPercent = calculateProgress(localProgress.progressIndex, promptText.length);
-  const elapsedMs =
-    room?.serverStartAt && room.status === "playing" ? Date.now() - room.serverStartAt : 0;
-  const localWpm = calculateWpm(localProgress.correctCharacters, elapsedMs);
-  const localAccuracy = calculateAccuracy(
-    localProgress.correctCharacters,
-    localProgress.totalTypedCharacters
-  );
+  const activePracticePlayer = practiceResult?.players[0] ?? null;
+  const activeResult = result ?? practiceResult;
+  const activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
+  const activePromptText = activePrompt?.text ?? "";
+  const isRoomPlaying = room?.status === "playing";
+  const isPracticePlaying = Boolean(practiceSession && !practiceResult && !room);
+  const activeProgress = room ? localProgress : practiceProgress;
+  const activeProgressPercent = calculateProgress(activeProgress.progressIndex, activePromptText.length);
+  const activeElapsedMs =
+    isRoomPlaying && room?.serverStartAt
+      ? Date.now() - room.serverStartAt
+      : isPracticePlaying && practiceSession
+        ? Date.now() - practiceSession.startedAt
+        : 0;
+  const activeWpm = calculateWpm(activeProgress.correctCharacters, activeElapsedMs);
+  const activeAccuracy = calculateAccuracy(activeProgress.correctCharacters, activeProgress.totalTypedCharacters);
+  const activeResultPlayer =
+    room?.players.find((player) => player.id === playerId) ?? activePracticePlayer ?? null;
   const canStart =
     room?.status === "waiting" &&
     currentPlayer?.isHost &&
@@ -80,15 +117,98 @@ export default function HomePage() {
     [room, currentPlayer]
   );
 
+  const setBotDifficulty = useCallback(
+    (difficulty: "easy" | "normal" | "hard") => {
+      if (!room || !socketRef.current || !currentPlayer?.isHost) {
+        return;
+      }
+
+      socketRef.current.emit("room:setBotDifficulty", { roomCode: room.roomCode, difficulty }, (response) => {
+        if (!response.ok) {
+          setError(response.error);
+        }
+      });
+    },
+    [room, currentPlayer]
+  );
+
+  const clearPracticeState = useCallback(() => {
+    setPracticeSession(null);
+    setPracticeResult(null);
+    setPracticeProgress(createEmptyProgress());
+  }, []);
+
   const resetTyping = useCallback(() => {
-    setLocalProgress({
-      progressIndex: 0,
-      correctCharacters: 0,
-      totalTypedCharacters: 0,
-      mistakes: 0
-    });
+    setLocalProgress(createEmptyProgress());
     setResult(null);
   }, []);
+
+  const startPractice = useCallback(() => {
+    const socket = socketRef.current;
+    const validationError = validateNickname(nickname);
+
+    if (!socket || validationError || !guestId) {
+      setError(validationError ?? "サーバーに接続していません。");
+      return;
+    }
+
+    socket.emit(
+      "practice:start",
+      { nickname: normalizeNickname(nickname), category: practiceCategory },
+      (response) => {
+        if (!response.ok) {
+          setError(response.error);
+          return;
+        }
+
+        setError("");
+        setPracticeSession({
+          ...response.data,
+          category: practiceCategory
+        });
+        setPracticeResult(null);
+        setPracticeProgress(createEmptyProgress());
+        resetTyping();
+      }
+    );
+  }, [guestId, nickname, practiceCategory, resetTyping]);
+
+  const finishPractice = useCallback(
+    (finalProgress: ProgressState) => {
+      if (!practiceSession) {
+        return;
+      }
+
+      const finishTimeMs = Date.now() - practiceSession.startedAt;
+      const player: PlayerResult = {
+        id: practiceSession.practiceId,
+        nickname: normalizeNickname(nickname),
+        connected: true,
+        ready: true,
+        isHost: true,
+        isBot: false,
+        progressIndex: finalProgress.progressIndex,
+        correctCharacters: finalProgress.correctCharacters,
+        totalTypedCharacters: finalProgress.totalTypedCharacters,
+        mistakes: finalProgress.mistakes,
+        maxStreak: finalProgress.maxStreak,
+        currentStreak: finalProgress.currentStreak,
+        wpm: calculateWpm(finalProgress.correctCharacters, finishTimeMs),
+        accuracy: calculateAccuracy(finalProgress.correctCharacters, finalProgress.totalTypedCharacters),
+        finishedAt: Date.now(),
+        finishTimeMs,
+        rank: 1,
+        finishGap: undefined
+      };
+
+      setPracticeResult({
+        roomCode: practiceSession.practiceId,
+        prompt: practiceSession.prompt,
+        players: [player]
+      });
+    },
+    [nickname, practiceSession]
+  );
 
   useEffect(() => {
     const storedGuestId = window.localStorage.getItem(GUEST_ID_KEY) ?? createGuestId();
@@ -177,9 +297,10 @@ export default function HomePage() {
         setPlayerId(response.data.playerId);
         setRoom(response.data.room);
         setResult(response.data.room.result ?? null);
+        clearPracticeState();
       }
     );
-  }, [connected, guestId, nickname, resumeAttempted, room]);
+  }, [clearPracticeState, connected, guestId, nickname, resumeAttempted, room]);
 
   useEffect(() => {
     if (!currentPlayer) {
@@ -195,7 +316,9 @@ export default function HomePage() {
         progressIndex: currentPlayer.progressIndex,
         correctCharacters: currentPlayer.correctCharacters,
         totalTypedCharacters: currentPlayer.totalTypedCharacters,
-        mistakes: currentPlayer.mistakes
+        mistakes: currentPlayer.mistakes,
+        currentStreak: currentPlayer.currentStreak,
+        maxStreak: currentPlayer.maxStreak
       };
     });
   }, [currentPlayer]);
@@ -233,7 +356,9 @@ export default function HomePage() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (room?.status !== "playing" || !promptText || result) {
+      const practiceActive = Boolean(practiceSession && !practiceResult && !room);
+
+      if (room?.status !== "playing" && !practiceActive) {
         return;
       }
 
@@ -243,30 +368,60 @@ export default function HomePage() {
 
       event.preventDefault();
 
-      setLocalProgress((previous) => {
-        const expected = promptText[previous.progressIndex];
-        const correct = event.key === expected;
-        const nextIndex = correct ? previous.progressIndex + 1 : previous.progressIndex;
-        const next = {
-          progressIndex: nextIndex,
-          correctCharacters: correct ? previous.correctCharacters + 1 : previous.correctCharacters,
-          totalTypedCharacters: previous.totalTypedCharacters + 1,
-          mistakes: correct ? previous.mistakes : previous.mistakes + 1
-        };
+      if (room?.status === "playing" && room?.prompt) {
+        setLocalProgress((previous) => {
+          const expected = activePromptText[previous.progressIndex];
+          const correct = event.key === expected;
+          const nextIndex = correct ? previous.progressIndex + 1 : previous.progressIndex;
+          const next: ProgressState = {
+            progressIndex: nextIndex,
+            correctCharacters: correct ? previous.correctCharacters + 1 : previous.correctCharacters,
+            totalTypedCharacters: previous.totalTypedCharacters + 1,
+            mistakes: correct ? previous.mistakes : previous.mistakes + 1,
+            currentStreak: correct ? previous.currentStreak + 1 : 0,
+            maxStreak: correct ? Math.max(previous.maxStreak, previous.currentStreak + 1) : previous.maxStreak
+          };
 
-        const payload: TypingProgress = {
-          roomCode: room.roomCode,
-          ...next
-        };
+          const payload: TypingProgress = {
+            roomCode: room.roomCode,
+            progressIndex: next.progressIndex,
+            correctCharacters: next.correctCharacters,
+            totalTypedCharacters: next.totalTypedCharacters,
+            mistakes: next.mistakes
+          };
 
-        emitProgress(payload, nextIndex >= promptText.length);
-        return next;
-      });
+          emitProgress(payload, nextIndex >= activePromptText.length);
+          return next;
+        });
+        return;
+      }
+
+      if (practiceActive && practiceSession) {
+        setPracticeProgress((previous) => {
+          const expected = activePromptText[previous.progressIndex];
+          const correct = event.key === expected;
+          const nextIndex = correct ? previous.progressIndex + 1 : previous.progressIndex;
+          const next: ProgressState = {
+            progressIndex: nextIndex,
+            correctCharacters: correct ? previous.correctCharacters + 1 : previous.correctCharacters,
+            totalTypedCharacters: previous.totalTypedCharacters + 1,
+            mistakes: correct ? previous.mistakes : previous.mistakes + 1,
+            currentStreak: correct ? previous.currentStreak + 1 : 0,
+            maxStreak: correct ? Math.max(previous.maxStreak, previous.currentStreak + 1) : previous.maxStreak
+          };
+
+          if (nextIndex >= activePromptText.length) {
+            finishPractice(next);
+          }
+
+          return next;
+        });
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [emitProgress, promptText, result, room]);
+  }, [activePromptText, emitProgress, finishPractice, practiceResult, practiceSession, room]);
 
   const createRoom = () => {
     const socket = socketRef.current;
@@ -291,6 +446,7 @@ export default function HomePage() {
         setRoom(response.data.room);
         window.localStorage.setItem(ROOM_CODE_KEY, response.data.roomCode);
         window.localStorage.setItem(NICKNAME_KEY, normalizeNickname(nickname));
+        clearPracticeState();
         resetTyping();
       }
     );
@@ -323,6 +479,7 @@ export default function HomePage() {
         setRoom(response.data.room);
         window.localStorage.setItem(ROOM_CODE_KEY, response.data.room.roomCode);
         window.localStorage.setItem(NICKNAME_KEY, normalizeNickname(nickname));
+        clearPracticeState();
         resetTyping();
       }
     );
@@ -337,6 +494,7 @@ export default function HomePage() {
     setResult(null);
     setPlayerId("");
     window.localStorage.removeItem(ROOM_CODE_KEY);
+    clearPracticeState();
     resetTyping();
   };
 
@@ -375,6 +533,7 @@ export default function HomePage() {
       }
 
       setResult(null);
+      clearPracticeState();
       resetTyping();
     });
   };
@@ -447,6 +606,38 @@ export default function HomePage() {
             </div>
           )}
 
+          {!room ? (
+            <div className="difficultySelector">
+              <span>Practice mode</span>
+              <div className="difficultyButtons">
+                {(["short", "standard", "long"] as const).map((category) => (
+                  <button
+                    key={category}
+                    className={practiceCategory === category ? "active" : ""}
+                    type="button"
+                    onClick={() => setPracticeCategory(category)}
+                    disabled={Boolean(practiceSession && !practiceResult)}
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="secondaryButton"
+                type="button"
+                onClick={startPractice}
+                disabled={Boolean(practiceSession && !practiceResult)}
+              >
+                <Swords size={18} />
+                {practiceSession && !practiceResult
+                  ? "Practice running"
+                  : practiceResult
+                    ? "Practice again"
+                    : "Start practice"}
+              </button>
+            </div>
+          ) : null}
+
           {error ? <p className="errorText">{error}</p> : null}
 
           {room ? (
@@ -484,6 +675,25 @@ export default function HomePage() {
             </div>
           ) : null}
 
+          {room?.status === "waiting" && room.players.length < room.maxPlayers ? (
+            <div className="difficultySelector">
+              <span>COM Difficulty</span>
+              <div className="difficultyButtons">
+                {(["easy", "normal", "hard"] as const).map((difficulty) => (
+                  <button
+                    key={difficulty}
+                    className={room.botDifficulty === difficulty ? "active" : ""}
+                    type="button"
+                    onClick={() => setBotDifficulty(difficulty)}
+                    disabled={!currentPlayer?.isHost}
+                  >
+                    {difficulty}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {room?.status === "waiting" ? (
             <div className="lobbyActions">
               <button className="secondaryButton" type="button" onClick={setReady}>
@@ -498,31 +708,51 @@ export default function HomePage() {
         </aside>
 
         <section className="matchSurface" aria-label="Typing match">
-          {room ? (
+          {room || practiceSession || practiceResult ? (
             <>
               <div className="matchHeader">
-                <StatusPill status={result ? "result" : room.status} />
+                <StatusPill
+                  status={
+                    room ? (result ? "result" : room.status) : practiceResult ? "result" : "playing"
+                  }
+                />
                 <div className="statsGrid">
-                  <Stat label="WPM" value={room.status === "playing" ? localWpm : currentPlayer?.wpm ?? 0} />
+                  <Stat
+                    label="WPM"
+                    value={
+                      isRoomPlaying || isPracticePlaying ? activeWpm : activeResultPlayer?.wpm ?? 0
+                    }
+                  />
                   <Stat
                     label="ACC"
-                    value={`${room.status === "playing" ? localAccuracy : currentPlayer?.accuracy ?? 100}%`}
+                    value={`${
+                      isRoomPlaying || isPracticePlaying
+                        ? activeAccuracy
+                        : activeResultPlayer?.accuracy ?? 100
+                    }%`}
                   />
-                  <Stat label="MISS" value={localProgress.mistakes} />
+                  <Stat
+                    label="MISS"
+                    value={
+                      isRoomPlaying || isPracticePlaying
+                        ? activeProgress.mistakes
+                        : activeResultPlayer?.mistakes ?? 0
+                    }
+                  />
                 </div>
               </div>
 
-              {room.status === "countdown" ? (
+              {room?.status === "countdown" ? (
                 <div className="countdown">{Math.max(1, Math.ceil(countdownMs / 1000))}</div>
               ) : null}
 
-              {promptText ? (
+              {activePromptText ? (
                 <div className="promptBox" aria-label="Typing prompt">
-                  {promptText.split("").map((char, index) => {
+                  {activePromptText.split("").map((char, index) => {
                     const className =
-                      index < localProgress.progressIndex
+                      index < activeProgress.progressIndex
                         ? "char typed"
-                        : index === localProgress.progressIndex
+                        : index === activeProgress.progressIndex
                           ? "char current"
                           : "char";
                     return (
@@ -535,35 +765,37 @@ export default function HomePage() {
               ) : (
                 <div className="emptyState">
                   <Swords size={42} />
-                  <p>{room.players.length < room.maxPlayers ? "Waiting for rival" : "Ready to start"}</p>
+                  <p>{room ? (room.players.length < room.maxPlayers ? "Waiting for rival" : "Ready to start") : "Start practice"}</p>
                 </div>
               )}
 
               <div className="progressBlock">
                 <div className="progressLabel">
                   <span>Your progress</span>
-                  <strong>{progressPercent}%</strong>
+                  <strong>{activeProgressPercent}%</strong>
                 </div>
                 <div className="progressTrack">
-                  <span style={{ width: `${progressPercent}%` }} />
+                  <span style={{ width: `${activeProgressPercent}%` }} />
                 </div>
               </div>
 
-              <div className="rivalGrid">
-                {room.players.map((player) => (
-                  <RivalBar
-                    key={player.id}
-                    player={player}
-                    promptLength={promptText.length}
-                    isSelf={player.id === playerId}
-                  />
-                ))}
-              </div>
+              {room ? (
+                <div className="rivalGrid">
+                  {room.players.map((player) => (
+                    <RivalBar
+                      key={player.id}
+                      player={player}
+                      promptLength={activePromptText.length}
+                      isSelf={player.id === playerId}
+                    />
+                  ))}
+                </div>
+              ) : null}
 
-              {result ? (
+              {activeResult ? (
                 <div className="resultPanel">
                   <div className="resultRows">
-                    {result.players.map((player) => (
+                    {activeResult.players.map((player) => (
                       <div className="resultRow" key={player.id}>
                         <span>#{player.rank}</span>
                         <strong>{player.nickname}</strong>
@@ -574,9 +806,13 @@ export default function HomePage() {
                       </div>
                     ))}
                   </div>
-                  <button className="primaryButton" type="button" onClick={rematch}>
+                  <button
+                    className="primaryButton"
+                    type="button"
+                    onClick={room ? rematch : startPractice}
+                  >
                     <RotateCcw size={18} />
-                    Rematch
+                    {room ? "Rematch" : "Practice again"}
                   </button>
                 </div>
               ) : null}

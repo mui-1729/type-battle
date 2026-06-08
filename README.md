@@ -17,15 +17,19 @@
 - 完走結果と再戦
 - 1 人で開始した場合の COM 対戦
 - COM の server-side progress、速度揺らぎ、miss simulation
+- COM difficulty selector
 - リロード後の同一 guest room 復帰
 - playing 中の長時間 disconnect forfeit 判定
+- disconnect / forfeit の room state 反映
 - waiting room TTL cleanup
 - host leave 時の host transfer
 - short / standard / long の prompt category
 - host による prompt category 選択
 - room code を維持した rematch
 - practice prompt 発行 event
-- result stats の `finishGap` field
+- result stats の `finishGap` と `maxStreak` field
+- result analytics UI
+- practice mode
 - shared event types / game state / scoring
 - Vitest unit / room flow tests
 - Playwright room join / complete match / COM match / reload rejoin E2E
@@ -90,10 +94,8 @@ npm run test:e2e
 
 ## 次の作業
 
-1. COM の難易度選択 UI / event を追加する。
-2. Practice mode の Web UI と result を追加する。
-3. long disconnect forfeit の broadcast と E2E を固める。
-4. Result UI に finish gap / max streak などを表示する。
-5. Private beta 用のログ、rate limit、monitoring、デプロイを追加する。
+1. long disconnect forfeit の専用 E2E と明示 UI を固める。
+2. player settings を追加する。
+3. Private beta 用のログ、rate limit、monitoring、デプロイを追加する。
 
 機能実装前の詳細仕様は [docs/features/README.md](docs/features/README.md) にまとめています。

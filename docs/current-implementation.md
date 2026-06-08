@@ -18,9 +18,12 @@
 ### COM 対戦
 
 - host が 1 人だけの room で `Start vs COM` できる。
+- COM difficulty selector がある。
+- selector で `easy | normal | hard` を切り替えられる。
+- `room:setBotDifficulty` event で server 側に反映する。
 - server 側で COM player を追加する。
 - COM は `isBot = true` の player として room state に含まれる。
-- COM は `COM (Normal)` として表示される。
+- COM は選択した難易度名つきで表示される。
 - COM は server timer で progress する。
 - COM の速度には簡単な揺らぎと miss chance がある。
 
@@ -31,6 +34,7 @@
 - host が leave した時、他の active human がいれば host を移譲する。
 - room code を維持した rematch ができる。
 - rematch で progress、result、serverStartAt を reset する。
+- long disconnect の forfeit 判定後、room state が更新される。
 
 ### Reconnect / Disconnect
 
@@ -47,39 +51,33 @@
 - waiting lobby で host が prompt category を変更できる。
 - match start 時に server が category に応じて prompt を選ぶ。
 
-### Tests / CI
-
-- GitHub Actions CI がある。
-- lint / typecheck / unit test / build / Playwright E2E を実行する。
-- E2E は room join、2 player completion、reload rejoin、COM match を確認する。
-- realtime unit test は room creation、join、finish、rejoin、COM、forfeit を確認する。
-
-## 部分実装
-
-### COM difficulty
-
-- `easy | normal | hard` の型と server 側設定値はある。
-- 現在の UI は difficulty selector を持たず、room の default は `normal`。
-- `room:setBotDifficulty` のようなイベントはまだない。
-
 ### Practice mode
 
-- `practice:start` event と server 側の prompt 発行はある。
-- Web UI には practice の入口、typing UI、result UI がまだない。
-- practice result の保存や retry / next prompt はまだない。
+- `practice:start` event と server 側の prompt 発行がある。
+- Web UI に practice の入口、typing UI、result UI がある。
+- practice result を client-side で表示し、`Practice again` で再実行できる。
 
 ### Result analytics
 
 - `PlayerResult` に `finishGap` と `maxStreak` の field がある。
 - `finishGap` は完走者同士の差分として計算される。
-- `maxStreak` は現在 0 固定。
-- Result UI はまだ finish gap / max streak を表示していない。
+- `maxStreak` は typing progress の累積から更新される。
+- Result UI で finish gap と max streak を表示している。
+
+### Tests / CI
+
+- GitHub Actions CI がある。
+- lint / typecheck / unit test / build / Playwright E2E を実行する。
+- E2E は room join、2 player completion、reload rejoin、COM match、practice mode を確認する。
+- realtime unit test は room creation、join、finish、rejoin、COM、forfeit を確認する。
+
+## 部分実装
 
 ### Long disconnect forfeit
 
-- server state では forfeit 判定できる。
-- 現状の interval は room state を更新するが、forfeit による result を room に broadcast する設計は未整理。
-- E2E はまだ long disconnect forfeit を確認していない。
+- server state で forfeit 判定できる。
+- room state の broadcast で disconnect / forfeit の状態が反映される。
+- dedicated E2E はまだ long disconnect forfeit を確認していない。
 
 ## 未実装
 

@@ -41,7 +41,7 @@ export function rankPlayers(players: PlayerState[], promptLength: number): Playe
     return {
       ...player,
       rank: index + 1,
-      maxStreak: 0,
+      maxStreak: player.maxStreak,
       finishGap
     };
   });

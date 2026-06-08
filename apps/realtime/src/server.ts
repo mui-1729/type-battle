@@ -22,6 +22,7 @@ import {
   leaveBySocket,
   markPlaying,
   rematch,
+  setBotDifficulty,
   setPromptCategory,
   setReady,
   startMatch,
@@ -120,6 +121,18 @@ io.on("connection", (socket) => {
     ack({ ok: true, data: result.room });
   });
 
+  socket.on("room:setBotDifficulty", (payload, ack) => {
+    const result = setBotDifficulty(socket.id, payload.roomCode, payload.difficulty);
+
+    if ("error" in result) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+
+    emitRoomState(result.room);
+    ack({ ok: true, data: result.room });
+  });
+
   socket.on("match:start", (payload, ack) => {
     const result = startMatch(socket.id, payload.roomCode);
 
@@ -191,7 +204,11 @@ httpServer.listen(PORT, "127.0.0.1", () => {
 });
 
 setInterval(cleanupExpiredRooms, 10000);
-setInterval(checkForForfeits, 5000); // Check for forfeits every 5 seconds
+setInterval(() => {
+  for (const room of checkForForfeits()) {
+    emitRoomState(room);
+  }
+}, 5000);
 
 function emitRoomState(room: RoomState): void {
   io.to(room.roomCode).emit("room:state", room);

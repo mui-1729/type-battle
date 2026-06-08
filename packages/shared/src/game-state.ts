@@ -13,6 +13,8 @@ export type PlayerState = {
   correctCharacters: number;
   totalTypedCharacters: number;
   mistakes: number;
+  maxStreak: number;
+  currentStreak: number;
   wpm: number;
   accuracy: number;
   finishedAt?: number;

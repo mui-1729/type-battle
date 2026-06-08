@@ -1,5 +1,6 @@
 import type {
   AckResponse,
+  BotDifficulty,
   MatchResult,
   Prompt,
   PromptCategory,
@@ -51,6 +52,10 @@ export type ClientToServerEvents = {
   "player:ready": (payload: ReadyPayload) => void;
   "room:setPromptCategory": (
     payload: RoomCodePayload & { category: PromptCategory },
+    ack: (response: AckResponse<RoomState>) => void
+  ) => void;
+  "room:setBotDifficulty": (
+    payload: RoomCodePayload & { difficulty: BotDifficulty },
     ack: (response: AckResponse<RoomState>) => void
   ) => void;
   "match:start": (

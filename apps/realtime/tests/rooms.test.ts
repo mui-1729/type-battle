@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   createRoom,
+  setBotDifficulty,
   finishTyping,
   getRoom,
   joinRoom,
   leaveBySocket,
   markPlaying,
   checkForForfeits,
+  rematch,
   startMatch,
   updateProgress,
   rooms
@@ -201,6 +203,9 @@ describe("rooms", () => {
       socketId: "socket_alice_com"
     });
 
+    const difficulty = setBotDifficulty("socket_alice_com", created.room.roomCode, "hard");
+    expect("error" in difficulty).toBe(false);
+
     const started = startMatch("socket_alice_com", created.room.roomCode);
     expect("error" in started).toBe(false);
 
@@ -209,7 +214,68 @@ describe("rooms", () => {
     }
 
     expect(started.room.players).toHaveLength(2);
-    expect(started.room.players.some((player) => player.isBot && player.nickname === "COM (Normal)")).toBe(true);
+    expect(started.room.players.some((player) => player.isBot && player.nickname === "COM (Hard)")).toBe(true);
+  });
+
+  it("tracks streaks during typing and resets them on rematch", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_streak",
+      socketId: "socket_alice_streak"
+    });
+
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_streak",
+      socketId: "socket_bob_streak"
+    });
+
+    expect("error" in joined).toBe(false);
+
+    const started = startMatch("socket_alice_streak", created.room.roomCode);
+    expect("error" in started).toBe(false);
+
+    if ("error" in started) {
+      return;
+    }
+
+    expect(markPlaying(created.room.roomCode)?.status).toBe("playing");
+
+    updateProgress("socket_alice_streak", {
+      roomCode: created.room.roomCode,
+      progressIndex: 1,
+      correctCharacters: 1,
+      totalTypedCharacters: 1,
+      mistakes: 0
+    });
+
+    updateProgress("socket_alice_streak", {
+      roomCode: created.room.roomCode,
+      progressIndex: 2,
+      correctCharacters: 2,
+      totalTypedCharacters: 2,
+      mistakes: 0
+    });
+
+    const roomAfterTyping = getRoom(created.room.roomCode);
+    const aliceAfterTyping = roomAfterTyping?.players.find((player) => player.id === "guest_alice_streak");
+
+    expect(aliceAfterTyping?.currentStreak).toBe(2);
+    expect(aliceAfterTyping?.maxStreak).toBe(2);
+
+    const rematched = rematch("socket_alice_streak", created.room.roomCode);
+    expect("error" in rematched).toBe(false);
+
+    if ("error" in rematched) {
+      return;
+    }
+
+    const roomAfterRematch = getRoom(created.room.roomCode);
+    const aliceAfterRematch = roomAfterRematch?.players.find((player) => player.id === "guest_alice_streak");
+
+    expect(aliceAfterRematch?.currentStreak).toBe(0);
+    expect(aliceAfterRematch?.maxStreak).toBe(0);
   });
 
   it("forfeits a disconnected player after grace period", () => {

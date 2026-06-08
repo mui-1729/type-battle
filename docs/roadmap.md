@@ -56,10 +56,10 @@
 - [x] COM fallback and server-side progress
 - [x] long disconnect forfeit server判定
 - [x] result finish gap field
-- [ ] long disconnect forfeit broadcast / UI / E2E
-- [ ] COM difficulty selector
-- [ ] result analytics UI
-- [ ] practice mode Web UI
+- [x] long disconnect forfeit broadcast / room state update
+- [x] COM difficulty selector
+- [x] result analytics UI
+- [x] practice mode Web UI
 - [ ] player settings
 - [ ] lightweight rate limit
 - [ ] structured logging

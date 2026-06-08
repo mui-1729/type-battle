@@ -89,16 +89,36 @@ test("starts a match against COM when alone", async ({ browser }) => {
   await host.getByLabel("Nickname").fill("Alice");
   await host.getByRole("button", { name: "Create room" }).click();
   await expect(host.getByRole("button", { name: "Start vs COM" })).toBeEnabled();
+  await host.getByRole("button", { name: "hard" }).click();
 
   await host.getByRole("button", { name: "Start vs COM" }).click();
-  await expect(host.getByLabel("Room controls").getByText("COM", { exact: false })).toBeVisible();
+  await expect(host.getByLabel("Room controls").getByText("COM (Hard)", { exact: true })).toBeVisible();
   await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
   const promptText = await host.getByLabel("Typing prompt").innerText();
   await host.keyboard.type(promptText, { delay: 1 });
 
   await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 8_000 });
-  await expect(host.locator(".resultPanel").getByText("COM")).toBeVisible();
+  await expect(host.locator(".resultPanel").getByText("COM (Hard)", { exact: true })).toBeVisible();
 
   await hostContext.close();
+});
+
+test("completes a practice session", async ({ browser }) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  await page.goto("/");
+  await page.getByLabel("Nickname").fill("Alice");
+  await expect(page.locator(".connection")).toHaveClass(/isOnline/);
+  await page.getByRole("button", { name: "Start practice" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const promptText = await page.getByLabel("Typing prompt").innerText();
+  await page.keyboard.type(promptText, { delay: 1 });
+
+  await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator(".resultPanel").getByText("Practice again")).toBeVisible();
+
+  await context.close();
 });

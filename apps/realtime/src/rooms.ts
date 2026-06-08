@@ -151,6 +151,29 @@ export function setPromptCategory(
   return { room: toPublicRoom(context.room) };
 }
 
+export function setBotDifficulty(
+  socketId: string,
+  roomCode: string,
+  difficulty: BotDifficulty
+): { room: RoomState } | { error: string } {
+  const context = getContext(socketId, roomCode);
+
+  if (!context) {
+    return { error: "ルームに参加していません。" };
+  }
+
+  if (context.player.id !== context.room.hostPlayerId) {
+    return { error: "ホストだけが COM 難易度を変更できます。" };
+  }
+
+  if (context.room.status !== "waiting") {
+    return { error: "試合中は COM 難易度を変更できません。" };
+  }
+
+  context.room.botDifficulty = difficulty;
+  return { room: toPublicRoom(context.room) };
+}
+
 export function leaveBySocket(socketId: string): RoomState | null {
   const record = socketIndex.get(socketId);
 
@@ -436,6 +459,8 @@ function resetPlayers(room: InternalRoom): void {
     player.correctCharacters = 0;
     player.totalTypedCharacters = 0;
     player.mistakes = 0;
+    player.maxStreak = 0;
+    player.currentStreak = 0;
     player.wpm = 0;
     player.accuracy = 100;
     delete player.finishedAt;
@@ -594,24 +619,40 @@ export function cleanupExpiredRooms(): void {
   }
 }
 
-export function checkForForfeits(): void {
+export function checkForForfeits(): RoomState[] {
   const now = Date.now();
+  const updatedRooms: RoomState[] = [];
+
   for (const room of rooms.values()) {
     if (room.status === "playing") {
+      let changed = false;
+
       for (const player of room.players.values()) {
         if (!player.connected && player.disconnectedAt && now - player.disconnectedAt > DISCONNECT_GRACE_MS) {
+          if (player.finishTimeMs === Infinity) {
+            continue;
+          }
+
           player.finishedAt = now;
           player.finishTimeMs = Infinity; // Represent forfeit
+          changed = true;
           // If all humans are finished now, finish the match
           if (areHumansFinished(room)) {
             finalizeUnfinishedBots(room);
             room.status = "finished";
             room.result = toMatchResult(room);
+            changed = true;
           }
         }
       }
+
+      if (changed) {
+        updatedRooms.push(toPublicRoom(room));
+      }
     }
   }
+
+  return updatedRooms;
 }
 
 export function startPractice(nickname: string, category: PromptCategory): { practiceId: string; prompt: Prompt; startedAt: number } {
