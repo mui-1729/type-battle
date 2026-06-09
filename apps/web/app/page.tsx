@@ -1,6 +1,6 @@
 "use client";
 
-import { Clipboard, Play, RotateCcw, Swords, Unplug, Users } from "lucide-react";
+import { Clipboard, Play, RotateCcw, Settings, Swords, Unplug, Users, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import type { Socket } from "socket.io-client";
@@ -33,6 +33,16 @@ type ProgressState = {
   maxStreak: number;
 };
 
+type PlayerSettings = {
+  nickname: string;
+  theme: "system" | "light" | "dark";
+  soundEnabled: boolean;
+  countdownSoundEnabled: boolean;
+  inputGuideEnabled: boolean;
+  reducedMotion: boolean;
+  fontSize: "small" | "normal" | "large";
+};
+
 type PracticeSession = {
   practiceId: string;
   prompt: Prompt;
@@ -43,7 +53,17 @@ type PracticeSession = {
 const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL ?? "http://127.0.0.1:3001";
 const GUEST_ID_KEY = "type-battle:guest-id";
 const ROOM_CODE_KEY = "type-battle:room-code";
-const NICKNAME_KEY = "type-battle:nickname";
+const SETTINGS_KEY = "type-battle:settings";
+
+const DEFAULT_SETTINGS: PlayerSettings = {
+  nickname: "Player",
+  theme: "system",
+  soundEnabled: true,
+  countdownSoundEnabled: true,
+  inputGuideEnabled: true,
+  reducedMotion: false,
+  fontSize: "normal"
+};
 
 function createEmptyProgress(): ProgressState {
   return {
@@ -61,7 +81,8 @@ export default function HomePage() {
   const [connected, setConnected] = useState(false);
   const [guestId, setGuestId] = useState("");
   const [playerId, setPlayerId] = useState("");
-  const [nickname, setNickname] = useState("Player");
+  const [settings, setSettings] = useState<PlayerSettings>(DEFAULT_SETTINGS);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [room, setRoom] = useState<RoomState | null>(null);
   const [result, setResult] = useState<MatchResult | null>(null);
@@ -73,6 +94,9 @@ export default function HomePage() {
   const [resumeAttempted, setResumeAttempted] = useState(false);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
+
+  const nickname = settings.nickname;
+  const setNickname = (next: string) => setSettings((s) => ({ ...s, nickname: next }));
 
   const currentPlayer = useMemo(
     () => room?.players.find((player) => player.id === playerId) ?? null,
@@ -212,12 +236,17 @@ export default function HomePage() {
 
   useEffect(() => {
     const storedGuestId = window.localStorage.getItem(GUEST_ID_KEY) ?? createGuestId();
-    const storedNickname = window.localStorage.getItem(NICKNAME_KEY);
+    const storedSettingsJson = window.localStorage.getItem(SETTINGS_KEY);
     window.localStorage.setItem(GUEST_ID_KEY, storedGuestId);
     setGuestId(storedGuestId);
 
-    if (storedNickname) {
-      setNickname(storedNickname);
+    if (storedSettingsJson) {
+      try {
+        const storedSettings = JSON.parse(storedSettingsJson);
+        setSettings((prev) => ({ ...prev, ...storedSettings }));
+      } catch (e) {
+        console.error("Failed to parse settings", e);
+      }
     }
 
     const socket: ClientSocket = io(REALTIME_URL, {
@@ -260,6 +289,21 @@ export default function HomePage() {
   }, [resetTyping]);
 
   useEffect(() => {
+    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+
+    const html = document.documentElement;
+    html.classList.remove("theme-light", "theme-dark", "font-small", "font-normal", "font-large", "reduced-motion");
+    
+    if (settings.theme !== "system") {
+      html.classList.add(`theme-${settings.theme}`);
+    }
+    html.classList.add(`font-${settings.fontSize}`);
+    if (settings.reducedMotion) {
+      html.classList.add("reduced-motion");
+    }
+  }, [settings]);
+
+  useEffect(() => {
     if (!connected || !guestId || resumeAttempted) {
       return;
     }
@@ -272,7 +316,6 @@ export default function HomePage() {
       return;
     }
 
-    const storedNickname = window.localStorage.getItem(NICKNAME_KEY) ?? nickname;
     const socket = socketRef.current;
 
     if (!socket) {
@@ -284,7 +327,7 @@ export default function HomePage() {
       "room:join",
       {
         roomCode: storedRoomCode,
-        nickname: normalizeNickname(storedNickname),
+        nickname: normalizeNickname(nickname),
         guestId
       },
       (response) => {
@@ -445,7 +488,6 @@ export default function HomePage() {
         setPlayerId(response.data.playerId);
         setRoom(response.data.room);
         window.localStorage.setItem(ROOM_CODE_KEY, response.data.roomCode);
-        window.localStorage.setItem(NICKNAME_KEY, normalizeNickname(nickname));
         clearPracticeState();
         resetTyping();
       }
@@ -478,7 +520,6 @@ export default function HomePage() {
         setPlayerId(response.data.playerId);
         setRoom(response.data.room);
         window.localStorage.setItem(ROOM_CODE_KEY, response.data.room.roomCode);
-        window.localStorage.setItem(NICKNAME_KEY, normalizeNickname(nickname));
         clearPracticeState();
         resetTyping();
       }
@@ -557,6 +598,14 @@ export default function HomePage() {
           <span />
           {connected ? "online" : "offline"}
         </div>
+        <button
+          className="iconButton"
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          title="Open settings"
+        >
+          <Settings size={18} />
+        </button>
       </section>
 
       <section className="workspace">
@@ -650,7 +699,15 @@ export default function HomePage() {
                       {player.isBot ? "com" : player.isHost ? "host" : player.ready ? "ready" : "waiting"}
                     </span>
                   </div>
-                  <small>{player.isBot ? "bot" : player.connected ? "connected" : "offline"}</small>
+                  <small>
+                    {player.isBot
+                      ? "bot"
+                      : player.finishTimeMs === Infinity
+                        ? "forfeited"
+                        : player.connected
+                          ? "connected"
+                          : "reconnecting..."}
+                  </small>
                 </div>
               ))}
             </div>
@@ -752,7 +809,7 @@ export default function HomePage() {
                     const className =
                       index < activeProgress.progressIndex
                         ? "char typed"
-                        : index === activeProgress.progressIndex
+                        : index === activeProgress.progressIndex && settings.inputGuideEnabled
                           ? "char current"
                           : "char";
                     return (
@@ -825,6 +882,110 @@ export default function HomePage() {
           )}
         </section>
       </section>
+
+      {settingsOpen ? (
+        <div className="modalBackdrop" onClick={() => setSettingsOpen(false)}>
+          <div className="modalContent" onClick={(e) => e.stopPropagation()}>
+            <div className="modalHeader">
+              <h2>Player Settings</h2>
+              <button className="iconButton" onClick={() => setSettingsOpen(false)}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="settingsGrid">
+              <div className="fieldGroup">
+                <label>Nickname</label>
+                <input
+                  value={settings.nickname}
+                  maxLength={18}
+                  onChange={(e) => setNickname(e.target.value)}
+                />
+              </div>
+
+              <div className="fieldGroup">
+                <label>Theme</label>
+                <div className="difficultyButtons">
+                  {(["system", "light", "dark"] as const).map((t) => (
+                    <button
+                      key={t}
+                      className={settings.theme === t ? "active" : ""}
+                      onClick={() => setSettings((s) => ({ ...s, theme: t }))}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="fieldGroup">
+                <label>Display & Accessibility</label>
+                <div className="toggleGroup">
+                  <label className="toggleLabel">
+                    <input
+                      type="checkbox"
+                      checked={settings.inputGuideEnabled}
+                      onChange={(e) => setSettings((s) => ({ ...s, inputGuideEnabled: e.target.checked }))}
+                    />
+                    Input Guide (Highlight next char)
+                  </label>
+                  <label className="toggleLabel">
+                    <input
+                      type="checkbox"
+                      checked={settings.reducedMotion}
+                      onChange={(e) => setSettings((s) => ({ ...s, reducedMotion: e.target.checked }))}
+                    />
+                    Reduced Motion
+                  </label>
+                </div>
+              </div>
+
+              <div className="fieldGroup">
+                <label>Font Size</label>
+                <div className="difficultyButtons">
+                  {(["small", "normal", "large"] as const).map((f) => (
+                    <button
+                      key={f}
+                      className={settings.fontSize === f ? "active" : ""}
+                      onClick={() => setSettings((s) => ({ ...s, fontSize: f }))}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="fieldGroup">
+                <label>Sound</label>
+                <div className="toggleGroup">
+                  <label className="toggleLabel">
+                    <input
+                      type="checkbox"
+                      checked={settings.soundEnabled}
+                      onChange={(e) => setSettings((s) => ({ ...s, soundEnabled: e.target.checked }))}
+                    />
+                    Sound Effects
+                  </label>
+                  <label className="toggleLabel">
+                    <input
+                      type="checkbox"
+                      checked={settings.countdownSoundEnabled}
+                      onChange={(e) => setSettings((s) => ({ ...s, countdownSoundEnabled: e.target.checked }))}
+                    />
+                    Countdown Sound
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="modalActions">
+              <button className="primaryButton" onClick={() => setSettingsOpen(false)}>
+                Save & Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -852,15 +1013,23 @@ function RivalBar({
   isSelf: boolean;
 }) {
   const progress = calculateProgress(player.progressIndex, promptLength);
+  const isForfeited = player.forfeited;
+  const isDisconnected = !player.connected && !player.isBot;
 
   return (
     <div className={isSelf ? "rivalBar isSelf" : "rivalBar"}>
-      <div>
+      <div className="rivalInfo">
         <strong>{player.nickname}</strong>
-        <span>{progress}%</span>
+        {isForfeited ? (
+          <span className="statusTag isForfeited">FORFEITED</span>
+        ) : isDisconnected ? (
+          <span className="statusTag isDisconnected">RECONNECTING...</span>
+        ) : (
+          <span>{progress}%</span>
+        )}
       </div>
       <div className="miniTrack">
-        <span style={{ width: `${progress}%` }} />
+        <span style={{ width: `${progress}%` }} className={isForfeited ? "isForfeited" : ""} />
       </div>
     </div>
   );

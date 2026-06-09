@@ -104,6 +104,42 @@ test("starts a match against COM when alone", async ({ browser }) => {
   await hostContext.close();
 });
 
+test("forfeits the match after long disconnect", async ({ browser }) => {
+  const hostContext = await browser.newContext();
+  const guestContext = await browser.newContext();
+  const host = await hostContext.newPage();
+  const guest = await guestContext.newPage();
+
+  await host.goto("/");
+  await host.getByLabel("Nickname").fill("Alice");
+  await host.getByRole("button", { name: "Create room" }).click();
+
+  const roomCode = await host.locator(".roomMeta strong").innerText();
+
+  await guest.goto("/");
+  await guest.getByLabel("Nickname").fill("Bob");
+  await guest.getByLabel("Room code").fill(roomCode);
+  await guest.getByTitle("Join room").click();
+
+  await host.getByRole("button", { name: "Start" }).click();
+  await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expect(guest.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  // Guest disconnects
+  await guestContext.close();
+
+  // Should immediately show reconnecting
+  await expect(host.locator(".statusTag.isDisconnected")).toBeVisible();
+  await expect(host.locator(".rivalBar").getByText("RECONNECTING...")).toBeVisible();
+
+  // Wait for forfeit (grace period + some margin)
+  // We've updated playwright.config.ts to set grace period to 5s
+  await expect(host.locator(".statusTag.isForfeited")).toBeVisible({ timeout: 25_000 });
+  await expect(host.locator(".rivalBar").getByText("FORFEITED")).toBeVisible();
+
+  await hostContext.close();
+});
+
 test("completes a practice session", async ({ browser }) => {
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -119,6 +155,43 @@ test("completes a practice session", async ({ browser }) => {
 
   await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(page.locator(".resultPanel").getByText("Practice again")).toBeVisible();
+
+  await context.close();
+});
+
+test("saves and restores player settings from localStorage", async ({ browser }) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  await page.goto("/");
+  
+  // Open settings
+  await page.getByTitle("Open settings").click();
+  await expect(page.getByText("Player Settings")).toBeVisible();
+
+  // Change nickname
+  await page.locator(".modalContent input").first().fill("Charlie");
+  
+  // Toggle dark theme
+  await page.getByRole("button", { name: "dark" }).click();
+  
+  // Change font size
+  await page.getByRole("button", { name: "large" }).click();
+
+  // Close modal
+  await page.getByRole("button", { name: "Save & Close" }).click();
+  await expect(page.getByText("Player Settings")).not.toBeVisible();
+
+  // Verify UI reflects changes
+  await expect(page.getByLabel("Nickname")).toHaveValue("Charlie");
+  await expect(page.locator("html")).toHaveClass(/theme-dark/);
+  await expect(page.locator("html")).toHaveClass(/font-large/);
+
+  // Reload and verify persistence
+  await page.reload();
+  await expect(page.getByLabel("Nickname")).toHaveValue("Charlie");
+  await expect(page.locator("html")).toHaveClass(/theme-dark/);
+  await expect(page.locator("html")).toHaveClass(/font-large/);
 
   await context.close();
 });

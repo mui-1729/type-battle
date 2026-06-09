@@ -17,6 +17,7 @@ import type {
   TypingFinish,
   TypingProgress
 } from "@type-battle/shared";
+import { logger } from "./logger.js";
 
 const MAX_PLAYERS = 2;
 const COUNTDOWN_MS = 3_000;
@@ -64,6 +65,21 @@ type InternalRoom = {
 
 export const rooms = new Map<string, InternalRoom>();
 const socketIndex = new Map<string, { roomCode: string; playerId: string }>();
+
+export const metrics = {
+  matchesStarted: 0,
+  matchesFinished: 0,
+  disconnectCount: 0,
+  serverErrors: 0
+};
+
+export function getMetrics() {
+  return {
+    ...metrics,
+    activeRooms: rooms.size,
+    activePlayers: socketIndex.size
+  };
+}
 
 export function createRoom(input: { nickname: string; guestId: string; socketId: string }): {
   room: RoomState;
@@ -194,6 +210,7 @@ export function leaveBySocket(socketId: string): RoomState | null {
     player.connected = false;
     player.ready = false;
     player.disconnectedAt = Date.now();
+    metrics.disconnectCount += 1;
   }
 
   room.lastActivityAt = Date.now();
@@ -264,6 +281,7 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
   room.serverStartAt = Date.now() + COUNTDOWN_MS;
   delete room.result;
   resetPlayers(room);
+  metrics.matchesStarted += 1;
 
   return { room: toPublicRoom(room) };
 }
@@ -338,6 +356,7 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
     }
     room.status = "finished";
     room.result = toMatchResult(room);
+    metrics.matchesFinished += 1;
     return { type: "result", result: room.result };
   }
 
@@ -376,6 +395,7 @@ export function finishTyping(socketId: string, payload: TypingFinish): MatchResu
     finalizeUnfinishedBots(context.room);
     context.room.status = "finished";
     context.room.result = toMatchResult(context.room);
+    metrics.matchesFinished += 1;
     return context.room.result;
   }
 
@@ -429,6 +449,18 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
   const promptLength = room.prompt?.text.length ?? 0;
   const nextIndex = clamp(payload.progressIndex, player.progressIndex, promptLength);
   
+  // Basic suspicious detection: jumping too many characters
+  if (nextIndex - player.progressIndex > 10) {
+    logger.warn({
+      event: "suspicious_progress",
+      roomCode: room.roomCode,
+      playerId: player.id,
+      jumpSize: nextIndex - player.progressIndex,
+      from: player.progressIndex,
+      to: nextIndex
+    });
+  }
+
   // Update streaks based on typing success
   const isCorrect = nextIndex > player.progressIndex;
   if (isCorrect) {
@@ -523,7 +555,8 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     wpm: player.wpm,
     accuracy: player.accuracy,
     maxStreak: player.maxStreak,
-    currentStreak: player.currentStreak
+    currentStreak: player.currentStreak,
+    forfeited: player.forfeited
   };
 
   if (player.finishedAt) {
@@ -600,7 +633,9 @@ function createUniqueRoomCode(): string {
 }
 
 const ROOM_TTL_MS = 60 * 1000; // 1 minute
-const DISCONNECT_GRACE_MS = 30 * 1000; // 30 seconds
+const DISCONNECT_GRACE_MS = Number(
+  process.env.DISCONNECT_GRACE_MS ?? (process.env.NODE_ENV === "test" ? 5000 : 30 * 1000)
+); // Default 30 seconds, 5 seconds for tests
 
 export function cleanupExpiredRooms(): void {
   const now = Date.now();
@@ -628,20 +663,25 @@ export function checkForForfeits(): RoomState[] {
       let changed = false;
 
       for (const player of room.players.values()) {
-        if (!player.connected && player.disconnectedAt && now - player.disconnectedAt > DISCONNECT_GRACE_MS) {
-          if (player.finishTimeMs === Infinity) {
-            continue;
-          }
+        if (!player.connected && player.disconnectedAt) {
+          const elapsed = now - player.disconnectedAt;
+          if (elapsed > DISCONNECT_GRACE_MS) {
+            if (player.forfeited) {
+              continue;
+            }
 
-          player.finishedAt = now;
-          player.finishTimeMs = Infinity; // Represent forfeit
-          changed = true;
-          // If all humans are finished now, finish the match
-          if (areHumansFinished(room)) {
-            finalizeUnfinishedBots(room);
-            room.status = "finished";
-            room.result = toMatchResult(room);
+            player.finishedAt = now;
+            player.finishTimeMs = Infinity; // Keep for internal logic if needed
+            player.forfeited = true;
             changed = true;
+            // If all humans are finished now, finish the match
+            if (areHumansFinished(room)) {
+              finalizeUnfinishedBots(room);
+              room.status = "finished";
+              room.result = toMatchResult(room);
+              metrics.matchesFinished += 1;
+              changed = true;
+            }
           }
         }
       }

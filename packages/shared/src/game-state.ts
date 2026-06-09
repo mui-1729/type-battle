@@ -19,6 +19,7 @@ export type PlayerState = {
   accuracy: number;
   finishedAt?: number;
   finishTimeMs?: number;
+  forfeited?: boolean | undefined;
 };
 
 export type PromptCategory = "short" | "standard" | "long";
