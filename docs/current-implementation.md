@@ -68,16 +68,32 @@
 
 - GitHub Actions CI がある。
 - lint / typecheck / unit test / build / Playwright E2E を実行する。
-- E2E は room join、2 player completion、reload rejoin、COM match、practice mode を確認する。
+- E2E は room join、2 player completion、reload rejoin、COM match、practice mode、long disconnect forfeit、player settings を確認する。
 - realtime unit test は room creation、join、finish、rejoin、COM、forfeit を確認する。
+- デプロイ後の導線を検証する `smoke test`。
+
+### Player settings
+
+- nickname、theme、sound、input guide、reduced motion、font size の設定ができる。
+- modal UI による設定変更。
+- localStorage への設定保存と復元。
+- theme (system/light/dark) の CSS 変数による動的切り替え。
+- reduced motion によるアニメーション停止の制御。
+- font size による課題文テキストのサイズ調整。
+
+### Observability / Rate limit
+
+- `pino` による構造化ログ。
+- IP、guest id、socket ごとの軽量な rate limit。
+- 試合開始、終了、接続数などの基本メトリクス。
+- health endpoint (`/health`) によるメトリクス露出。
+- 進行度の急激な変化を検知する suspicious detection ログ。
+
+### Deployment
+
+- realtime サーバーの `Dockerfile`。
 
 ## 部分実装
-
-### Long disconnect forfeit
-
-- server state で forfeit 判定できる。
-- room state の broadcast で disconnect / forfeit の状態が反映される。
-- dedicated E2E はまだ long disconnect forfeit を確認していない。
 
 ## 未実装
 

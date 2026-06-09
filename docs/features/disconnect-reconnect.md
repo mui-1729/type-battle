@@ -110,8 +110,11 @@ type RoomState = {
 - E2E: playing room reload rejoin
 - E2E: opponent offline display
 
-## 未決定事項
+## 未決定事項 (決定済み)
 
 - playing 中に相手が長時間切断した時、即勝利にするか、完走を待つか。
-- COM 対戦中の切断は paused にするか、COM を進め続けるか。
+  - -> 完走を待つ。相手は Forfeit として記録される。
+- COM 対戦中の切戦は paused にするか、COM を進め続けるか。
+  - -> COM を進め続ける。
 - public beta で意図的な切断を rating penalty にするか。
+  - -> 未定。

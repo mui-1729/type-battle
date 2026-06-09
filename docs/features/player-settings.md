@@ -64,7 +64,9 @@ type PlayerSettings = {
 - theme 切り替え。
 - reduced motion 時の表示。
 
-## 未決定事項
+## 未決定事項 (決定済み)
 
 - キー音を入れるか。
+  - -> Private Beta では保留。
 - 設定画面を modal にするか page にするか。
+  - -> Modal に実装済み。
