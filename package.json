@@ -14,6 +14,7 @@
     "typecheck": "turbo typecheck",
     "test": "turbo test",
     "test:e2e": "npm run build && playwright test",
+    "test:smoke": "tsx tests/smoke-test.ts",
     "build": "turbo build",
     "ci": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
@@ -24,6 +25,8 @@
     "eslint": "^9.0.0",
     "jiti": "^2.0.0",
     "prettier": "^3.0.0",
+    "socket.io-client": "^4.8.3",
+    "tsx": "^4.22.4",
     "turbo": "^2.0.0",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.0.0",
