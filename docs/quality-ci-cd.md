@@ -181,8 +181,7 @@ E2E は初期は PR ごとに実行する。実行時間が重くなったら、
 実行:
 
 - Pull Request CI と同等
-- deploy artifact 作成
-- private beta deploy の trigger
+- Vercel の production deployment は Git integration 側で実行する
 
 ### Nightly
 
@@ -202,10 +201,10 @@ public beta を目指す段階で追加する。
 
 ### Private Beta
 
-- `main` merge 後、自動 deploy を基本にする。
-- deploy 先は private beta 用 URL とする。
-- deploy 後に smoke test を実行する。
-- deploy 失敗時は自動 rollback または前バージョン維持を優先する。
+- `main` merge 後、Vercel の production deployment を基本にする。
+- web deploy 先は private beta 用 URL とする。
+- web deploy 後に smoke test を実行する。
+- realtime は当面 external deploy しないか、別途運用を決める。
 
 ### Public Beta
 

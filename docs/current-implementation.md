@@ -102,14 +102,13 @@
 
 - realtime サーバーの `Dockerfile`。
 - `tests/smoke-test.ts` による health / socket / room create の確認。
-- realtime の Fly.io `fly.toml` と deploy workflow がある。
 
 ## 部分実装
 
 ### Deployment automation
 
-- realtime 側の provider wiring は repo 内で進んでいる。
-- web の provider wiring と rollback はまだ外部設定に依存する。
+- web は Vercel 前提で進める。
+- realtime の外部デプロイは当面行わない。
 
 ## 未実装
 

@@ -9,9 +9,9 @@
 - [x] `feat(settings): wire sound playback to player settings`
   - sound effects と countdown sound を実際の再生処理に接続する。
   - sound off の時は再生しない。
-- [ ] `feat(release): wire deployment provider and rollback`
-  - hosting provider への自動 deploy と rollback をまとめる。
-  - repo 内の Dockerfile / smoke test とつなぐ。
+- [ ] `feat(release): wire web deployment on Vercel`
+  - Vercel への自動 deploy と preview / production の切り替えを整える。
+  - repo 内の build 物と smoke test 手順をつなぐ。
 - [x] `feat(beta): add private beta feedback issue flow`
   - 不具合報告を GitHub Issue にすぐ切り出せるようにする。
   - 再現条件のテンプレートを用意する。
