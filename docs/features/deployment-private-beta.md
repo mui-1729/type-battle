@@ -26,6 +26,7 @@ MVP の web は Vercel に置く。realtime server はこの段階では外部�
 
 ```txt
 NEXT_PUBLIC_REALTIME_URL=https://realtime.example.com
+NEXT_PUBLIC_FEEDBACK_ISSUE_URL=https://github.com/mui-1729/type-battle/issues/new?template=private-beta-feedback.yml
 ```
 
 ### Realtime

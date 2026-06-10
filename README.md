@@ -78,6 +78,8 @@ npm install
 npm run dev
 ```
 
+環境変数の雛形は [.env.example](.env.example) を参照してください。
+
 ローカルでは次の URL を使います。
 
 - Web: http://127.0.0.1:3000
