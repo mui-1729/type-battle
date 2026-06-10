@@ -36,7 +36,7 @@
 - PostgreSQL persistence
 - structured logging
 - room create / join / typing progress の軽い rate limit
-- smoke test script と realtime Dockerfile
+- smoke test script と realtime Dockerfile / Fly.io wiring
 - shared event types / game state / scoring
 - Vitest unit / room flow tests
 - Playwright room join / complete match / COM match / reload rejoin / long disconnect forfeit / player settings E2E
@@ -101,7 +101,7 @@ npm run test:e2e
 
 ## 次の作業
 
-1. deployment automation / hosting provider wiring を詰める。
+1. web deployment / hosting provider wiring を詰める。
 2. branch protection を有効化する。
 3. public beta 向け機能の優先順位を決める。
 

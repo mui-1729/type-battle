@@ -1,0 +1,48 @@
+name: Deploy Realtime
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "apps/realtime/**"
+      - "packages/shared/**"
+      - "package.json"
+      - "package-lock.json"
+      - "turbo.json"
+      - "tsconfig.base.json"
+      - "fly.toml"
+      - ".github/workflows/deploy-realtime.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-realtime
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ secrets.FLY_API_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    environment: private-beta
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy realtime
+        run: flyctl deploy --config fly.toml --remote-only --app type-battle-realtime
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Smoke test
+        run: REALTIME_URL=https://type-battle-realtime.fly.dev npm run test:smoke

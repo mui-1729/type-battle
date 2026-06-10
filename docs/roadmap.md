@@ -68,8 +68,9 @@
 - [x] CD smoke test
 - [x] player settings sound wiring
 - [x] private beta feedback issue flow
+- [x] realtime hosting provider wiring
+- [ ] web hosting provider wiring
 - [ ] branch protection
-- [ ] hosting provider wiring
 - [x] PostgreSQL 保存
 - [x] guest session
 

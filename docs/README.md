@@ -59,17 +59,17 @@ MVP では次を優先します。
 - PostgreSQL persistence
 - structured logging
 - room create / join / typing progress の軽量 rate limit
-- smoke test script と realtime Dockerfile
+- smoke test script と realtime Dockerfile / Fly.io wiring
 
 部分実装:
 
-- deployment automation / hosting provider wiring
+- realtime hosting provider wiring
 
 ## 次に仕様化・実装する機能
 
 Private beta 前に優先する機能は次です。
 
-1. deployment automation / hosting provider wiring
+1. web deployment / hosting provider wiring
 2. branch protection
 
 Public beta 以降に検討する主な機能は次です。
