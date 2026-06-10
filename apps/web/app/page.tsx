@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Clipboard, Play, RotateCcw, Settings, Swords, Unplug, Users, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
@@ -8,7 +9,6 @@ import {
   calculateAccuracy,
   calculateProgress,
   calculateWpm,
-  createGuestId,
   normalizeNickname,
   validateNickname
 } from "@type-battle/shared";
@@ -22,6 +22,20 @@ import type {
   ServerToClientEvents,
   TypingProgress
 } from "@type-battle/shared";
+import {
+  applyPlayerSettingsToDocument,
+  DEFAULT_PLAYER_SETTINGS,
+  loadPlayerSettings,
+  persistPlayerSettings,
+  type PlayerSettings
+} from "../lib/player-settings";
+import {
+  loadGuestSession,
+  persistGuestSession,
+  touchGuestSession,
+  type GuestSession
+} from "../lib/guest-session";
+import { playCountdownSound, playTypingSound, primeSoundPlayback } from "../lib/sound";
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 type ProgressState = {
@@ -33,16 +47,6 @@ type ProgressState = {
   maxStreak: number;
 };
 
-type PlayerSettings = {
-  nickname: string;
-  theme: "system" | "light" | "dark";
-  soundEnabled: boolean;
-  countdownSoundEnabled: boolean;
-  inputGuideEnabled: boolean;
-  reducedMotion: boolean;
-  fontSize: "small" | "normal" | "large";
-};
-
 type PracticeSession = {
   practiceId: string;
   prompt: Prompt;
@@ -51,19 +55,7 @@ type PracticeSession = {
 };
 
 const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL ?? "http://127.0.0.1:3001";
-const GUEST_ID_KEY = "type-battle:guest-id";
 const ROOM_CODE_KEY = "type-battle:room-code";
-const SETTINGS_KEY = "type-battle:settings";
-
-const DEFAULT_SETTINGS: PlayerSettings = {
-  nickname: "Player",
-  theme: "system",
-  soundEnabled: true,
-  countdownSoundEnabled: true,
-  inputGuideEnabled: true,
-  reducedMotion: false,
-  fontSize: "normal"
-};
 
 function createEmptyProgress(): ProgressState {
   return {
@@ -76,12 +68,29 @@ function createEmptyProgress(): ProgressState {
   };
 }
 
+function advanceProgress(previous: ProgressState, expectedChar: string | undefined, typedChar: string): ProgressState {
+  const correct = typedChar === expectedChar;
+  const nextIndex = correct ? previous.progressIndex + 1 : previous.progressIndex;
+
+  return {
+    progressIndex: nextIndex,
+    correctCharacters: correct ? previous.correctCharacters + 1 : previous.correctCharacters,
+    totalTypedCharacters: previous.totalTypedCharacters + 1,
+    mistakes: correct ? previous.mistakes : previous.mistakes + 1,
+    currentStreak: correct ? previous.currentStreak + 1 : 0,
+    maxStreak: correct ? Math.max(previous.maxStreak, previous.currentStreak + 1) : previous.maxStreak
+  };
+}
+
 export default function HomePage() {
   const socketRef = useRef<ClientSocket | null>(null);
+  const settingsRef = useRef(DEFAULT_PLAYER_SETTINGS);
+  const countdownSecondRef = useRef<number | null>(null);
   const [connected, setConnected] = useState(false);
-  const [guestId, setGuestId] = useState("");
+  const [guestSession, setGuestSession] = useState<GuestSession | null>(null);
   const [playerId, setPlayerId] = useState("");
-  const [settings, setSettings] = useState<PlayerSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<PlayerSettings>(DEFAULT_PLAYER_SETTINGS);
+  const [settingsHydrated, setSettingsHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [joinCode, setJoinCode] = useState("");
   const [room, setRoom] = useState<RoomState | null>(null);
@@ -94,6 +103,8 @@ export default function HomePage() {
   const [resumeAttempted, setResumeAttempted] = useState(false);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
+  const guestId = guestSession?.guestId ?? "";
+  const sessionId = guestSession?.sessionId ?? "";
 
   const nickname = settings.nickname;
   const setNickname = (next: string) => setSettings((s) => ({ ...s, nickname: next }));
@@ -167,6 +178,16 @@ export default function HomePage() {
     setResult(null);
   }, []);
 
+  const updateGuestSession = useCallback(() => {
+    setGuestSession((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return touchGuestSession(current);
+    });
+  }, []);
+
   const startPractice = useCallback(() => {
     const socket = socketRef.current;
     const validationError = validateNickname(nickname);
@@ -176,6 +197,7 @@ export default function HomePage() {
       return;
     }
 
+    void primeSoundPlayback();
     socket.emit(
       "practice:start",
       { nickname: normalizeNickname(nickname), category: practiceCategory },
@@ -235,19 +257,10 @@ export default function HomePage() {
   );
 
   useEffect(() => {
-    const storedGuestId = window.localStorage.getItem(GUEST_ID_KEY) ?? createGuestId();
-    const storedSettingsJson = window.localStorage.getItem(SETTINGS_KEY);
-    window.localStorage.setItem(GUEST_ID_KEY, storedGuestId);
-    setGuestId(storedGuestId);
-
-    if (storedSettingsJson) {
-      try {
-        const storedSettings = JSON.parse(storedSettingsJson);
-        setSettings((prev) => ({ ...prev, ...storedSettings }));
-      } catch (e) {
-        console.error("Failed to parse settings", e);
-      }
-    }
+    const session = loadGuestSession(window.localStorage);
+    setGuestSession(session);
+    setSettings(loadPlayerSettings(window.localStorage));
+    setSettingsHydrated(true);
 
     const socket: ClientSocket = io(REALTIME_URL, {
       transports: ["websocket"]
@@ -289,22 +302,39 @@ export default function HomePage() {
   }, [resetTyping]);
 
   useEffect(() => {
-    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    if (!settingsHydrated) {
+      return;
+    }
 
-    const html = document.documentElement;
-    html.classList.remove("theme-light", "theme-dark", "font-small", "font-normal", "font-large", "reduced-motion");
-    
-    if (settings.theme !== "system") {
-      html.classList.add(`theme-${settings.theme}`);
-    }
-    html.classList.add(`font-${settings.fontSize}`);
-    if (settings.reducedMotion) {
-      html.classList.add("reduced-motion");
-    }
-  }, [settings]);
+    persistPlayerSettings(window.localStorage, settings);
+    applyPlayerSettingsToDocument(document, settings);
+    settingsRef.current = settings;
+  }, [settings, settingsHydrated]);
 
   useEffect(() => {
-    if (!connected || !guestId || resumeAttempted) {
+    if (!guestSession) {
+      return;
+    }
+
+    persistGuestSession(window.localStorage, guestSession);
+  }, [guestSession]);
+
+  useEffect(() => {
+    const handlePrimeSound = () => {
+      void primeSoundPlayback();
+    };
+
+    window.addEventListener("pointerdown", handlePrimeSound, { once: true });
+    window.addEventListener("keydown", handlePrimeSound, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePrimeSound);
+      window.removeEventListener("keydown", handlePrimeSound);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!connected || !guestId || !sessionId || resumeAttempted) {
       return;
     }
 
@@ -328,7 +358,8 @@ export default function HomePage() {
       {
         roomCode: storedRoomCode,
         nickname: normalizeNickname(nickname),
-        guestId
+        guestId,
+        sessionId
       },
       (response) => {
         if (!response.ok) {
@@ -340,10 +371,11 @@ export default function HomePage() {
         setPlayerId(response.data.playerId);
         setRoom(response.data.room);
         setResult(response.data.room.result ?? null);
+        updateGuestSession();
         clearPracticeState();
       }
     );
-  }, [clearPracticeState, connected, guestId, nickname, resumeAttempted, room]);
+  }, [clearPracticeState, connected, guestId, nickname, resumeAttempted, room, sessionId, updateGuestSession]);
 
   useEffect(() => {
     if (!currentPlayer) {
@@ -369,6 +401,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!room?.serverStartAt || room.status !== "countdown") {
       setCountdownMs(0);
+      countdownSecondRef.current = null;
       return;
     }
 
@@ -378,6 +411,26 @@ export default function HomePage() {
 
     return () => window.clearInterval(interval);
   }, [room?.serverStartAt, room?.status]);
+
+  useEffect(() => {
+    if (!room || room.status !== "countdown") {
+      countdownSecondRef.current = null;
+      return;
+    }
+
+    const nextSecond = Math.max(1, Math.ceil(countdownMs / 1000));
+
+    if (countdownSecondRef.current === null) {
+      countdownSecondRef.current = nextSecond;
+      void playCountdownSound({ enabled: settingsRef.current.countdownSoundEnabled }, nextSecond);
+      return;
+    }
+
+    if (nextSecond < countdownSecondRef.current) {
+      countdownSecondRef.current = nextSecond;
+      void playCountdownSound({ enabled: settingsRef.current.countdownSoundEnabled }, nextSecond);
+    }
+  }, [countdownMs, room]);
 
   const emitProgress = useCallback(
     (nextProgress: TypingProgress, finish: boolean) => {
@@ -413,17 +466,9 @@ export default function HomePage() {
 
       if (room?.status === "playing" && room?.prompt) {
         setLocalProgress((previous) => {
-          const expected = activePromptText[previous.progressIndex];
-          const correct = event.key === expected;
-          const nextIndex = correct ? previous.progressIndex + 1 : previous.progressIndex;
-          const next: ProgressState = {
-            progressIndex: nextIndex,
-            correctCharacters: correct ? previous.correctCharacters + 1 : previous.correctCharacters,
-            totalTypedCharacters: previous.totalTypedCharacters + 1,
-            mistakes: correct ? previous.mistakes : previous.mistakes + 1,
-            currentStreak: correct ? previous.currentStreak + 1 : 0,
-            maxStreak: correct ? Math.max(previous.maxStreak, previous.currentStreak + 1) : previous.maxStreak
-          };
+          const next = advanceProgress(previous, activePromptText[previous.progressIndex], event.key);
+          const correct = next.progressIndex > previous.progressIndex;
+          const soundOptions = settingsRef.current;
 
           const payload: TypingProgress = {
             roomCode: room.roomCode,
@@ -433,7 +478,8 @@ export default function HomePage() {
             mistakes: next.mistakes
           };
 
-          emitProgress(payload, nextIndex >= activePromptText.length);
+          void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
+          emitProgress(payload, next.progressIndex >= activePromptText.length);
           return next;
         });
         return;
@@ -441,22 +487,15 @@ export default function HomePage() {
 
       if (practiceActive && practiceSession) {
         setPracticeProgress((previous) => {
-          const expected = activePromptText[previous.progressIndex];
-          const correct = event.key === expected;
-          const nextIndex = correct ? previous.progressIndex + 1 : previous.progressIndex;
-          const next: ProgressState = {
-            progressIndex: nextIndex,
-            correctCharacters: correct ? previous.correctCharacters + 1 : previous.correctCharacters,
-            totalTypedCharacters: previous.totalTypedCharacters + 1,
-            mistakes: correct ? previous.mistakes : previous.mistakes + 1,
-            currentStreak: correct ? previous.currentStreak + 1 : 0,
-            maxStreak: correct ? Math.max(previous.maxStreak, previous.currentStreak + 1) : previous.maxStreak
-          };
+          const next = advanceProgress(previous, activePromptText[previous.progressIndex], event.key);
+          const correct = next.progressIndex > previous.progressIndex;
+          const soundOptions = settingsRef.current;
 
-          if (nextIndex >= activePromptText.length) {
+          if (next.progressIndex >= activePromptText.length) {
             finishPractice(next);
           }
 
+          void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
           return next;
         });
       }
@@ -475,9 +514,10 @@ export default function HomePage() {
       return;
     }
 
+    void primeSoundPlayback();
     socket.emit(
       "room:create",
-      { nickname: normalizeNickname(nickname), guestId },
+      { nickname: normalizeNickname(nickname), guestId, sessionId },
       (response) => {
         if (!response.ok) {
           setError(response.error);
@@ -488,6 +528,7 @@ export default function HomePage() {
         setPlayerId(response.data.playerId);
         setRoom(response.data.room);
         window.localStorage.setItem(ROOM_CODE_KEY, response.data.roomCode);
+        updateGuestSession();
         clearPracticeState();
         resetTyping();
       }
@@ -503,12 +544,14 @@ export default function HomePage() {
       return;
     }
 
+    void primeSoundPlayback();
     socket.emit(
       "room:join",
       {
         roomCode: joinCode.trim().toUpperCase(),
         nickname: normalizeNickname(nickname),
-        guestId
+        guestId,
+        sessionId
       },
       (response) => {
         if (!response.ok) {
@@ -520,6 +563,7 @@ export default function HomePage() {
         setPlayerId(response.data.playerId);
         setRoom(response.data.room);
         window.localStorage.setItem(ROOM_CODE_KEY, response.data.room.roomCode);
+        updateGuestSession();
         clearPracticeState();
         resetTyping();
       }
@@ -555,6 +599,7 @@ export default function HomePage() {
       return;
     }
 
+    void primeSoundPlayback();
     socketRef.current.emit("match:start", { roomCode: room.roomCode }, (response) => {
       if (!response.ok) {
         setError(response.error);
@@ -567,6 +612,7 @@ export default function HomePage() {
       return;
     }
 
+    void primeSoundPlayback();
     socketRef.current.emit("match:rematch", { roomCode: room.roomCode }, (response) => {
       if (!response.ok) {
         setError(response.error);
@@ -686,6 +732,12 @@ export default function HomePage() {
               </button>
             </div>
           ) : null}
+
+          <div className="panelLinks">
+            <Link className="secondaryButton" href="/feedback">
+              Report a bug
+            </Link>
+          </div>
 
           {error ? <p className="errorText">{error}</p> : null}
 
@@ -871,6 +923,9 @@ export default function HomePage() {
                     <RotateCcw size={18} />
                     {room ? "Rematch" : "Practice again"}
                   </button>
+                  <Link className="secondaryButton" href="/feedback">
+                    Report a bug
+                  </Link>
                 </div>
               ) : null}
             </>
@@ -888,7 +943,7 @@ export default function HomePage() {
           <div className="modalContent" onClick={(e) => e.stopPropagation()}>
             <div className="modalHeader">
               <h2>Player Settings</h2>
-              <button className="iconButton" onClick={() => setSettingsOpen(false)}>
+              <button className="iconButton" type="button" onClick={() => setSettingsOpen(false)}>
                 <X size={20} />
               </button>
             </div>
@@ -909,6 +964,7 @@ export default function HomePage() {
                   {(["system", "light", "dark"] as const).map((t) => (
                     <button
                       key={t}
+                      type="button"
                       className={settings.theme === t ? "active" : ""}
                       onClick={() => setSettings((s) => ({ ...s, theme: t }))}
                     >
@@ -946,6 +1002,7 @@ export default function HomePage() {
                   {(["small", "normal", "large"] as const).map((f) => (
                     <button
                       key={f}
+                      type="button"
                       className={settings.fontSize === f ? "active" : ""}
                       onClick={() => setSettings((s) => ({ ...s, fontSize: f }))}
                     >
@@ -979,7 +1036,7 @@ export default function HomePage() {
             </div>
 
             <div className="modalActions">
-              <button className="primaryButton" onClick={() => setSettingsOpen(false)}>
+              <button className="primaryButton" type="button" onClick={() => setSettingsOpen(false)}>
                 Save & Close
               </button>
             </div>

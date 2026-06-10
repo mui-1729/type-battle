@@ -53,19 +53,24 @@ MVP では次を優先します。
 - result stats の finish gap と max streak
 - result analytics UI
 - practice mode
+- player settings modal / localStorage / theme / input guide / font size / reduced motion / sound wiring
+- private beta feedback issue flow
+- guest session
+- PostgreSQL persistence
+- structured logging
+- room create / join / typing progress の軽量 rate limit
+- smoke test script と realtime Dockerfile
 
 部分実装:
 
-- long disconnect forfeit の専用 E2E / 明示 UI
+- deployment automation / hosting provider wiring
 
 ## 次に仕様化・実装する機能
 
 Private beta 前に優先する機能は次です。
 
-1. [disconnect / reconnect](features/disconnect-reconnect.md)
-2. [observability / rate limit](features/observability-rate-limit.md)
-3. [private beta deployment](features/deployment-private-beta.md)
-4. [player settings](features/player-settings.md)
+1. deployment automation / hosting provider wiring
+2. branch protection
 
 Public beta 以降に検討する主な機能は次です。
 

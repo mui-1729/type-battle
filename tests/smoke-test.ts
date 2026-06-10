@@ -31,20 +31,28 @@ async function checkSocket() {
 
     socket.on("connect", () => {
       console.log("Socket connected successfully");
-      
+
       // Try a room:create
-      socket.emit("room:create", { nickname: "SmokeTest", guestId: "smoke-test-guest" }, (response) => {
-        if (response.ok) {
-          console.log("Room created successfully:", response.data.roomCode);
-          socket.disconnect();
-          clearTimeout(timeout);
-          resolve();
-        } else {
-          socket.disconnect();
-          clearTimeout(timeout);
-          reject(new Error(`Room creation failed: ${response.error}`));
+      socket.emit(
+        "room:create",
+        {
+          nickname: "SmokeTest",
+          guestId: "smoke-test-guest",
+          sessionId: "smoke-test-session"
+        },
+        (response) => {
+          if (response.ok) {
+            console.log("Room created successfully:", response.data.roomCode);
+            socket.disconnect();
+            clearTimeout(timeout);
+            resolve();
+          } else {
+            socket.disconnect();
+            clearTimeout(timeout);
+            reject(new Error(`Room creation failed: ${response.error}`));
+          }
         }
-      });
+      );
     });
 
     socket.on("connect_error", (err) => {

@@ -10,7 +10,8 @@
 
 ## 対象ステージ
 
-- Private beta: nickname、theme、sound、input display の最小設定。
+- Private beta: nickname、theme、input display、reduced motion、font size の最小設定。
+- sound / countdown sound も実際の再生に wiring する。
 - Public beta: accessibility、language、privacy の拡張。
 
 ## 設定項目
@@ -46,14 +47,15 @@ type PlayerSettings = {
 
 ## UI
 
-- Home に settings menu を置く。
-- Match 中は最低限、sound と reduced motion の切り替えだけ可能にする。
-- 設定変更が即時反映されるようにする。
+- Home の top bar から settings modal を開く。
+- 設定変更は即時反映されるようにする。
+- nickname は次の room 作成 / 参加で使う表示名として扱う。
 
 ## 受け入れ条件
 
 - nickname が validation される。
-- sound off の時に効果音が鳴らない。
+- sound / countdown sound の設定が localStorage に保存される。
+- sound / countdown sound が typing / countdown に反映される。
 - reduced motion の時に大きな animation が無効になる。
 - font size を変えても主要 UI が重ならない。
 
@@ -67,6 +69,8 @@ type PlayerSettings = {
 ## 未決定事項 (決定済み)
 
 - キー音を入れるか。
-  - -> Private Beta では保留。
+  - -> Private Beta で実装済み。
 - 設定画面を modal にするか page にするか。
   - -> Modal に実装済み。
+- sound effect を実際に鳴らすか。
+  - -> Private Beta で実装済み。

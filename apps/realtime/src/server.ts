@@ -31,6 +31,7 @@ import {
   updateProgress
 } from "./rooms.js";
 import { logger } from "./logger.js";
+import { getPersistenceStatus } from "./persistence.js";
 import { checkProgressLimit, checkRoomCreateLimit, checkRoomJoinLimit } from "./rate-limiter.js";
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -45,7 +46,8 @@ app.get("/health", (_request, response) => {
     service: "type-battle-realtime",
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV ?? "development",
-    metrics: getMetrics()
+    metrics: getMetrics(),
+    database: getPersistenceStatus()
   });
 });
 
@@ -76,7 +78,8 @@ io.on("connection", (socket) => {
     const { room, playerId } = createRoom({
       nickname: payload.nickname,
       guestId: payload.guestId,
-      socketId: socket.id
+      socketId: socket.id,
+      sessionId: payload.sessionId
     });
 
     socket.join(room.roomCode);
@@ -84,7 +87,8 @@ io.on("connection", (socket) => {
       event: "room_create",
       roomCode: room.roomCode,
       hostPlayerId: playerId,
-      guestId: payload.guestId
+      guestId: payload.guestId,
+      sessionId: payload.sessionId
     });
     ack({ ok: true, data: { roomCode: room.roomCode, playerId, room } });
     emitRoomState(room);
@@ -108,7 +112,8 @@ io.on("connection", (socket) => {
       roomCode: payload.roomCode,
       nickname: payload.nickname,
       guestId: payload.guestId,
-      socketId: socket.id
+      socketId: socket.id,
+      sessionId: payload.sessionId
     });
 
     if ("error" in result) {
@@ -116,6 +121,7 @@ io.on("connection", (socket) => {
         event: "room_join_failed",
         roomCode: payload.roomCode,
         guestId: payload.guestId,
+        sessionId: payload.sessionId,
         error: result.error
       });
       ack({ ok: false, error: result.error });
@@ -127,7 +133,8 @@ io.on("connection", (socket) => {
       event: "room_join",
       roomCode: result.room.roomCode,
       playerId: result.playerId,
-      guestId: payload.guestId
+      guestId: payload.guestId,
+      sessionId: payload.sessionId
     });
     ack({ ok: true, data: { playerId: result.playerId, room: result.room } });
     emitRoomState(result.room);

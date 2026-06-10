@@ -4,49 +4,34 @@
 
 ## P0 / Private Beta Stability
 
-### room lifecycle
+### settings / release
 
-- `feat(room): add room TTL and expiration cleanup`
-  - waiting room、finished room、abandoned room を期限切れにする。
-  - 期限切れ room へ join した時の error を定義する。
-- `feat(room): add host leave handling`
-  - host が抜けた時に host transfer または room close を行う。
-  - lobby / match / result それぞれの挙動を決める。
-- `feat(room): add rematch round state`
-  - same room code で複数 round を扱う。
-  - previous round の progress / result を次 round に混ぜない。
+- [x] `feat(settings): wire sound playback to player settings`
+  - sound effects と countdown sound を実際の再生処理に接続する。
+  - sound off の時は再生しない。
+- [ ] `feat(release): wire deployment provider and rollback`
+  - hosting provider への自動 deploy と rollback をまとめる。
+  - repo 内の Dockerfile / smoke test とつなぐ。
+- [x] `feat(beta): add private beta feedback issue flow`
+  - 不具合報告を GitHub Issue にすぐ切り出せるようにする。
+  - 再現条件のテンプレートを用意する。
+- [ ] `feat(repo): enable branch protection`
+  - main への直接 push を避ける。
+  - CI green を merge gate にする。
 
-### disconnect / reconnect
+### persistence / session
 
-- `feat(realtime): add reconnect grace period`
-  - short disconnect では player slot を保持する。
-  - grace を超えたら disconnected / forfeited にする。
-- `feat(realtime): restore room state after reload`
-  - guest id で同じ room に復帰する。
-  - countdown / playing / result の各 state を復元する。
-- `feat(match): settle long disconnect as forfeit`
-  - playing 中の長期切断を敗北または未完走として扱う。
-  - result に disconnect reason を残す。
-
-### COM
-
-- `feat(com): add difficulty selector`
-  - Easy / Normal / Hard の速度とミス率を分ける。
-  - COM の progress は server authoritative にする。
-- `feat(com): add auto fallback when no opponent joins`
-  - quick match や solo start で COM を自動投入する。
-  - user が human only を選べる余地を残す。
-- `feat(com): show COM profile in lobby and result`
-  - COM 名、難易度、opponent type を表示する。
-  - ranking / rating 対象外であることを結果に反映する。
+- [x] `feat(db): add PostgreSQL persistence`
+  - match result と基本的な session を永続化する。
+  - private beta の再起動に備える。
+- [x] `feat(identity): add guest session`
+  - guest id と room code を session として扱いやすくする。
+  - reload / reconnect の基盤を整理する。
 
 ## P1 / Better Play Experience
 
 ### prompt library
 
-- `feat(prompt): add prompt categories`
-  - Short / Standard / Long を選択できる。
-  - server が prompt を選択する。
 - `feat(prompt): add prompt validation`
   - 空、短すぎる、長すぎる、不正文字を拒否する。
   - disabled prompt を試合に出さない。
@@ -55,30 +40,12 @@
 
 ### practice
 
-- `feat(practice): add solo practice mode`
-  - room を作らずに一人で開始できる。
-  - result は match result と分離する。
 - `feat(practice): add retry same prompt`
   - 同じ prompt を再挑戦できる。
   - retry と next prompt を分ける。
-
-### result
-
-- `feat(result): add detailed match stats`
-  - max streak、finish gap、miss count を表示する。
-  - 完走者と未完走者の両方に stats を出す。
-- `feat(result): add session summary`
+- `feat(practice): add session summary`
   - 連続試合の勝敗数を表示する。
   - round count と直近結果をまとめる。
-
-### settings
-
-- `feat(settings): persist player settings locally`
-  - nickname、theme、sound、input guide を保存する。
-  - reload 後も復元する。
-- `feat(settings): add accessibility options`
-  - reduced motion、font size、sound off を追加する。
-  - match UI で layout が崩れない。
 
 ## P2 / Public Beta Readiness
 
@@ -116,9 +83,6 @@
 
 ### identity / profile
 
-- `feat(identity): stabilize guest id`
-  - nickname 変更と guest id を分離する。
-  - reconnect と report の基盤にする。
 - `feat(profile): add optional player profile`
   - display name と basic stats を表示する。
 

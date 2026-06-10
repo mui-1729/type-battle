@@ -64,12 +64,14 @@
 - [x] lightweight rate limit
 - [x] structured logging
 - [x] basic monitoring
-- [x] deployment
+- [x] deployment scaffolding
 - [x] CD smoke test
-- [ ] private beta feedback issue flow
+- [x] player settings sound wiring
+- [x] private beta feedback issue flow
 - [ ] branch protection
-- [ ] PostgreSQL 保存
-- [ ] guest session
+- [ ] hosting provider wiring
+- [x] PostgreSQL 保存
+- [x] guest session
 
 ## Phase 5: Public Beta
 

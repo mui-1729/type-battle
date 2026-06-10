@@ -78,14 +78,18 @@
 - result に finish gap を保持している。
 - result analytics UI で finish gap と max streak を確認できる。
 - long disconnect の状態変化が room state に反映される。
+- player settings の modal、localStorage 保存、theme、font size、reduced motion、input guide を実装する。
+- player settings の sound / countdown sound 再生を wiring する。
+- private beta feedback issue flow を用意する。
+- PostgreSQL 保存を導入する。
+- guest session を実装する。
+- structured logging、軽量 rate limit、health endpoint を実装する。
+- smoke test script と realtime Dockerfile を用意する。
 
 ### まだ足りない要件
 
-- デプロイ先で Web UI と realtime server を動かす。
-- エラー、切断、試合開始、試合終了を structured log で追えるようにする。
-- room 作成、join、typing event に軽い rate limit を入れる。
-- long disconnect forfeit の dedicated E2E と明示 UI を固める。
-- player settings を実装する。
+- デプロイ先で Web UI と realtime server を常設運用する wiring。
+- branch protection を有効化する。
 
 ## Public Beta 要件
 

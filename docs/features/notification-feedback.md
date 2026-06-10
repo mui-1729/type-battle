@@ -52,6 +52,7 @@ type ServiceNotice = {
 ## 受け入れ条件
 
 - feedback link から報告できる。
+- feedback page から GitHub issue template に遷移できる。
 - maintenance banner を表示 / 非表示にできる。
 - 試合中の UI を大きく邪魔しない。
 - notice が古くなったら自動で消える。

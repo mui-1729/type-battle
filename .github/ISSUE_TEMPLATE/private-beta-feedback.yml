@@ -1,0 +1,51 @@
+name: Private beta feedback
+description: Report a bug or suggest an improvement for private beta
+labels:
+  - private-beta
+  - feedback
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Short description of the issue or request.
+      placeholder: The countdown sound does not play after reconnecting.
+    validations:
+      required: true
+  - type: input
+    id: room_code
+    attributes:
+      label: Room code
+      description: If the issue happened in a match, add the room code.
+      placeholder: ABC123
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Write the smallest reliable sequence to reproduce the issue.
+      placeholder: |
+        1. Create a room.
+        2. Start a match.
+        3. Refresh the page during countdown.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: The room should reconnect and keep the countdown sound enabled.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: The sound does not play and the match continues silently.
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Extra context
+      description: Browser, OS, screenshots, logs, or other useful details.
+      placeholder: Chrome 126 on macOS. No console errors.

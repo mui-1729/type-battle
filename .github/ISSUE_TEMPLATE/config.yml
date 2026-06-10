@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Feedback page
+    url: https://github.com/mui-1729/type-battle/issues/new?template=private-beta-feedback.yml
+    about: Use the private beta feedback template for bugs and improvement requests.

@@ -18,6 +18,7 @@ import type {
   TypingProgress
 } from "@type-battle/shared";
 import { logger } from "./logger.js";
+import { recordGuestSession, recordMatchResult } from "./persistence.js";
 
 const MAX_PLAYERS = 2;
 const COUNTDOWN_MS = 3_000;
@@ -81,7 +82,12 @@ export function getMetrics() {
   };
 }
 
-export function createRoom(input: { nickname: string; guestId: string; socketId: string }): {
+export function createRoom(input: {
+  nickname: string;
+  guestId: string;
+  socketId: string;
+  sessionId?: string;
+}): {
   room: RoomState;
   playerId: string;
 } {
@@ -101,6 +107,12 @@ export function createRoom(input: { nickname: string; guestId: string; socketId:
 
   rooms.set(roomCode, room);
   socketIndex.set(input.socketId, { roomCode, playerId: player.id });
+  void recordGuestSession({
+    sessionId: input.sessionId ?? input.guestId,
+    guestId: input.guestId,
+    nickname: player.nickname,
+    roomCode
+  });
 
   return { room: toPublicRoom(room), playerId: player.id };
 }
@@ -110,6 +122,7 @@ export function joinRoom(input: {
   nickname: string;
   guestId: string;
   socketId: string;
+  sessionId?: string;
 }): { room: RoomState; playerId: string } | { error: string } {
   const room = rooms.get(input.roomCode.toUpperCase());
 
@@ -126,6 +139,12 @@ export function joinRoom(input: {
     delete existing.disconnectedAt;
     existing.nickname = normalizeNickname(input.nickname);
     socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: existing.id });
+    void recordGuestSession({
+      sessionId: input.sessionId ?? input.guestId,
+      guestId: input.guestId,
+      nickname: existing.nickname,
+      roomCode: room.roomCode
+    });
     return { room: toPublicRoom(room), playerId: existing.id };
   }
 
@@ -140,6 +159,12 @@ export function joinRoom(input: {
   const player = createPlayer(input.guestId, input.nickname, input.socketId, false);
   room.players.set(player.id, player);
   socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: player.id });
+  void recordGuestSession({
+    sessionId: input.sessionId ?? input.guestId,
+    guestId: input.guestId,
+    nickname: player.nickname,
+    roomCode: room.roomCode
+  });
 
   return { room: toPublicRoom(room), playerId: player.id };
 }
@@ -354,10 +379,8 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
     if (bot.progressIndex < promptLength) {
       finalizeUnfinishedBots(room);
     }
-    room.status = "finished";
-    room.result = toMatchResult(room);
-    metrics.matchesFinished += 1;
-    return { type: "result", result: room.result };
+    const result = finalizeRoom(room);
+    return { type: "result", result };
   }
 
   return { type: "progress", room: toPublicRoom(room) };
@@ -393,10 +416,7 @@ export function finishTyping(socketId: string, payload: TypingFinish): MatchResu
 
   if (areHumansFinished(context.room)) {
     finalizeUnfinishedBots(context.room);
-    context.room.status = "finished";
-    context.room.result = toMatchResult(context.room);
-    metrics.matchesFinished += 1;
-    return context.room.result;
+    return finalizeRoom(context.room);
   }
 
   return toPublicRoom(context.room);
@@ -508,6 +528,25 @@ function toMatchResult(room: InternalRoom): MatchResult {
     prompt,
     players: rankPlayers(toPublicPlayers(room), prompt.text.length)
   };
+}
+
+function finalizeRoom(room: InternalRoom): MatchResult {
+  room.status = "finished";
+  room.result = toMatchResult(room);
+  metrics.matchesFinished += 1;
+
+  void recordMatchResult({
+    roomCode: room.roomCode,
+    round: room.round,
+    prompt: room.prompt ?? pickPrompt(),
+    promptCategory: room.promptCategory,
+    botDifficulty: room.botDifficulty,
+    playerCount: room.players.size,
+    hasBot: [...room.players.values()].some((player) => player.isBot),
+    result: room.result
+  });
+
+  return room.result;
 }
 
 function toPublicRoom(room: InternalRoom): RoomState {
@@ -677,9 +716,7 @@ export function checkForForfeits(): RoomState[] {
             // If all humans are finished now, finish the match
             if (areHumansFinished(room)) {
               finalizeUnfinishedBots(room);
-              room.status = "finished";
-              room.result = toMatchResult(room);
-              metrics.matchesFinished += 1;
+              finalizeRoom(room);
               changed = true;
             }
           }
