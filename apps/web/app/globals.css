@@ -235,6 +235,16 @@ input:focus {
   padding: 10px;
 }
 
+.infoText {
+  background: #eef4ff;
+  border: 1px solid #cfe0ff;
+  border-radius: 8px;
+  color: #2457cc;
+  font-size: 13px;
+  margin: 0;
+  padding: 10px;
+}
+
 .playerList {
   display: grid;
   gap: 8px;

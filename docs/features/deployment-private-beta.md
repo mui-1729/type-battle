@@ -29,6 +29,8 @@ NEXT_PUBLIC_REALTIME_URL=https://realtime.example.com
 NEXT_PUBLIC_FEEDBACK_ISSUE_URL=https://github.com/mui-1729/type-battle/issues/new?template=private-beta-feedback.yml
 ```
 
+`NEXT_PUBLIC_REALTIME_URL` は realtime が未デプロイなら未設定のままでもよい。その場合、web は deploy できるが対戦機能は無効になる。
+
 ### Realtime
 
 ```txt

@@ -54,7 +54,8 @@ type PracticeSession = {
   category: PromptCategory;
 };
 
-const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL ?? "http://127.0.0.1:3001";
+const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL?.trim() ?? "";
+const REALTIME_UNAVAILABLE_MESSAGE = "Realtime の接続先が未設定です。";
 const ROOM_CODE_KEY = "type-battle:room-code";
 
 function createEmptyProgress(): ProgressState {
@@ -103,6 +104,7 @@ export default function HomePage() {
   const [resumeAttempted, setResumeAttempted] = useState(false);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
+  const realtimeConfigured = REALTIME_URL.length > 0;
   const guestId = guestSession?.guestId ?? "";
   const sessionId = guestSession?.sessionId ?? "";
 
@@ -192,8 +194,8 @@ export default function HomePage() {
     const socket = socketRef.current;
     const validationError = validateNickname(nickname);
 
-    if (!socket || validationError || !guestId) {
-      setError(validationError ?? "サーバーに接続していません。");
+    if (!realtimeConfigured || !socket || validationError || !guestId) {
+      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
       return;
     }
 
@@ -217,7 +219,7 @@ export default function HomePage() {
         resetTyping();
       }
     );
-  }, [guestId, nickname, practiceCategory, resetTyping]);
+  }, [guestId, nickname, practiceCategory, realtimeConfigured, resetTyping]);
 
   const finishPractice = useCallback(
     (finalProgress: ProgressState) => {
@@ -262,6 +264,11 @@ export default function HomePage() {
     setSettings(loadPlayerSettings(window.localStorage));
     setSettingsHydrated(true);
 
+    if (!realtimeConfigured) {
+      setConnected(false);
+      return;
+    }
+
     const socket: ClientSocket = io(REALTIME_URL, {
       transports: ["websocket"]
     });
@@ -299,7 +306,7 @@ export default function HomePage() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [resetTyping]);
+  }, [realtimeConfigured, resetTyping]);
 
   useEffect(() => {
     if (!settingsHydrated) {
@@ -509,8 +516,8 @@ export default function HomePage() {
     const socket = socketRef.current;
     const validationError = validateNickname(nickname);
 
-    if (!socket || validationError || !guestId) {
-      setError(validationError ?? "サーバーに接続していません。");
+    if (!realtimeConfigured || !socket || validationError || !guestId) {
+      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
       return;
     }
 
@@ -539,8 +546,8 @@ export default function HomePage() {
     const socket = socketRef.current;
     const validationError = validateNickname(nickname);
 
-    if (!socket || validationError || !guestId) {
-      setError(validationError ?? "サーバーに接続していません。");
+    if (!realtimeConfigured || !socket || validationError || !guestId) {
+      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
       return;
     }
 
@@ -584,7 +591,7 @@ export default function HomePage() {
   };
 
   const setReady = () => {
-    if (!socketRef.current || !room || !currentPlayer) {
+    if (!realtimeConfigured || !socketRef.current || !room || !currentPlayer) {
       return;
     }
 
@@ -595,7 +602,7 @@ export default function HomePage() {
   };
 
   const startMatch = () => {
-    if (!socketRef.current || !room) {
+    if (!realtimeConfigured || !socketRef.current || !room) {
       return;
     }
 
@@ -608,7 +615,7 @@ export default function HomePage() {
   };
 
   const rematch = () => {
-    if (!socketRef.current || !room) {
+    if (!realtimeConfigured || !socketRef.current || !room) {
       return;
     }
 
@@ -642,7 +649,7 @@ export default function HomePage() {
         </div>
         <div className={connected ? "connection isOnline" : "connection"}>
           <span />
-          {connected ? "online" : "offline"}
+          {connected ? "online" : realtimeConfigured ? "offline" : "realtime pending"}
         </div>
         <button
           className="iconButton"
@@ -656,6 +663,12 @@ export default function HomePage() {
 
       <section className="workspace">
         <aside className="sidePanel" aria-label="Room controls">
+          {!realtimeConfigured ? (
+            <p className="infoText">
+              Realtime の接続先が未設定のため、今は Vercel への web deploy はできますが対戦は使えません。
+            </p>
+          ) : null}
+
           <div className="fieldGroup">
             <label htmlFor="nickname">Nickname</label>
             <input
@@ -669,7 +682,7 @@ export default function HomePage() {
 
           {!room ? (
             <div className="roomActions">
-              <button className="primaryButton" type="button" onClick={createRoom}>
+              <button className="primaryButton" type="button" onClick={createRoom} disabled={!realtimeConfigured}>
                 <Swords size={18} />
                 Create room
               </button>
@@ -681,7 +694,13 @@ export default function HomePage() {
                   maxLength={8}
                   onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
                 />
-                <button className="iconButton" type="button" onClick={joinRoom} title="Join room">
+                <button
+                  className="iconButton"
+                  type="button"
+                  onClick={joinRoom}
+                  title="Join room"
+                  disabled={!realtimeConfigured}
+                >
                   <Users size={18} />
                 </button>
               </div>
@@ -711,7 +730,7 @@ export default function HomePage() {
                     className={practiceCategory === category ? "active" : ""}
                     type="button"
                     onClick={() => setPracticeCategory(category)}
-                    disabled={Boolean(practiceSession && !practiceResult)}
+                    disabled={!realtimeConfigured || Boolean(practiceSession && !practiceResult)}
                   >
                     {category}
                   </button>
@@ -721,7 +740,7 @@ export default function HomePage() {
                 className="secondaryButton"
                 type="button"
                 onClick={startPractice}
-                disabled={Boolean(practiceSession && !practiceResult)}
+                disabled={!realtimeConfigured || Boolean(practiceSession && !practiceResult)}
               >
                 <Swords size={18} />
                 {practiceSession && !practiceResult
@@ -808,7 +827,12 @@ export default function HomePage() {
               <button className="secondaryButton" type="button" onClick={setReady}>
                 {currentPlayer?.ready ? "Ready" : "Set ready"}
               </button>
-              <button className="primaryButton" type="button" onClick={startMatch} disabled={!canStart}>
+              <button
+                className="primaryButton"
+                type="button"
+                onClick={startMatch}
+                disabled={!realtimeConfigured || !canStart}
+              >
                 <Play size={18} />
                 {room.players.length < room.maxPlayers ? "Start vs COM" : "Start"}
               </button>
