@@ -37,10 +37,32 @@ import { getPersistenceStatus } from "./persistence.js";
 import { checkProgressLimit, checkRoomCreateLimit, checkRoomJoinLimit } from "./rate-limiter.js";
 
 const PORT = Number(process.env.PORT ?? 3001);
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? "http://127.0.0.1:3000";
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN?.trim() ?? "";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+const isAllowedOrigin = (origin: string | undefined) => {
+  if (!origin) {
+    return true;
+  }
+
+  if (CLIENT_ORIGIN) {
+    return origin === CLIENT_ORIGIN;
+  }
+
+  return !IS_PRODUCTION;
+};
+
+const corsOriginHandler = (origin: string | undefined, callback: (error: Error | null, success?: boolean) => void) => {
+  if (isAllowedOrigin(origin)) {
+    callback(null, true);
+    return;
+  }
+
+  callback(new Error(`CORS blocked for origin: ${origin ?? "<missing>"}`));
+};
 
 const app = express();
-app.use(cors({ origin: CLIENT_ORIGIN }));
+app.use(cors({ origin: corsOriginHandler }));
 
 app.get("/health", (_request, response) => {
   response.json({
@@ -56,7 +78,7 @@ app.get("/health", (_request, response) => {
 const httpServer = createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   cors: {
-    origin: CLIENT_ORIGIN
+    origin: corsOriginHandler
   }
 });
 
