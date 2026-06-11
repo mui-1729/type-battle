@@ -85,6 +85,9 @@ npm run dev
 - Web: http://127.0.0.1:3000
 - Realtime health: http://127.0.0.1:3001/health
 
+同じ Wi-Fi の端末から試すときは、Web を開いた PC の LAN IP で `http://<PC の IP>:3000` にアクセスします。
+realtime は同じ PC 上の `:3001` を使うので、PC 側のファイアウォールで 3000 / 3001 番ポートを許可する必要があります。
+
 品質チェック:
 
 ```bash

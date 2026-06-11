@@ -28,9 +28,15 @@ import { ProgressBlock } from "./_components/progress-block";
 import { ResultPanel } from "./_components/result-panel";
 import { RivalBar } from "./_components/rival-bar";
 import { Stat } from "./_components/stat";
+import { TypingInput } from "./_components/typing-input";
 import { StatusPill } from "./_components/status-pill";
 import { TypingPrompt } from "./_components/typing-prompt";
-import { advanceProgress, createEmptyProgress, type ProgressState } from "./_lib/typing-progress";
+import {
+  advanceProgress,
+  advanceProgressByText,
+  createEmptyProgress,
+  type ProgressState
+} from "./_lib/typing-progress";
 import {
   BOT_DIFFICULTY_LABELS,
   PROMPT_CATEGORY_LABELS,
@@ -68,7 +74,9 @@ const ROOM_CODE_KEY = "type-battle:room-code";
 export default function HomePage() {
   const socketRef = useRef<ClientSocket | null>(null);
   const settingsRef = useRef(DEFAULT_PLAYER_SETTINGS);
+  const nicknameRef = useRef(DEFAULT_PLAYER_SETTINGS.nickname);
   const countdownSecondRef = useRef<number | null>(null);
+  const typingInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [connected, setConnected] = useState(false);
   const [guestSession, setGuestSession] = useState<GuestSession | null>(null);
   const [playerId, setPlayerId] = useState("");
@@ -86,12 +94,17 @@ export default function HomePage() {
   const [resumeAttempted, setResumeAttempted] = useState(false);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
-  const realtimeConfigured = REALTIME_URL.length > 0;
+  const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
+  const realtimeUrl = REALTIME_URL || localRealtimeUrl;
+  const realtimeConfigured = realtimeUrl.length > 0;
   const guestId = guestSession?.guestId ?? "";
   const sessionId = guestSession?.sessionId ?? "";
 
   const nickname = settings.nickname;
-  const setNickname = (next: string) => setSettings((s) => ({ ...s, nickname: next }));
+  const setNickname = (next: string) => {
+    nicknameRef.current = next;
+    setSettings((s) => ({ ...s, nickname: next }));
+  };
 
   const currentPlayer = useMemo(
     () => room?.players.find((player) => player.id === playerId) ?? null,
@@ -120,6 +133,7 @@ export default function HomePage() {
     currentPlayer?.isHost &&
     room.players.length >= 1 &&
     room.players.every((player) => player.connected || player.isBot);
+  const acceptingTextInput = isRoomPlaying || isPracticePlaying;
 
   const setPromptCategory = useCallback(
     (category: "short" | "standard" | "long") => {
@@ -174,7 +188,8 @@ export default function HomePage() {
 
   const startPractice = useCallback(() => {
     const socket = socketRef.current;
-    const validationError = validateNickname(nickname);
+    const currentNickname = nicknameRef.current;
+    const validationError = validateNickname(currentNickname);
 
     if (!realtimeConfigured || !socket || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
@@ -184,7 +199,7 @@ export default function HomePage() {
     void primeSoundPlayback();
     socket.emit(
       "practice:start",
-      { nickname: normalizeNickname(nickname), category: practiceCategory },
+      { nickname: normalizeNickname(currentNickname), category: practiceCategory },
       (response) => {
         if (!response.ok) {
           setError(response.error);
@@ -201,7 +216,7 @@ export default function HomePage() {
         resetTyping();
       }
     );
-  }, [guestId, nickname, practiceCategory, realtimeConfigured, resetTyping]);
+  }, [guestId, practiceCategory, realtimeConfigured, resetTyping]);
 
   const finishPractice = useCallback(
     (finalProgress: ProgressState) => {
@@ -212,7 +227,7 @@ export default function HomePage() {
       const finishTimeMs = Date.now() - practiceSession.startedAt;
       const player: PlayerResult = {
         id: practiceSession.practiceId,
-        nickname: normalizeNickname(nickname),
+        nickname: normalizeNickname(nicknameRef.current),
         connected: true,
         ready: true,
         isHost: true,
@@ -237,13 +252,26 @@ export default function HomePage() {
         players: [player]
       });
     },
-    [nickname, practiceSession]
+    [practiceSession]
   );
+
+  useEffect(() => {
+    if (!REALTIME_URL && typeof window !== "undefined") {
+      const hostname = window.location.hostname;
+      const isVercelHost = hostname === "vercel.app" || hostname.endsWith(".vercel.app");
+
+      if (!isVercelHost && hostname) {
+        setLocalRealtimeUrl(`http://${hostname}:3001`);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const session = loadGuestSession(window.localStorage);
     setGuestSession(session);
-    setSettings(loadPlayerSettings(window.localStorage));
+    const loadedSettings = loadPlayerSettings(window.localStorage);
+    nicknameRef.current = loadedSettings.nickname;
+    setSettings(loadedSettings);
     setSettingsHydrated(true);
 
     if (!realtimeConfigured) {
@@ -251,7 +279,7 @@ export default function HomePage() {
       return;
     }
 
-    const socket: ClientSocket = io(REALTIME_URL, {
+    const socket: ClientSocket = io(realtimeUrl, {
       transports: ["websocket"]
     });
     socketRef.current = socket;
@@ -288,7 +316,7 @@ export default function HomePage() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [realtimeConfigured, resetTyping]);
+  }, [realtimeConfigured, realtimeUrl, resetTyping]);
 
   useEffect(() => {
     if (!settingsHydrated) {
@@ -323,7 +351,7 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (!connected || !guestId || !sessionId || resumeAttempted) {
+    if (!connected || !guestId || !sessionId || !settingsHydrated || resumeAttempted) {
       return;
     }
 
@@ -346,7 +374,7 @@ export default function HomePage() {
       "room:join",
       {
         roomCode: storedRoomCode,
-        nickname: normalizeNickname(nickname),
+        nickname: normalizeNickname(nicknameRef.current),
         guestId,
         sessionId
       },
@@ -364,7 +392,7 @@ export default function HomePage() {
         clearPracticeState();
       }
     );
-  }, [clearPracticeState, connected, guestId, nickname, resumeAttempted, room, sessionId, updateGuestSession]);
+  }, [clearPracticeState, connected, guestId, resumeAttempted, room, sessionId, settingsHydrated, updateGuestSession]);
 
   useEffect(() => {
     if (!currentPlayer) {
@@ -421,6 +449,14 @@ export default function HomePage() {
     }
   }, [countdownMs, room]);
 
+  useEffect(() => {
+    if (!acceptingTextInput) {
+      return;
+    }
+
+    typingInputRef.current?.focus();
+  }, [acceptingTextInput, activePromptText]);
+
   const emitProgress = useCallback(
     (nextProgress: TypingProgress, finish: boolean) => {
       const socket = socketRef.current;
@@ -439,11 +475,57 @@ export default function HomePage() {
     [room]
   );
 
+  const handleTypedText = useCallback(
+    (typedText: string) => {
+      if (!typedText) {
+        return;
+      }
+
+      if (room?.status === "playing" && room?.prompt) {
+        setLocalProgress((previous) => {
+          const next = advanceProgressByText(previous, activePromptText, typedText);
+          const correct = next.progressIndex > previous.progressIndex;
+          const payload: TypingProgress = {
+            roomCode: room.roomCode,
+            progressIndex: next.progressIndex,
+            correctCharacters: next.correctCharacters,
+            totalTypedCharacters: next.totalTypedCharacters,
+            mistakes: next.mistakes
+          };
+
+          void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
+          emitProgress(payload, next.progressIndex >= activePromptText.length);
+          return next;
+        });
+        return;
+      }
+
+      if (practiceSession && !practiceResult && !room) {
+        setPracticeProgress((previous) => {
+          const next = advanceProgressByText(previous, activePromptText, typedText);
+          const correct = next.progressIndex > previous.progressIndex;
+
+          if (next.progressIndex >= activePromptText.length) {
+            finishPractice(next);
+          }
+
+          void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
+          return next;
+        });
+      }
+    },
+    [activePromptText, emitProgress, finishPractice, practiceResult, practiceSession, room]
+  );
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const practiceActive = Boolean(practiceSession && !practiceResult && !room);
 
       if (room?.status !== "playing" && !practiceActive) {
+        return;
+      }
+
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
         return;
       }
 
@@ -496,7 +578,8 @@ export default function HomePage() {
 
   const createRoom = () => {
     const socket = socketRef.current;
-    const validationError = validateNickname(nickname);
+    const currentNickname = nicknameRef.current;
+    const validationError = validateNickname(currentNickname);
 
     if (!realtimeConfigured || !socket || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
@@ -506,7 +589,7 @@ export default function HomePage() {
     void primeSoundPlayback();
     socket.emit(
       "room:create",
-      { nickname: normalizeNickname(nickname), guestId, sessionId },
+      { nickname: normalizeNickname(currentNickname), guestId, sessionId },
       (response) => {
         if (!response.ok) {
           setError(response.error);
@@ -526,7 +609,8 @@ export default function HomePage() {
 
   const joinRoom = () => {
     const socket = socketRef.current;
-    const validationError = validateNickname(nickname);
+    const currentNickname = nicknameRef.current;
+    const validationError = validateNickname(currentNickname);
 
     if (!realtimeConfigured || !socket || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
@@ -538,7 +622,7 @@ export default function HomePage() {
       "room:join",
       {
         roomCode: joinCode.trim().toUpperCase(),
-        nickname: normalizeNickname(nickname),
+        nickname: normalizeNickname(currentNickname),
         guestId,
         sessionId
       },
@@ -645,7 +729,7 @@ export default function HomePage() {
               value={nickname}
               maxLength={18}
               onChange={(event) => setNickname(event.target.value)}
-              disabled={Boolean(room)}
+              disabled={!settingsHydrated || Boolean(room)}
             />
           </div>
 
@@ -850,6 +934,8 @@ export default function HomePage() {
                   <p>{room ? (room.players.length < room.maxPlayers ? "対戦相手を待っています" : "開始できます") : "練習を開始してください"}</p>
                 </div>
               )}
+
+              <TypingInput inputRef={typingInputRef} disabled={!acceptingTextInput} onTextInput={handleTypedText} />
 
               <ProgressBlock progressPercent={activeProgressPercent} />
 

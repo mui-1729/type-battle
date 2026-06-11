@@ -103,7 +103,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -223,6 +224,22 @@ input:focus {
 }
 
 input::placeholder {
+  color: var(--muted);
+}
+
+textarea {
+  background: var(--input-bg);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  outline: none;
+}
+
+textarea:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+textarea::placeholder {
   color: var(--muted);
 }
 
@@ -445,6 +462,21 @@ input::placeholder {
   line-height: 1.65;
   min-height: 190px;
   padding: 26px;
+}
+
+.typingInput {
+  border-radius: 8px;
+  display: block;
+  line-height: 1.5;
+  margin-top: 12px;
+  min-height: 44px;
+  padding: 10px 12px;
+  resize: none;
+  width: 100%;
+}
+
+.typingInput:disabled {
+  opacity: 0.55;
 }
 
 .char {

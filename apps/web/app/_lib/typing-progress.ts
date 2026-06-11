@@ -35,3 +35,14 @@ export function advanceProgress(
     maxStreak: correct ? Math.max(previous.maxStreak, previous.currentStreak + 1) : previous.maxStreak
   };
 }
+
+export function advanceProgressByText(
+  previous: ProgressState,
+  promptText: string,
+  typedText: string
+): ProgressState {
+  return Array.from(typedText).reduce(
+    (progress, typedChar) => advanceProgress(progress, promptText[progress.progressIndex], typedChar),
+    previous
+  );
+}

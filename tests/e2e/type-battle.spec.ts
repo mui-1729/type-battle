@@ -105,6 +105,8 @@ test("starts a match against COM when alone", async ({ browser }) => {
 });
 
 test("forfeits the match after long disconnect", async ({ browser }) => {
+  test.setTimeout(60_000);
+
   const hostContext = await browser.newContext();
   const guestContext = await browser.newContext();
   const host = await hostContext.newPage();
@@ -132,9 +134,8 @@ test("forfeits the match after long disconnect", async ({ browser }) => {
   await expect(host.locator(".statusTag.isDisconnected")).toBeVisible();
   await expect(host.locator(".rivalBar").getByText("再接続中...")).toBeVisible();
 
-  // Wait for forfeit (grace period + some margin)
-  // We've updated playwright.config.ts to set grace period to 5s
-  await expect(host.locator(".statusTag.isForfeited")).toBeVisible({ timeout: 25_000 });
+  // Wait for forfeit. Local runs can reuse an existing realtime server with the default 30s grace period.
+  await expect(host.locator(".statusTag.isForfeited")).toBeVisible({ timeout: 40_000 });
   await expect(host.locator(".rivalBar").getByText("棄権")).toBeVisible();
 
   await hostContext.close();
