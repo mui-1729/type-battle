@@ -14,6 +14,7 @@ import {
 } from "@type-battle/shared";
 import type {
   ClientToServerEvents,
+  MatchRule,
   MatchResult,
   PlayerResult,
   Prompt,
@@ -39,6 +40,7 @@ import {
 } from "./_lib/typing-progress";
 import {
   BOT_DIFFICULTY_LABELS,
+  MATCH_RULE_LABELS,
   PROMPT_CATEGORY_LABELS,
   getPlayerConnectionLabel,
   getPlayerRoleLabel
@@ -157,6 +159,21 @@ export default function HomePage() {
       }
 
       socketRef.current.emit("room:setBotDifficulty", { roomCode: room.roomCode, difficulty }, (response) => {
+        if (!response.ok) {
+          setError(response.error);
+        }
+      });
+    },
+    [room, currentPlayer]
+  );
+
+  const setMatchRule = useCallback(
+    (rule: MatchRule) => {
+      if (!room || !socketRef.current || !currentPlayer?.isHost) {
+        return;
+      }
+
+      socketRef.current.emit("room:setMatchRule", { roomCode: room.roomCode, rule }, (response) => {
         if (!response.ok) {
           setError(response.error);
         }
@@ -824,6 +841,25 @@ export default function HomePage() {
                   <small>{getPlayerConnectionLabel(player)}</small>
                 </div>
               ))}
+            </div>
+          ) : null}
+
+          {room?.status === "waiting" && room.players.length < room.maxPlayers ? (
+            <div className="difficultySelector">
+              <span>対戦ルール</span>
+              <div className="difficultyButtons twoColumns">
+                {(["race", "timeAttack"] as const).map((rule) => (
+                  <button
+                    key={rule}
+                    className={room.matchRule === rule ? "active" : ""}
+                    type="button"
+                    onClick={() => setMatchRule(rule)}
+                    disabled={!currentPlayer?.isHost}
+                  >
+                    {MATCH_RULE_LABELS[rule]}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : null}
 

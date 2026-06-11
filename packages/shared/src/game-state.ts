@@ -2,6 +2,8 @@ export type MatchStatus = "waiting" | "countdown" | "playing" | "finished";
 
 export type BotDifficulty = "easy" | "normal" | "hard";
 
+export type MatchRule = "race" | "timeAttack";
+
 export type PlayerState = {
   id: string;
   nickname: string;
@@ -34,10 +36,12 @@ export type RoomState = {
   roomCode: string;
   hostPlayerId: string;
   status: MatchStatus;
+  matchRule: MatchRule;
   botDifficulty: BotDifficulty;
   promptCategory: PromptCategory;
   prompt?: Prompt;
   serverStartAt?: number;
+  matchEndsAt?: number;
   players: PlayerState[];
   maxPlayers: number;
   result?: MatchResult;

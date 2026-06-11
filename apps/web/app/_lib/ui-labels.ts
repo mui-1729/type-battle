@@ -1,4 +1,4 @@
-import type { BotDifficulty, PromptCategory, RoomState } from "@type-battle/shared";
+import type { BotDifficulty, MatchRule, PromptCategory, RoomState } from "@type-battle/shared";
 import type { PlayerSettings } from "../../lib/player-settings";
 
 export const PROMPT_CATEGORY_LABELS: Record<PromptCategory, string> = {
@@ -11,6 +11,11 @@ export const BOT_DIFFICULTY_LABELS: Record<BotDifficulty, string> = {
   easy: "かんたん",
   normal: "ふつう",
   hard: "むずかしい"
+};
+
+export const MATCH_RULE_LABELS: Record<MatchRule, string> = {
+  race: "レース",
+  timeAttack: "タイム"
 };
 
 export const THEME_LABELS: Record<PlayerSettings["theme"], string> = {

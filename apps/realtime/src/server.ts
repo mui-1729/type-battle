@@ -14,6 +14,7 @@ import type {
 import {
   BOT_TICK_MS,
   advanceBot,
+  checkExpiredTimeAttackMatches,
   checkForForfeits,
   cleanupExpiredRooms,
   createRoom,
@@ -24,6 +25,7 @@ import {
   markPlaying,
   rematch,
   setBotDifficulty,
+  setMatchRule,
   setPromptCategory,
   setReady,
   startMatch,
@@ -182,6 +184,18 @@ io.on("connection", (socket) => {
     ack({ ok: true, data: result.room });
   });
 
+  socket.on("room:setMatchRule", (payload, ack) => {
+    const result = setMatchRule(socket.id, payload.roomCode, payload.rule);
+
+    if ("error" in result) {
+      ack({ ok: false, error: result.error });
+      return;
+    }
+
+    emitRoomState(result.room);
+    ack({ ok: true, data: result.room });
+  });
+
   socket.on("match:start", (payload, ack) => {
     const result = startMatch(socket.id, payload.roomCode);
 
@@ -283,6 +297,13 @@ setInterval(() => {
     emitRoomState(room);
   }
 }, process.env.NODE_ENV === "test" ? 1000 : 5000);
+
+setInterval(() => {
+  for (const result of checkExpiredTimeAttackMatches()) {
+    logger.info({ event: "match_time_attack_finish", roomCode: result.roomCode });
+    io.to(result.roomCode).emit("match:result", result);
+  }
+}, process.env.NODE_ENV === "test" ? 500 : 1000);
 
 function emitRoomState(room: RoomState): void {
   io.to(room.roomCode).emit("room:state", room);

@@ -354,6 +354,10 @@ textarea::placeholder {
   grid-template-columns: repeat(3, 1fr);
 }
 
+.difficultyButtons.twoColumns {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 .difficultyButtons button {
   background: var(--control);
   border: 1px solid var(--line);

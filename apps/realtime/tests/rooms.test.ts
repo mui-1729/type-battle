@@ -8,8 +8,10 @@ import {
   leaveBySocket,
   markPlaying,
   checkForForfeits,
+  checkExpiredTimeAttackMatches,
   rematch,
   startMatch,
+  setMatchRule,
   updateProgress,
   rooms
 } from "../src/rooms";
@@ -303,5 +305,47 @@ describe("rooms", () => {
     const updatedRoom = getRoom(created.room.roomCode);
     expect(updatedRoom?.status).toBe("finished");
     expect(updatedRoom?.players[0]?.finishTimeMs).toBe(Infinity);
+  });
+
+  it("finishes a time attack match when the timer expires", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_time_attack",
+      socketId: "socket_alice_time_attack"
+    });
+
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_time_attack",
+      socketId: "socket_bob_time_attack"
+    });
+
+    expect("error" in joined).toBe(false);
+
+    const rule = setMatchRule("socket_alice_time_attack", created.room.roomCode, "timeAttack");
+    expect("error" in rule).toBe(false);
+
+    const started = startMatch("socket_alice_time_attack", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    expect(markPlaying(created.room.roomCode)?.status).toBe("playing");
+
+    updateProgress("socket_alice_time_attack", {
+      roomCode: created.room.roomCode,
+      progressIndex: 2,
+      correctCharacters: 2,
+      totalTypedCharacters: 2,
+      mistakes: 0
+    });
+
+    const room = rooms.get(created.room.roomCode.toUpperCase());
+    if (room) {
+      room.matchEndsAt = Date.now() - 1;
+    }
+
+    const results = checkExpiredTimeAttackMatches();
+    expect(results).toHaveLength(1);
+    expect(results[0]?.players[0]?.id).toBe("guest_alice_time_attack");
+    expect(getRoom(created.room.roomCode)?.status).toBe("finished");
   });
 });

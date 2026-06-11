@@ -1,6 +1,7 @@
 import type {
   AckResponse,
   BotDifficulty,
+  MatchRule,
   MatchResult,
   Prompt,
   PromptCategory,
@@ -58,6 +59,10 @@ export type ClientToServerEvents = {
   ) => void;
   "room:setBotDifficulty": (
     payload: RoomCodePayload & { difficulty: BotDifficulty },
+    ack: (response: AckResponse<RoomState>) => void
+  ) => void;
+  "room:setMatchRule": (
+    payload: RoomCodePayload & { rule: MatchRule },
     ack: (response: AckResponse<RoomState>) => void
   ) => void;
   "match:start": (

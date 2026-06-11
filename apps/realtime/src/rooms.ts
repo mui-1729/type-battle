@@ -8,6 +8,7 @@ import {
 } from "@type-battle/shared";
 import type {
   BotDifficulty,
+  MatchRule,
   MatchResult,
   MatchStatus,
   PlayerState,
@@ -22,6 +23,7 @@ import { recordGuestSession, recordMatchResult } from "./persistence.js";
 
 const MAX_PLAYERS = 2;
 const COUNTDOWN_MS = 3_000;
+const TIME_ATTACK_MS = Number(process.env.TIME_ATTACK_MS ?? (process.env.NODE_ENV === "test" ? 5_000 : 30_000));
 const BOT_PLAYER_ID = "bot_com_1";
 const BOT_NICKNAME = "COM";
 export const BOT_TICK_MS = 500;
@@ -53,10 +55,12 @@ type InternalRoom = {
   roomCode: string;
   hostPlayerId: string;
   status: MatchStatus;
+  matchRule: MatchRule;
   botDifficulty: BotDifficulty;
   promptCategory: PromptCategory;
   prompt?: Prompt;
   serverStartAt?: number;
+  matchEndsAt?: number;
   result?: MatchResult;
   players: Map<string, InternalPlayer>;
   createdAt: number;
@@ -97,6 +101,7 @@ export function createRoom(input: {
     roomCode,
     hostPlayerId: player.id,
     status: "waiting",
+    matchRule: "race",
     botDifficulty: "normal",
     promptCategory: "standard",
     players: new Map([[player.id, player]]),
@@ -215,6 +220,29 @@ export function setBotDifficulty(
   return { room: toPublicRoom(context.room) };
 }
 
+export function setMatchRule(
+  socketId: string,
+  roomCode: string,
+  rule: MatchRule
+): { room: RoomState } | { error: string } {
+  const context = getContext(socketId, roomCode);
+
+  if (!context) {
+    return { error: "ルームに参加していません。" };
+  }
+
+  if (context.player.id !== context.room.hostPlayerId) {
+    return { error: "ホストだけがルールを変更できます。" };
+  }
+
+  if (context.room.status !== "waiting") {
+    return { error: "試合中はルールを変更できません。" };
+  }
+
+  context.room.matchRule = rule;
+  return { room: toPublicRoom(context.room) };
+}
+
 export function leaveBySocket(socketId: string): RoomState | null {
   const record = socketIndex.get(socketId);
 
@@ -304,6 +332,11 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
   room.status = "countdown";
   room.prompt = pickPrompt(room.promptCategory, Date.now());
   room.serverStartAt = Date.now() + COUNTDOWN_MS;
+  if (room.matchRule === "timeAttack") {
+    room.matchEndsAt = room.serverStartAt + TIME_ATTACK_MS;
+  } else {
+    delete room.matchEndsAt;
+  }
   delete room.result;
   resetPlayers(room);
   metrics.matchesStarted += 1;
@@ -375,7 +408,7 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
     bot.finishTimeMs = bot.finishedAt - (room.serverStartAt ?? bot.finishedAt);
   }
 
-  if (bot.progressIndex >= promptLength || areHumansFinished(room)) {
+  if ((room.matchRule === "race" && bot.progressIndex >= promptLength) || areHumansFinished(room)) {
     if (bot.progressIndex < promptLength) {
       finalizeUnfinishedBots(room);
     }
@@ -434,6 +467,7 @@ export function rematch(socketId: string, roomCode: string): { room: RoomState }
   room.round += 1;
   room.prompt = pickPrompt(room.promptCategory, Date.now() + room.round);
   delete room.serverStartAt;
+  delete room.matchEndsAt;
   delete room.result;
   resetPlayers(room);
 
@@ -554,6 +588,7 @@ function toPublicRoom(room: InternalRoom): RoomState {
     roomCode: room.roomCode,
     hostPlayerId: room.hostPlayerId,
     status: room.status,
+    matchRule: room.matchRule,
     botDifficulty: room.botDifficulty,
     promptCategory: room.promptCategory,
     players: toPublicPlayers(room),
@@ -566,6 +601,10 @@ function toPublicRoom(room: InternalRoom): RoomState {
 
   if (room.serverStartAt) {
     publicRoom.serverStartAt = room.serverStartAt;
+  }
+
+  if (room.matchEndsAt) {
+    publicRoom.matchEndsAt = room.matchEndsAt;
   }
 
   if (room.result) {
@@ -730,6 +769,26 @@ export function checkForForfeits(): RoomState[] {
   }
 
   return updatedRooms;
+}
+
+export function checkExpiredTimeAttackMatches(): MatchResult[] {
+  const now = Date.now();
+  const results: MatchResult[] = [];
+
+  for (const room of rooms.values()) {
+    if (room.status !== "playing" || room.matchRule !== "timeAttack" || !room.matchEndsAt) {
+      continue;
+    }
+
+    if (now < room.matchEndsAt) {
+      continue;
+    }
+
+    finalizeUnfinishedBots(room);
+    results.push(finalizeRoom(room));
+  }
+
+  return results;
 }
 
 export function startPractice(nickname: string, category: PromptCategory): { practiceId: string; prompt: Prompt; startedAt: number } {
