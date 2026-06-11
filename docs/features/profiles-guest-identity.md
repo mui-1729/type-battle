@@ -11,7 +11,7 @@
 ## 対象ステージ
 
 - MVP: guest id。
-- Private beta: guest id の安定保存。
+- Private beta: guest id / session id の安定保存。
 - Public beta: optional login。
 - Public service: account / profile。
 
@@ -37,6 +37,7 @@ type PlayerProfile = {
 ## 保存
 
 - guest id は localStorage または cookie に保存する。
+- session id を localStorage に保存して reload / reconnect を支える。
 - server には hashed guest id を保存する案も検討する。
 - login 後に guest history を account に merge できるようにする。
 
@@ -52,6 +53,7 @@ type PlayerProfile = {
 - reload 後も同じ guest id で reconnect できる。
 - nickname validation が server 側でも行われる。
 - login なしでも room 参加できる。
+- guest session と match result を server 側に保存できる。
 
 ## テスト観点
 

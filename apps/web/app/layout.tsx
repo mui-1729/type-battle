@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Type Battle",
-  description: "Online typing battle game"
+  description: "オンラインタイピング対戦ゲーム"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

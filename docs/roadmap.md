@@ -41,7 +41,7 @@
 - [x] COM match Playwright E2E
 - [x] reload rejoin tests
 - [x] long disconnect handling unit tests
-- [ ] long disconnect handling E2E
+- [x] long disconnect handling E2E
 - [x] room join Playwright smoke E2E
 - [x] GitHub Actions CI
 - [x] local build check
@@ -60,16 +60,19 @@
 - [x] COM difficulty selector
 - [x] result analytics UI
 - [x] practice mode Web UI
-- [ ] player settings
-- [ ] lightweight rate limit
-- [ ] structured logging
-- [ ] basic monitoring
-- [ ] deployment
-- [ ] CD smoke test
-- [ ] private beta feedback issue flow
+- [x] player settings
+- [x] lightweight rate limit
+- [x] structured logging
+- [x] basic monitoring
+- [x] deployment scaffolding
+- [x] CD smoke test
+- [x] player settings sound wiring
+- [x] private beta feedback issue flow
+- [x] web hosting provider wiring
+- [ ] realtime external deploy
 - [ ] branch protection
-- [ ] PostgreSQL 保存
-- [ ] guest session
+- [x] PostgreSQL 保存
+- [x] guest session
 
 ## Phase 5: Public Beta
 

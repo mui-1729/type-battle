@@ -30,9 +30,16 @@
 - result stats の `finishGap` と `maxStreak` field
 - result analytics UI
 - practice mode
+- player settings modal / localStorage / theme / input guide / font size / reduced motion / sound wiring
+- private beta feedback issue flow
+- guest session
+- PostgreSQL persistence
+- structured logging
+- room create / join / typing progress の軽い rate limit
+- smoke test script と realtime Dockerfile
 - shared event types / game state / scoring
 - Vitest unit / room flow tests
-- Playwright room join / complete match / COM match / reload rejoin E2E
+- Playwright room join / complete match / COM match / reload rejoin / long disconnect forfeit / player settings E2E
 - GitHub Actions CI
 
 実装済み・部分実装・未実装の詳しい状態は [docs/current-implementation.md](docs/current-implementation.md) にまとめています。
@@ -60,7 +67,7 @@
 - Database: PostgreSQL
 - Cache / scaling: Redis
 - Testing: Vitest + Playwright
-- Hosting: Vercel for web frontend, Fly.io / Render / Railway / VPS for realtime server
+- Hosting: Vercel for web frontend, realtime server is deferred / self-hosted later
 
 Next.js 単体で WebSocket 常時接続を完結させるより、Web UI とリアルタイムサーバーを分ける構成を基本方針にします。理由は、対戦ルーム、切断復帰、スケールアウト、低遅延イベント処理をサーバー側で明確に管理できるためです。
 
@@ -71,10 +78,16 @@ npm install
 npm run dev
 ```
 
+環境変数の雛形は [.env.example](.env.example) を参照してください。
+
 ローカルでは次の URL を使います。
 
 - Web: http://127.0.0.1:3000
 - Realtime health: http://127.0.0.1:3001/health
+
+同じ Wi-Fi の端末から試すときは、Web を開いた PC の LAN IP で `http://<PC の IP>:3000` にアクセスします。
+realtime は同じ PC 上の `:3001` を使うので、PC 側のファイアウォールで 3000 / 3001 番ポートを許可する必要があります。
+開発時は `CLIENT_ORIGIN` を手で合わせなくても、LAN からの接続を受けられます。
 
 品質チェック:
 
@@ -94,8 +107,8 @@ npm run test:e2e
 
 ## 次の作業
 
-1. long disconnect forfeit の専用 E2E と明示 UI を固める。
-2. player settings を追加する。
-3. Private beta 用のログ、rate limit、monitoring、デプロイを追加する。
+1. web deployment / Vercel wiring を詰める。
+2. branch protection を有効化する。
+3. public beta 向け機能の優先順位を決める。
 
 機能実装前の詳細仕様は [docs/features/README.md](docs/features/README.md) にまとめています。

@@ -62,4 +62,30 @@ describe("scoring", () => {
     expect(players[1]?.id).toBe("loser");
     expect(players[1]?.finishGap).toBe(500);
   });
+
+  it("ranks hp battle players by completion and remaining hp", () => {
+    const mixedPlayers = rankPlayers(
+      [
+        { ...basePlayer, id: "finished", progressIndex: 10, hp: 20, maxHp: 100 },
+        { ...basePlayer, id: "stillPlaying", progressIndex: 4, hp: 100, maxHp: 100 }
+      ],
+      10,
+      "hpBattle"
+    );
+
+    expect(mixedPlayers[0]?.id).toBe("finished");
+    expect(mixedPlayers[1]?.id).toBe("stillPlaying");
+
+    const finishedPlayers = rankPlayers(
+      [
+        { ...basePlayer, id: "lowHp", progressIndex: 10, hp: 20, maxHp: 100, finishTimeMs: 1000 },
+        { ...basePlayer, id: "highHp", progressIndex: 10, hp: 80, maxHp: 100, finishTimeMs: 1200 }
+      ],
+      10,
+      "hpBattle"
+    );
+
+    expect(finishedPlayers[0]?.id).toBe("highHp");
+    expect(finishedPlayers[1]?.id).toBe("lowHp");
+  });
 });

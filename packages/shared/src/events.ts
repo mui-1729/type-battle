@@ -1,6 +1,8 @@
 import type {
   AckResponse,
   BotDifficulty,
+  DeviceKind,
+  MatchRule,
   MatchResult,
   Prompt,
   PromptCategory,
@@ -13,11 +15,15 @@ export type JoinRoomPayload = {
   roomCode: string;
   nickname: string;
   guestId: string;
+  sessionId: string;
+  deviceKind?: DeviceKind;
 };
 
 export type CreateRoomPayload = {
   nickname: string;
   guestId: string;
+  sessionId: string;
+  deviceKind?: DeviceKind;
 };
 
 export type RoomCodePayload = {
@@ -56,6 +62,10 @@ export type ClientToServerEvents = {
   ) => void;
   "room:setBotDifficulty": (
     payload: RoomCodePayload & { difficulty: BotDifficulty },
+    ack: (response: AckResponse<RoomState>) => void
+  ) => void;
+  "room:setMatchRule": (
+    payload: RoomCodePayload & { rule: MatchRule },
     ack: (response: AckResponse<RoomState>) => void
   ) => void;
   "match:start": (

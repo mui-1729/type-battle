@@ -68,27 +68,51 @@
 
 - GitHub Actions CI がある。
 - lint / typecheck / unit test / build / Playwright E2E を実行する。
-- E2E は room join、2 player completion、reload rejoin、COM match、practice mode を確認する。
+- E2E は room join、2 player completion、reload rejoin、COM match、practice mode、long disconnect forfeit、player settings を確認する。
+- smoke test スクリプトで health endpoint と socket 接続を確認できる。
 - realtime unit test は room creation、join、finish、rejoin、COM、forfeit を確認する。
+
+### Player settings
+
+- nickname、theme、input guide、reduced motion、font size の設定ができる。
+- modal UI による設定変更。
+- localStorage への設定保存と復元。
+- theme (system/light/dark) の CSS 変数による動的切り替え。
+- reduced motion によるアニメーション停止の制御。
+- font size による課題文テキストのサイズ調整。
+- sound / countdown sound を typing / countdown の再生に wiring している。
+
+### Feedback / Session / Persistence
+
+- private beta feedback issue flow がある。
+- Home と result 画面から feedback page に遷移できる。
+- GitHub issue template で room code / steps / expected / actual を収集できる。
+- guest session を localStorage で保存し、reload / reconnect に使っている。
+- server 側で guest session と match result を PostgreSQL に記録できる。
+
+### Observability / Rate limit
+
+- `pino` による構造化ログ。
+- IP、guest id、socket ごとの軽量な rate limit。
+- 試合開始、終了、接続数などの基本メトリクス。
+- health endpoint (`/health`) によるメトリクス露出。
+- 進行度の急激な変化を検知する suspicious detection ログ。
+
+### Deployment
+
+- realtime サーバーの `Dockerfile`。
+- `tests/smoke-test.ts` による health / socket / room create の確認。
 
 ## 部分実装
 
-### Long disconnect forfeit
+### Deployment automation
 
-- server state で forfeit 判定できる。
-- room state の broadcast で disconnect / forfeit の状態が反映される。
-- dedicated E2E はまだ long disconnect forfeit を確認していない。
+- web は Vercel 前提で進める。
+- realtime の外部デプロイは当面行わない。
 
 ## 未実装
 
-- quick match / random matchmaking
-- public lobby
-- rate limit
-- structured logging
-- basic monitoring
-- deployment / CD smoke
-- player settings
-- persistent database
+- branch protection
 - Redis scaling
 - profile / ranking / rating
 - moderation / report / block

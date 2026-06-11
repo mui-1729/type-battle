@@ -6,7 +6,7 @@ export default defineConfig({
   reporter: "list",
   webServer: [
     {
-      command: "npm run start -w @type-battle/realtime",
+      command: "NODE_ENV=test npm run start -w @type-battle/realtime",
       url: "http://127.0.0.1:3001/health",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000

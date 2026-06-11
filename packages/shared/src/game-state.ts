@@ -2,6 +2,10 @@ export type MatchStatus = "waiting" | "countdown" | "playing" | "finished";
 
 export type BotDifficulty = "easy" | "normal" | "hard";
 
+export type MatchRule = "race" | "timeAttack" | "hpBattle";
+
+export type DeviceKind = "mobile" | "desktop";
+
 export type PlayerState = {
   id: string;
   nickname: string;
@@ -13,12 +17,16 @@ export type PlayerState = {
   correctCharacters: number;
   totalTypedCharacters: number;
   mistakes: number;
+  deviceKind?: DeviceKind;
+  hp?: number;
+  maxHp?: number;
   maxStreak: number;
   currentStreak: number;
   wpm: number;
   accuracy: number;
   finishedAt?: number;
   finishTimeMs?: number;
+  forfeited?: boolean | undefined;
 };
 
 export type PromptCategory = "short" | "standard" | "long";
@@ -33,10 +41,12 @@ export type RoomState = {
   roomCode: string;
   hostPlayerId: string;
   status: MatchStatus;
+  matchRule: MatchRule;
   botDifficulty: BotDifficulty;
   promptCategory: PromptCategory;
   prompt?: Prompt;
   serverStartAt?: number;
+  matchEndsAt?: number;
   players: PlayerState[];
   maxPlayers: number;
   result?: MatchResult;

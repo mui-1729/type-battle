@@ -8,6 +8,8 @@ import {
 } from "@type-battle/shared";
 import type {
   BotDifficulty,
+  DeviceKind,
+  MatchRule,
   MatchResult,
   MatchStatus,
   PlayerState,
@@ -17,9 +19,16 @@ import type {
   TypingFinish,
   TypingProgress
 } from "@type-battle/shared";
+import { logger } from "./logger.js";
+import { recordGuestSession, recordMatchResult } from "./persistence.js";
 
 const MAX_PLAYERS = 2;
 const COUNTDOWN_MS = 3_000;
+const TIME_ATTACK_MS = Number(process.env.TIME_ATTACK_MS ?? (process.env.NODE_ENV === "test" ? 5_000 : 30_000));
+const HP_BATTLE_HP_PER_PROMPT_CHAR = 5;
+const HP_BATTLE_MIN_HP = 50;
+const HP_BATTLE_ATTACK_DAMAGE = 5;
+const HP_BATTLE_MISTAKE_DAMAGE = 2;
 const BOT_PLAYER_ID = "bot_com_1";
 const BOT_NICKNAME = "COM";
 export const BOT_TICK_MS = 500;
@@ -51,10 +60,12 @@ type InternalRoom = {
   roomCode: string;
   hostPlayerId: string;
   status: MatchStatus;
+  matchRule: MatchRule;
   botDifficulty: BotDifficulty;
   promptCategory: PromptCategory;
   prompt?: Prompt;
   serverStartAt?: number;
+  matchEndsAt?: number;
   result?: MatchResult;
   players: Map<string, InternalPlayer>;
   createdAt: number;
@@ -65,16 +76,38 @@ type InternalRoom = {
 export const rooms = new Map<string, InternalRoom>();
 const socketIndex = new Map<string, { roomCode: string; playerId: string }>();
 
-export function createRoom(input: { nickname: string; guestId: string; socketId: string }): {
+export const metrics = {
+  matchesStarted: 0,
+  matchesFinished: 0,
+  disconnectCount: 0,
+  serverErrors: 0
+};
+
+export function getMetrics() {
+  return {
+    ...metrics,
+    activeRooms: rooms.size,
+    activePlayers: socketIndex.size
+  };
+}
+
+export function createRoom(input: {
+  nickname: string;
+  guestId: string;
+  socketId: string;
+  sessionId?: string;
+  deviceKind?: DeviceKind;
+}): {
   room: RoomState;
   playerId: string;
 } {
   const roomCode = createUniqueRoomCode();
-  const player = createPlayer(input.guestId, input.nickname, input.socketId, true);
+  const player = createPlayer(input.guestId, input.nickname, input.socketId, true, input.deviceKind);
   const room: InternalRoom = {
     roomCode,
     hostPlayerId: player.id,
     status: "waiting",
+    matchRule: "race",
     botDifficulty: "normal",
     promptCategory: "standard",
     players: new Map([[player.id, player]]),
@@ -85,6 +118,12 @@ export function createRoom(input: { nickname: string; guestId: string; socketId:
 
   rooms.set(roomCode, room);
   socketIndex.set(input.socketId, { roomCode, playerId: player.id });
+  void recordGuestSession({
+    sessionId: input.sessionId ?? input.guestId,
+    guestId: input.guestId,
+    nickname: player.nickname,
+    roomCode
+  });
 
   return { room: toPublicRoom(room), playerId: player.id };
 }
@@ -94,6 +133,8 @@ export function joinRoom(input: {
   nickname: string;
   guestId: string;
   socketId: string;
+  sessionId?: string;
+  deviceKind?: DeviceKind;
 }): { room: RoomState; playerId: string } | { error: string } {
   const room = rooms.get(input.roomCode.toUpperCase());
 
@@ -109,7 +150,14 @@ export function joinRoom(input: {
     existing.connected = true;
     delete existing.disconnectedAt;
     existing.nickname = normalizeNickname(input.nickname);
+    existing.deviceKind = input.deviceKind ?? existing.deviceKind ?? "desktop";
     socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: existing.id });
+    void recordGuestSession({
+      sessionId: input.sessionId ?? input.guestId,
+      guestId: input.guestId,
+      nickname: existing.nickname,
+      roomCode: room.roomCode
+    });
     return { room: toPublicRoom(room), playerId: existing.id };
   }
 
@@ -121,9 +169,15 @@ export function joinRoom(input: {
     return { error: "このルームは満員です。" };
   }
 
-  const player = createPlayer(input.guestId, input.nickname, input.socketId, false);
+  const player = createPlayer(input.guestId, input.nickname, input.socketId, false, input.deviceKind);
   room.players.set(player.id, player);
   socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: player.id });
+  void recordGuestSession({
+    sessionId: input.sessionId ?? input.guestId,
+    guestId: input.guestId,
+    nickname: player.nickname,
+    roomCode: room.roomCode
+  });
 
   return { room: toPublicRoom(room), playerId: player.id };
 }
@@ -174,6 +228,29 @@ export function setBotDifficulty(
   return { room: toPublicRoom(context.room) };
 }
 
+export function setMatchRule(
+  socketId: string,
+  roomCode: string,
+  rule: MatchRule
+): { room: RoomState } | { error: string } {
+  const context = getContext(socketId, roomCode);
+
+  if (!context) {
+    return { error: "ルームに参加していません。" };
+  }
+
+  if (context.player.id !== context.room.hostPlayerId) {
+    return { error: "ホストだけがルールを変更できます。" };
+  }
+
+  if (context.room.status !== "waiting") {
+    return { error: "試合中はルールを変更できません。" };
+  }
+
+  context.room.matchRule = rule;
+  return { room: toPublicRoom(context.room) };
+}
+
 export function leaveBySocket(socketId: string): RoomState | null {
   const record = socketIndex.get(socketId);
 
@@ -194,6 +271,7 @@ export function leaveBySocket(socketId: string): RoomState | null {
     player.connected = false;
     player.ready = false;
     player.disconnectedAt = Date.now();
+    metrics.disconnectCount += 1;
   }
 
   room.lastActivityAt = Date.now();
@@ -207,6 +285,43 @@ export function leaveBySocket(socketId: string): RoomState | null {
     
     // Transfer host to the first active human player, or remain if no humans
     const nextHost = activePlayers.find(p => !p.isBot) || activePlayers[0];
+    if (nextHost) {
+      room.hostPlayerId = nextHost.id;
+    }
+  }
+
+  return toPublicRoom(room);
+}
+
+export function explicitLeaveBySocket(socketId: string): RoomState | null {
+  const record = socketIndex.get(socketId);
+
+  if (!record) {
+    return null;
+  }
+
+  const room = rooms.get(record.roomCode);
+
+  if (!room) {
+    socketIndex.delete(socketId);
+    return null;
+  }
+
+  if (room.status === "playing" || room.status === "countdown") {
+    return leaveBySocket(socketId);
+  }
+
+  socketIndex.delete(socketId);
+  room.players.delete(record.playerId);
+  room.lastActivityAt = Date.now();
+
+  if (room.players.size === 0) {
+    rooms.delete(room.roomCode);
+    return null;
+  }
+
+  if (record.playerId === room.hostPlayerId) {
+    const nextHost = [...room.players.values()].find((player) => !player.isBot) ?? [...room.players.values()][0];
     if (nextHost) {
       room.hostPlayerId = nextHost.id;
     }
@@ -262,8 +377,14 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
   room.status = "countdown";
   room.prompt = pickPrompt(room.promptCategory, Date.now());
   room.serverStartAt = Date.now() + COUNTDOWN_MS;
+  if (room.matchRule === "timeAttack") {
+    room.matchEndsAt = room.serverStartAt + TIME_ATTACK_MS;
+  } else {
+    delete room.matchEndsAt;
+  }
   delete room.result;
   resetPlayers(room);
+  metrics.matchesStarted += 1;
 
   return { room: toPublicRoom(room) };
 }
@@ -283,7 +404,17 @@ function areHumansFinished(room: InternalRoom): boolean {
   const promptLength = room.prompt?.text.length ?? 0;
   return [...room.players.values()]
     .filter((p) => !p.isBot)
-    .every((p) => p.progressIndex >= promptLength || !p.connected);
+    .every((p) => {
+      if (!p.connected) {
+        return true;
+      }
+
+      if (room.matchRule === "hpBattle" && (p.hp ?? 0) <= 0) {
+        return true;
+      }
+
+      return p.progressIndex >= promptLength;
+    });
 }
 
 function finalizeUnfinishedBots(room: InternalRoom): void {
@@ -332,19 +463,23 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
     bot.finishTimeMs = bot.finishedAt - (room.serverStartAt ?? bot.finishedAt);
   }
 
-  if (bot.progressIndex >= promptLength || areHumansFinished(room)) {
+  const result = maybeFinalizeRoom(room);
+
+  if (result) {
+    return { type: "result", result };
+  }
+
+  if ((room.matchRule === "race" && bot.progressIndex >= promptLength) || areHumansFinished(room)) {
     if (bot.progressIndex < promptLength) {
       finalizeUnfinishedBots(room);
     }
-    room.status = "finished";
-    room.result = toMatchResult(room);
-    return { type: "result", result: room.result };
+    return { type: "result", result: finalizeRoom(room) };
   }
 
   return { type: "progress", room: toPublicRoom(room) };
 }
 
-export function updateProgress(socketId: string, payload: TypingProgress): RoomState | null {
+export function updateProgress(socketId: string, payload: TypingProgress): RoomState | MatchResult | null {
   const context = getContext(socketId, payload.roomCode);
 
   if (!context || context.room.status !== "playing" || !context.room.prompt) {
@@ -352,6 +487,12 @@ export function updateProgress(socketId: string, payload: TypingProgress): RoomS
   }
 
   applyProgress(context.player, context.room, payload);
+
+  const result = maybeFinalizeRoom(context.room);
+  if (result) {
+    return result;
+  }
+
   return toPublicRoom(context.room);
 }
 
@@ -372,11 +513,14 @@ export function finishTyping(socketId: string, payload: TypingFinish): MatchResu
     context.player.finishTimeMs = now - (context.room.serverStartAt ?? now);
   }
 
+  const result = maybeFinalizeRoom(context.room);
+  if (result) {
+    return result;
+  }
+
   if (areHumansFinished(context.room)) {
     finalizeUnfinishedBots(context.room);
-    context.room.status = "finished";
-    context.room.result = toMatchResult(context.room);
-    return context.room.result;
+    return finalizeRoom(context.room);
   }
 
   return toPublicRoom(context.room);
@@ -390,10 +534,19 @@ export function rematch(socketId: string, roomCode: string): { room: RoomState }
     return { error: "ルームに参加していません。" };
   }
 
+  if (record.playerId !== room.hostPlayerId) {
+    return { error: "ホストだけが再戦できます。" };
+  }
+
+  if (room.status !== "finished") {
+    return { error: "終了した試合だけ再戦できます。" };
+  }
+
   room.status = "waiting";
   room.round += 1;
   room.prompt = pickPrompt(room.promptCategory, Date.now() + room.round);
   delete room.serverStartAt;
+  delete room.matchEndsAt;
   delete room.result;
   resetPlayers(room);
 
@@ -427,8 +580,23 @@ function getContext(
 
 function applyProgress(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): void {
   const promptLength = room.prompt?.text.length ?? 0;
+  const previousProgressIndex = player.progressIndex;
+  const previousCorrectCharacters = player.correctCharacters;
+  const previousMistakes = player.mistakes;
   const nextIndex = clamp(payload.progressIndex, player.progressIndex, promptLength);
-  
+
+  // Basic suspicious detection: jumping too many characters
+  if (nextIndex - player.progressIndex > 10) {
+    logger.warn({
+      event: "suspicious_progress",
+      roomCode: room.roomCode,
+      playerId: player.id,
+      jumpSize: nextIndex - player.progressIndex,
+      from: player.progressIndex,
+      to: nextIndex
+    });
+  }
+
   // Update streaks based on typing success
   const isCorrect = nextIndex > player.progressIndex;
   if (isCorrect) {
@@ -450,9 +618,38 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
   player.mistakes = mistakes;
   player.wpm = calculateWpm(correctCharacters, now - startedAt);
   player.accuracy = calculateAccuracy(correctCharacters, totalTypedCharacters);
+
+  if (room.matchRule !== "hpBattle") {
+    return;
+  }
+
+  const correctDelta = Math.max(correctCharacters - previousCorrectCharacters, 0);
+  const mistakeDelta = Math.max(mistakes - previousMistakes, 0);
+
+  if (correctDelta > 0) {
+    for (const opponent of room.players.values()) {
+      if (opponent.id === player.id || opponent.hp === undefined || opponent.progressIndex >= promptLength || opponent.hp <= 0) {
+        continue;
+      }
+
+      applyHpDamage(opponent, correctDelta * HP_BATTLE_ATTACK_DAMAGE, room, now);
+    }
+  }
+
+  if (mistakeDelta > 0) {
+    applyHpDamage(player, mistakeDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
+  }
+
+  if (player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
+    player.finishedAt = now;
+    player.finishTimeMs = now - startedAt;
+  }
 }
 
 function resetPlayers(room: InternalRoom): void {
+  const promptLength = room.prompt?.text.length ?? 0;
+  const maxHp = room.matchRule === "hpBattle" ? Math.max(HP_BATTLE_MIN_HP, promptLength * HP_BATTLE_HP_PER_PROMPT_CHAR) : undefined;
+
   for (const player of room.players.values()) {
     player.ready = false;
     player.progressIndex = 0;
@@ -463,6 +660,15 @@ function resetPlayers(room: InternalRoom): void {
     player.currentStreak = 0;
     player.wpm = 0;
     player.accuracy = 100;
+    if (maxHp !== undefined) {
+      player.maxHp = maxHp;
+      player.hp = maxHp;
+    } else {
+      delete player.maxHp;
+      delete player.hp;
+    }
+    delete player.forfeited;
+    delete player.disconnectedAt;
     delete player.finishedAt;
     delete player.finishTimeMs;
   }
@@ -474,8 +680,27 @@ function toMatchResult(room: InternalRoom): MatchResult {
   return {
     roomCode: room.roomCode,
     prompt,
-    players: rankPlayers(toPublicPlayers(room), prompt.text.length)
+    players: rankPlayers(toPublicPlayers(room), prompt.text.length, room.matchRule)
   };
+}
+
+function finalizeRoom(room: InternalRoom): MatchResult {
+  room.status = "finished";
+  room.result = toMatchResult(room);
+  metrics.matchesFinished += 1;
+
+  void recordMatchResult({
+    roomCode: room.roomCode,
+    round: room.round,
+    prompt: room.prompt ?? pickPrompt(),
+    promptCategory: room.promptCategory,
+    botDifficulty: room.botDifficulty,
+    playerCount: room.players.size,
+    hasBot: [...room.players.values()].some((player) => player.isBot),
+    result: room.result
+  });
+
+  return room.result;
 }
 
 function toPublicRoom(room: InternalRoom): RoomState {
@@ -483,6 +708,7 @@ function toPublicRoom(room: InternalRoom): RoomState {
     roomCode: room.roomCode,
     hostPlayerId: room.hostPlayerId,
     status: room.status,
+    matchRule: room.matchRule,
     botDifficulty: room.botDifficulty,
     promptCategory: room.promptCategory,
     players: toPublicPlayers(room),
@@ -495,6 +721,10 @@ function toPublicRoom(room: InternalRoom): RoomState {
 
   if (room.serverStartAt) {
     publicRoom.serverStartAt = room.serverStartAt;
+  }
+
+  if (room.matchEndsAt) {
+    publicRoom.matchEndsAt = room.matchEndsAt;
   }
 
   if (room.result) {
@@ -523,14 +753,27 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     wpm: player.wpm,
     accuracy: player.accuracy,
     maxStreak: player.maxStreak,
-    currentStreak: player.currentStreak
+    currentStreak: player.currentStreak,
+    forfeited: player.forfeited
   };
 
-  if (player.finishedAt) {
+  if (player.hp !== undefined) {
+    publicPlayer.hp = player.hp;
+  }
+
+  if (player.deviceKind !== undefined) {
+    publicPlayer.deviceKind = player.deviceKind;
+  }
+
+  if (player.maxHp !== undefined) {
+    publicPlayer.maxHp = player.maxHp;
+  }
+
+  if (player.finishedAt !== undefined) {
     publicPlayer.finishedAt = player.finishedAt;
   }
 
-  if (player.finishTimeMs) {
+  if (player.finishTimeMs !== undefined) {
     publicPlayer.finishTimeMs = player.finishTimeMs;
   }
 
@@ -553,6 +796,7 @@ function addBotPlayer(room: InternalRoom): void {
     ready: true,
     isHost: false,
     isBot: true,
+    deviceKind: "desktop",
     progressIndex: 0,
     correctCharacters: 0,
     totalTypedCharacters: 0,
@@ -568,7 +812,8 @@ function createPlayer(
   id: string,
   nickname: string,
   socketId: string,
-  isHost: boolean
+  isHost: boolean,
+  deviceKind: DeviceKind = "desktop"
 ): InternalPlayer {
   return {
     id,
@@ -578,6 +823,7 @@ function createPlayer(
     ready: false,
     isHost,
     isBot: false,
+    deviceKind,
     progressIndex: 0,
     correctCharacters: 0,
     totalTypedCharacters: 0,
@@ -600,7 +846,9 @@ function createUniqueRoomCode(): string {
 }
 
 const ROOM_TTL_MS = 60 * 1000; // 1 minute
-const DISCONNECT_GRACE_MS = 30 * 1000; // 30 seconds
+const DISCONNECT_GRACE_MS = Number(
+  process.env.DISCONNECT_GRACE_MS ?? (process.env.NODE_ENV === "test" ? 5000 : 30 * 1000)
+); // Default 30 seconds, 5 seconds for tests
 
 export function cleanupExpiredRooms(): void {
   const now = Date.now();
@@ -628,20 +876,23 @@ export function checkForForfeits(): RoomState[] {
       let changed = false;
 
       for (const player of room.players.values()) {
-        if (!player.connected && player.disconnectedAt && now - player.disconnectedAt > DISCONNECT_GRACE_MS) {
-          if (player.finishTimeMs === Infinity) {
-            continue;
-          }
+        if (!player.connected && player.disconnectedAt) {
+          const elapsed = now - player.disconnectedAt;
+          if (elapsed > DISCONNECT_GRACE_MS) {
+            if (player.forfeited) {
+              continue;
+            }
 
-          player.finishedAt = now;
-          player.finishTimeMs = Infinity; // Represent forfeit
-          changed = true;
-          // If all humans are finished now, finish the match
-          if (areHumansFinished(room)) {
-            finalizeUnfinishedBots(room);
-            room.status = "finished";
-            room.result = toMatchResult(room);
+            player.finishedAt = now;
+            player.finishTimeMs = Infinity; // Keep for internal logic if needed
+            player.forfeited = true;
             changed = true;
+            // If all humans are finished now, finish the match
+            if (areHumansFinished(room)) {
+              finalizeUnfinishedBots(room);
+              finalizeRoom(room);
+              changed = true;
+            }
           }
         }
       }
@@ -653,6 +904,26 @@ export function checkForForfeits(): RoomState[] {
   }
 
   return updatedRooms;
+}
+
+export function checkExpiredTimeAttackMatches(): MatchResult[] {
+  const now = Date.now();
+  const results: MatchResult[] = [];
+
+  for (const room of rooms.values()) {
+    if (room.status !== "playing" || room.matchRule !== "timeAttack" || !room.matchEndsAt) {
+      continue;
+    }
+
+    if (now < room.matchEndsAt) {
+      continue;
+    }
+
+    finalizeUnfinishedBots(room);
+    results.push(finalizeRoom(room));
+  }
+
+  return results;
 }
 
 export function startPractice(nickname: string, category: PromptCategory): { practiceId: string; prompt: Prompt; startedAt: number } {
@@ -667,4 +938,40 @@ export function startPractice(nickname: string, category: PromptCategory): { pra
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(Math.floor(value), min), max);
+}
+
+function maybeFinalizeRoom(room: InternalRoom): MatchResult | null {
+  if (room.matchRule === "hpBattle") {
+    const hasElimination = [...room.players.values()].some((player) => (player.hp ?? 1) <= 0);
+
+    if (hasElimination) {
+      return finalizeRoom(room);
+    }
+  }
+
+  if (areHumansFinished(room)) {
+    finalizeUnfinishedBots(room);
+    return finalizeRoom(room);
+  }
+
+  return null;
+}
+
+function applyHpDamage(player: InternalPlayer, damage: number, room: InternalRoom, now: number): void {
+  if (damage <= 0 || player.hp === undefined || player.hp <= 0) {
+    return;
+  }
+
+  const nextHp = Math.max(0, player.hp - damage);
+
+  if (nextHp === player.hp) {
+    return;
+  }
+
+  player.hp = nextHp;
+
+  if (nextHp === 0) {
+    player.finishedAt = now;
+    player.finishTimeMs = now - (room.serverStartAt ?? now);
+  }
 }

@@ -8,8 +8,11 @@ import {
   leaveBySocket,
   markPlaying,
   checkForForfeits,
+  checkExpiredTimeAttackMatches,
+  explicitLeaveBySocket,
   rematch,
   startMatch,
+  setMatchRule,
   updateProgress,
   rooms
 } from "../src/rooms";
@@ -36,6 +39,33 @@ describe("rooms", () => {
     }
 
     expect(joined.room.players).toHaveLength(2);
+  });
+
+  it("stores device kinds for joined players", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_device",
+      socketId: "socket_alice_device",
+      deviceKind: "mobile"
+    });
+
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_device",
+      socketId: "socket_bob_device",
+      deviceKind: "mobile"
+    });
+
+    expect("error" in joined).toBe(false);
+
+    if ("error" in joined) {
+      return;
+    }
+
+    expect(created.room.players[0]?.deviceKind).toBe("mobile");
+    expect(joined.room.players[0]?.deviceKind).toBe("mobile");
+    expect(joined.room.players[1]?.deviceKind).toBe("mobile");
   });
 
   it("starts a match and produces a result after both players finish", () => {
@@ -196,6 +226,42 @@ describe("rooms", () => {
     expect(rejoined.room.players[0]?.isHost).toBe(true);
   });
 
+  it("frees a waiting room slot when a player explicitly leaves", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_explicit_leave",
+      socketId: "socket_alice_explicit_leave"
+    });
+
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_explicit_leave",
+      socketId: "socket_bob_explicit_leave"
+    });
+
+    expect("error" in joined).toBe(false);
+
+    const afterLeave = explicitLeaveBySocket("socket_bob_explicit_leave");
+    expect(afterLeave?.players).toHaveLength(1);
+
+    const replacement = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Charlie",
+      guestId: "guest_charlie_explicit_leave",
+      socketId: "socket_charlie_explicit_leave"
+    });
+
+    expect("error" in replacement).toBe(false);
+
+    if ("error" in replacement) {
+      return;
+    }
+
+    expect(replacement.room.players).toHaveLength(2);
+    expect(replacement.room.players.some((player) => player.id === "guest_charlie_explicit_leave")).toBe(true);
+  });
+
   it("adds a COM player with difficulty in nickname when a host starts alone", () => {
     const created = createRoom({
       nickname: "Alice",
@@ -264,6 +330,22 @@ describe("rooms", () => {
     expect(aliceAfterTyping?.currentStreak).toBe(2);
     expect(aliceAfterTyping?.maxStreak).toBe(2);
 
+    const promptLength = started.room.prompt?.text.length ?? 0;
+    finishTyping("socket_alice_streak", {
+      roomCode: created.room.roomCode,
+      progressIndex: promptLength,
+      correctCharacters: promptLength,
+      totalTypedCharacters: promptLength,
+      mistakes: 0
+    });
+    finishTyping("socket_bob_streak", {
+      roomCode: created.room.roomCode,
+      progressIndex: promptLength,
+      correctCharacters: promptLength,
+      totalTypedCharacters: promptLength,
+      mistakes: 0
+    });
+
     const rematched = rematch("socket_alice_streak", created.room.roomCode);
     expect("error" in rematched).toBe(false);
 
@@ -303,5 +385,96 @@ describe("rooms", () => {
     const updatedRoom = getRoom(created.room.roomCode);
     expect(updatedRoom?.status).toBe("finished");
     expect(updatedRoom?.players[0]?.finishTimeMs).toBe(Infinity);
+  });
+
+  it("finishes a time attack match when the timer expires", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_time_attack",
+      socketId: "socket_alice_time_attack"
+    });
+
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_time_attack",
+      socketId: "socket_bob_time_attack"
+    });
+
+    expect("error" in joined).toBe(false);
+
+    const rule = setMatchRule("socket_alice_time_attack", created.room.roomCode, "timeAttack");
+    expect("error" in rule).toBe(false);
+
+    const started = startMatch("socket_alice_time_attack", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    expect(markPlaying(created.room.roomCode)?.status).toBe("playing");
+
+    updateProgress("socket_alice_time_attack", {
+      roomCode: created.room.roomCode,
+      progressIndex: 2,
+      correctCharacters: 2,
+      totalTypedCharacters: 2,
+      mistakes: 0
+    });
+
+    const room = rooms.get(created.room.roomCode.toUpperCase());
+    if (room) {
+      room.matchEndsAt = Date.now() - 1;
+    }
+
+    const results = checkExpiredTimeAttackMatches();
+    expect(results).toHaveLength(1);
+    expect(results[0]?.players[0]?.id).toBe("guest_alice_time_attack");
+    expect(getRoom(created.room.roomCode)?.status).toBe("finished");
+  });
+
+  it("finishes an hp battle match when a player deals lethal damage", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_hp_battle",
+      socketId: "socket_alice_hp_battle"
+    });
+
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_hp_battle",
+      socketId: "socket_bob_hp_battle"
+    });
+
+    expect("error" in joined).toBe(false);
+
+    const rule = setMatchRule("socket_alice_hp_battle", created.room.roomCode, "hpBattle");
+    expect("error" in rule).toBe(false);
+
+    const started = startMatch("socket_alice_hp_battle", created.room.roomCode);
+    expect("error" in started).toBe(false);
+
+    if ("error" in started) {
+      return;
+    }
+
+    expect(markPlaying(created.room.roomCode)?.status).toBe("playing");
+    expect(started.room.players.every((player) => player.maxHp === player.hp)).toBe(true);
+
+    const promptLength = started.room.prompt?.text.length ?? 0;
+    const outcome = updateProgress("socket_alice_hp_battle", {
+      roomCode: created.room.roomCode,
+      progressIndex: promptLength,
+      correctCharacters: promptLength,
+      totalTypedCharacters: promptLength,
+      mistakes: 0
+    });
+
+    expect(outcome && "status" in outcome).toBe(false);
+
+    if (!outcome || "status" in outcome) {
+      return;
+    }
+
+    expect(outcome.players[0]?.id).toBe("guest_alice_hp_battle");
+    expect(outcome.players[1]?.hp).toBe(0);
+    expect(getRoom(created.room.roomCode)?.status).toBe("finished");
   });
 });

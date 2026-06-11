@@ -14,41 +14,85 @@ import type {
 import {
   BOT_TICK_MS,
   advanceBot,
+  checkExpiredTimeAttackMatches,
   checkForForfeits,
   cleanupExpiredRooms,
   createRoom,
+  explicitLeaveBySocket,
   finishTyping,
+  getMetrics,
   joinRoom,
   leaveBySocket,
   markPlaying,
   rematch,
   setBotDifficulty,
+  setMatchRule,
   setPromptCategory,
   setReady,
   startMatch,
   startPractice,
   updateProgress
 } from "./rooms.js";
+import { logger } from "./logger.js";
+import { getPersistenceStatus } from "./persistence.js";
+import { checkProgressLimit, checkRoomCreateLimit, checkRoomJoinLimit } from "./rate-limiter.js";
 
 const PORT = Number(process.env.PORT ?? 3001);
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? "http://127.0.0.1:3000";
+const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN?.trim() ?? "";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+const isAllowedOrigin = (origin: string | undefined) => {
+  if (!origin) {
+    return true;
+  }
+
+  if (CLIENT_ORIGIN) {
+    return origin === CLIENT_ORIGIN;
+  }
+
+  return !IS_PRODUCTION;
+};
+
+const corsOriginHandler = (origin: string | undefined, callback: (error: Error | null, success?: boolean) => void) => {
+  if (isAllowedOrigin(origin)) {
+    callback(null, true);
+    return;
+  }
+
+  callback(new Error(`CORS blocked for origin: ${origin ?? "<missing>"}`));
+};
 
 const app = express();
-app.use(cors({ origin: CLIENT_ORIGIN }));
+app.use(cors({ origin: corsOriginHandler }));
 
 app.get("/health", (_request, response) => {
-  response.json({ ok: true, service: "type-battle-realtime" });
+  response.json({
+    ok: true,
+    service: "type-battle-realtime",
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV ?? "development",
+    metrics: getMetrics(),
+    database: getPersistenceStatus()
+  });
 });
 
 const httpServer = createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
   cors: {
-    origin: CLIENT_ORIGIN
+    origin: corsOriginHandler
   }
 });
 
 io.on("connection", (socket) => {
+  logger.info({ event: "socket_connect", socketId: socket.id, ip: socket.handshake.address });
+
   socket.on("room:create", (payload, ack) => {
+    const rateLimit = checkRoomCreateLimit(socket.handshake.address, payload.guestId);
+    if (!rateLimit.allowed) {
+      ack({ ok: false, error: rateLimit.error! });
+      return;
+    }
+
     const error = validateNickname(payload.nickname);
 
     if (error) {
@@ -59,15 +103,30 @@ io.on("connection", (socket) => {
     const { room, playerId } = createRoom({
       nickname: payload.nickname,
       guestId: payload.guestId,
-      socketId: socket.id
+      socketId: socket.id,
+      sessionId: payload.sessionId,
+      ...(payload.deviceKind ? { deviceKind: payload.deviceKind } : {})
     });
 
     socket.join(room.roomCode);
+    logger.info({
+      event: "room_create",
+      roomCode: room.roomCode,
+      hostPlayerId: playerId,
+      guestId: payload.guestId,
+      sessionId: payload.sessionId
+    });
     ack({ ok: true, data: { roomCode: room.roomCode, playerId, room } });
     emitRoomState(room);
   });
 
   socket.on("room:join", (payload, ack) => {
+    const rateLimit = checkRoomJoinLimit(socket.handshake.address, payload.guestId);
+    if (!rateLimit.allowed) {
+      ack({ ok: false, error: rateLimit.error! });
+      return;
+    }
+
     const error = validateNickname(payload.nickname);
 
     if (error) {
@@ -79,24 +138,41 @@ io.on("connection", (socket) => {
       roomCode: payload.roomCode,
       nickname: payload.nickname,
       guestId: payload.guestId,
-      socketId: socket.id
+      socketId: socket.id,
+      sessionId: payload.sessionId,
+      ...(payload.deviceKind ? { deviceKind: payload.deviceKind } : {})
     });
 
     if ("error" in result) {
+      logger.warn({
+        event: "room_join_failed",
+        roomCode: payload.roomCode,
+        guestId: payload.guestId,
+        sessionId: payload.sessionId,
+        error: result.error
+      });
       ack({ ok: false, error: result.error });
       return;
     }
 
     socket.join(result.room.roomCode);
+    logger.info({
+      event: "room_join",
+      roomCode: result.room.roomCode,
+      playerId: result.playerId,
+      guestId: payload.guestId,
+      sessionId: payload.sessionId
+    });
     ack({ ok: true, data: { playerId: result.playerId, room: result.room } });
     emitRoomState(result.room);
   });
 
   socket.on("room:leave", (payload) => {
     socket.leave(payload.roomCode.toUpperCase());
-    const room = leaveBySocket(socket.id);
+    const room = explicitLeaveBySocket(socket.id);
 
     if (room) {
+      logger.info({ event: "room_leave", roomCode: room.roomCode, socketId: socket.id });
       emitRoomState(room);
     }
   });
@@ -133,14 +209,37 @@ io.on("connection", (socket) => {
     ack({ ok: true, data: result.room });
   });
 
-  socket.on("match:start", (payload, ack) => {
-    const result = startMatch(socket.id, payload.roomCode);
+  socket.on("room:setMatchRule", (payload, ack) => {
+    const result = setMatchRule(socket.id, payload.roomCode, payload.rule);
 
     if ("error" in result) {
       ack({ ok: false, error: result.error });
       return;
     }
 
+    emitRoomState(result.room);
+    ack({ ok: true, data: result.room });
+  });
+
+  socket.on("match:start", (payload, ack) => {
+    const result = startMatch(socket.id, payload.roomCode);
+
+    if ("error" in result) {
+      logger.warn({
+        event: "match_start_failed",
+        roomCode: payload.roomCode,
+        socketId: socket.id,
+        error: result.error
+      });
+      ack({ ok: false, error: result.error });
+      return;
+    }
+
+    logger.info({
+      event: "match_countdown",
+      roomCode: result.room.roomCode,
+      playerCount: result.room.players.length
+    });
     ack({ ok: true, data: result.room });
     io.to(result.room.roomCode).emit("match:countdown", {
       room: result.room,
@@ -151,11 +250,21 @@ io.on("connection", (socket) => {
   });
 
   socket.on("typing:progress", (payload) => {
-    const room = updateProgress(socket.id, payload);
-
-    if (room) {
-      io.to(room.roomCode).emit("player:progress", room);
+    if (!checkProgressLimit(socket.id)) {
+      return;
     }
+    const result = updateProgress(socket.id, payload);
+
+    if (!result) {
+      return;
+    }
+
+    if ("status" in result) {
+      io.to(result.roomCode).emit("player:progress", result);
+      return;
+    }
+
+    io.to(result.roomCode).emit("match:result", result);
   });
 
   socket.on("typing:finish", (payload) => {
@@ -165,11 +274,16 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if ("hostPlayerId" in result) {
+    if ("status" in result) {
       io.to(result.roomCode).emit("player:progress", result);
       return;
     }
 
+    logger.info({
+      event: "match_finish",
+      roomCode: result.roomCode,
+      rankings: result.players.map(p => ({ id: p.id, rank: p.rank, wpm: p.wpm }))
+    });
     io.to(result.roomCode).emit("match:result", result);
   });
 
@@ -181,12 +295,14 @@ io.on("connection", (socket) => {
       return;
     }
 
+    logger.info({ event: "match_rematch", roomCode: result.room.roomCode });
     ack({ ok: true, data: result.room });
     emitRoomState(result.room);
   });
 
   socket.on("practice:start", (payload: { nickname: string; category: PromptCategory }, ack: (response: AckResponse<{ practiceId: string; prompt: Prompt; startedAt: number }>) => void) => {
     const practice = startPractice(payload.nickname, payload.category);
+    logger.info({ event: "practice_start", practiceId: practice.practiceId, category: payload.category });
     ack({ ok: true, data: practice });
   });
 
@@ -194,21 +310,32 @@ io.on("connection", (socket) => {
     const room = leaveBySocket(socket.id);
 
     if (room) {
+      logger.info({ event: "socket_disconnect", socketId: socket.id, roomCode: room.roomCode });
       emitRoomState(room);
+    } else {
+      logger.info({ event: "socket_disconnect", socketId: socket.id });
     }
   });
 });
 
-httpServer.listen(PORT, "127.0.0.1", () => {
-  console.log(`Realtime server listening on http://127.0.0.1:${PORT}`);
+httpServer.listen(PORT, "0.0.0.0", () => {
+  logger.info({ event: "server_start", port: PORT, env: process.env.NODE_ENV ?? "development" });
 });
 
 setInterval(cleanupExpiredRooms, 10000);
 setInterval(() => {
   for (const room of checkForForfeits()) {
+    logger.info({ event: "room_forfeit", roomCode: room.roomCode });
     emitRoomState(room);
   }
-}, 5000);
+}, process.env.NODE_ENV === "test" ? 1000 : 5000);
+
+setInterval(() => {
+  for (const result of checkExpiredTimeAttackMatches()) {
+    logger.info({ event: "match_time_attack_finish", roomCode: result.roomCode });
+    io.to(result.roomCode).emit("match:result", result);
+  }
+}, process.env.NODE_ENV === "test" ? 500 : 1000);
 
 function emitRoomState(room: RoomState): void {
   io.to(room.roomCode).emit("room:state", room);
@@ -221,6 +348,7 @@ function scheduleMatchStart(room: RoomState): void {
     const playingRoom = markPlaying(room.roomCode);
 
     if (playingRoom) {
+      logger.info({ event: "match_start", roomCode: playingRoom.roomCode });
       io.to(playingRoom.roomCode).emit("match:started", playingRoom);
       scheduleBotProgress(playingRoom);
     }
