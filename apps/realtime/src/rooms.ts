@@ -24,6 +24,10 @@ import { recordGuestSession, recordMatchResult } from "./persistence.js";
 const MAX_PLAYERS = 2;
 const COUNTDOWN_MS = 3_000;
 const TIME_ATTACK_MS = Number(process.env.TIME_ATTACK_MS ?? (process.env.NODE_ENV === "test" ? 5_000 : 30_000));
+const HP_BATTLE_HP_PER_PROMPT_CHAR = 5;
+const HP_BATTLE_MIN_HP = 50;
+const HP_BATTLE_ATTACK_DAMAGE = 5;
+const HP_BATTLE_MISTAKE_DAMAGE = 2;
 const BOT_PLAYER_ID = "bot_com_1";
 const BOT_NICKNAME = "COM";
 export const BOT_TICK_MS = 500;
@@ -359,7 +363,17 @@ function areHumansFinished(room: InternalRoom): boolean {
   const promptLength = room.prompt?.text.length ?? 0;
   return [...room.players.values()]
     .filter((p) => !p.isBot)
-    .every((p) => p.progressIndex >= promptLength || !p.connected);
+    .every((p) => {
+      if (!p.connected) {
+        return true;
+      }
+
+      if (room.matchRule === "hpBattle" && (p.hp ?? 0) <= 0) {
+        return true;
+      }
+
+      return p.progressIndex >= promptLength;
+    });
 }
 
 function finalizeUnfinishedBots(room: InternalRoom): void {
@@ -408,18 +422,23 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
     bot.finishTimeMs = bot.finishedAt - (room.serverStartAt ?? bot.finishedAt);
   }
 
+  const result = maybeFinalizeRoom(room);
+
+  if (result) {
+    return { type: "result", result };
+  }
+
   if ((room.matchRule === "race" && bot.progressIndex >= promptLength) || areHumansFinished(room)) {
     if (bot.progressIndex < promptLength) {
       finalizeUnfinishedBots(room);
     }
-    const result = finalizeRoom(room);
-    return { type: "result", result };
+    return { type: "result", result: finalizeRoom(room) };
   }
 
   return { type: "progress", room: toPublicRoom(room) };
 }
 
-export function updateProgress(socketId: string, payload: TypingProgress): RoomState | null {
+export function updateProgress(socketId: string, payload: TypingProgress): RoomState | MatchResult | null {
   const context = getContext(socketId, payload.roomCode);
 
   if (!context || context.room.status !== "playing" || !context.room.prompt) {
@@ -427,6 +446,12 @@ export function updateProgress(socketId: string, payload: TypingProgress): RoomS
   }
 
   applyProgress(context.player, context.room, payload);
+
+  const result = maybeFinalizeRoom(context.room);
+  if (result) {
+    return result;
+  }
+
   return toPublicRoom(context.room);
 }
 
@@ -445,6 +470,11 @@ export function finishTyping(socketId: string, payload: TypingFinish): MatchResu
     const now = Date.now();
     context.player.finishedAt = now;
     context.player.finishTimeMs = now - (context.room.serverStartAt ?? now);
+  }
+
+  const result = maybeFinalizeRoom(context.room);
+  if (result) {
+    return result;
   }
 
   if (areHumansFinished(context.room)) {
@@ -501,8 +531,11 @@ function getContext(
 
 function applyProgress(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): void {
   const promptLength = room.prompt?.text.length ?? 0;
+  const previousProgressIndex = player.progressIndex;
+  const previousCorrectCharacters = player.correctCharacters;
+  const previousMistakes = player.mistakes;
   const nextIndex = clamp(payload.progressIndex, player.progressIndex, promptLength);
-  
+
   // Basic suspicious detection: jumping too many characters
   if (nextIndex - player.progressIndex > 10) {
     logger.warn({
@@ -536,9 +569,38 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
   player.mistakes = mistakes;
   player.wpm = calculateWpm(correctCharacters, now - startedAt);
   player.accuracy = calculateAccuracy(correctCharacters, totalTypedCharacters);
+
+  if (room.matchRule !== "hpBattle") {
+    return;
+  }
+
+  const correctDelta = Math.max(correctCharacters - previousCorrectCharacters, 0);
+  const mistakeDelta = Math.max(mistakes - previousMistakes, 0);
+
+  if (correctDelta > 0) {
+    for (const opponent of room.players.values()) {
+      if (opponent.id === player.id || opponent.hp === undefined || opponent.progressIndex >= promptLength || opponent.hp <= 0) {
+        continue;
+      }
+
+      applyHpDamage(opponent, correctDelta * HP_BATTLE_ATTACK_DAMAGE, room, now);
+    }
+  }
+
+  if (mistakeDelta > 0) {
+    applyHpDamage(player, mistakeDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
+  }
+
+  if (player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
+    player.finishedAt = now;
+    player.finishTimeMs = now - startedAt;
+  }
 }
 
 function resetPlayers(room: InternalRoom): void {
+  const promptLength = room.prompt?.text.length ?? 0;
+  const maxHp = room.matchRule === "hpBattle" ? Math.max(HP_BATTLE_MIN_HP, promptLength * HP_BATTLE_HP_PER_PROMPT_CHAR) : undefined;
+
   for (const player of room.players.values()) {
     player.ready = false;
     player.progressIndex = 0;
@@ -549,6 +611,15 @@ function resetPlayers(room: InternalRoom): void {
     player.currentStreak = 0;
     player.wpm = 0;
     player.accuracy = 100;
+    if (maxHp !== undefined) {
+      player.maxHp = maxHp;
+      player.hp = maxHp;
+    } else {
+      delete player.maxHp;
+      delete player.hp;
+    }
+    delete player.forfeited;
+    delete player.disconnectedAt;
     delete player.finishedAt;
     delete player.finishTimeMs;
   }
@@ -560,7 +631,7 @@ function toMatchResult(room: InternalRoom): MatchResult {
   return {
     roomCode: room.roomCode,
     prompt,
-    players: rankPlayers(toPublicPlayers(room), prompt.text.length)
+    players: rankPlayers(toPublicPlayers(room), prompt.text.length, room.matchRule)
   };
 }
 
@@ -637,11 +708,19 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     forfeited: player.forfeited
   };
 
-  if (player.finishedAt) {
+  if (player.hp !== undefined) {
+    publicPlayer.hp = player.hp;
+  }
+
+  if (player.maxHp !== undefined) {
+    publicPlayer.maxHp = player.maxHp;
+  }
+
+  if (player.finishedAt !== undefined) {
     publicPlayer.finishedAt = player.finishedAt;
   }
 
-  if (player.finishTimeMs) {
+  if (player.finishTimeMs !== undefined) {
     publicPlayer.finishTimeMs = player.finishTimeMs;
   }
 
@@ -803,4 +882,40 @@ export function startPractice(nickname: string, category: PromptCategory): { pra
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(Math.floor(value), min), max);
+}
+
+function maybeFinalizeRoom(room: InternalRoom): MatchResult | null {
+  if (room.matchRule === "hpBattle") {
+    const hasElimination = [...room.players.values()].some((player) => (player.hp ?? 1) <= 0);
+
+    if (hasElimination) {
+      return finalizeRoom(room);
+    }
+  }
+
+  if (areHumansFinished(room)) {
+    finalizeUnfinishedBots(room);
+    return finalizeRoom(room);
+  }
+
+  return null;
+}
+
+function applyHpDamage(player: InternalPlayer, damage: number, room: InternalRoom, now: number): void {
+  if (damage <= 0 || player.hp === undefined || player.hp <= 0) {
+    return;
+  }
+
+  const nextHp = Math.max(0, player.hp - damage);
+
+  if (nextHp === player.hp) {
+    return;
+  }
+
+  player.hp = nextHp;
+
+  if (nextHp === 0) {
+    player.finishedAt = now;
+    player.finishTimeMs = now - (room.serverStartAt ?? now);
+  }
 }

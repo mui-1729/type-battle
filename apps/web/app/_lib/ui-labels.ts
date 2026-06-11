@@ -15,7 +15,8 @@ export const BOT_DIFFICULTY_LABELS: Record<BotDifficulty, string> = {
 
 export const MATCH_RULE_LABELS: Record<MatchRule, string> = {
   race: "レース",
-  timeAttack: "タイム"
+  timeAttack: "タイム",
+  hpBattle: "HPバトル"
 };
 
 export const THEME_LABELS: Record<PlayerSettings["theme"], string> = {

@@ -422,7 +422,7 @@ textarea::placeholder {
 .statsGrid {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(3, minmax(82px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(82px, 1fr));
 }
 
 .statItem {

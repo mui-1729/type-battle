@@ -77,6 +77,7 @@ export default function HomePage() {
   const socketRef = useRef<ClientSocket | null>(null);
   const settingsRef = useRef(DEFAULT_PLAYER_SETTINGS);
   const nicknameRef = useRef(DEFAULT_PLAYER_SETTINGS.nickname);
+  const nicknameInputRef = useRef<HTMLInputElement | null>(null);
   const countdownSecondRef = useRef<number | null>(null);
   const typingInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [connected, setConnected] = useState(false);
@@ -135,7 +136,7 @@ export default function HomePage() {
     currentPlayer?.isHost &&
     room.players.length >= 1 &&
     room.players.every((player) => player.connected || player.isBot);
-  const acceptingTextInput = isRoomPlaying || isPracticePlaying;
+  const acceptingTextInput = (isRoomPlaying && !result) || isPracticePlaying;
 
   const setPromptCategory = useCallback(
     (category: "short" | "standard" | "long") => {
@@ -205,7 +206,7 @@ export default function HomePage() {
 
   const startPractice = useCallback(() => {
     const socket = socketRef.current;
-    const currentNickname = nicknameRef.current;
+    const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
     const validationError = validateNickname(currentNickname);
 
     if (!realtimeConfigured || !socket || validationError || !guestId) {
@@ -326,6 +327,15 @@ export default function HomePage() {
     socket.on("match:result", (nextResult) => {
       setResult(nextResult);
       setCountdownMs(0);
+      setRoom((current) =>
+        current && current.roomCode === nextResult.roomCode
+          ? {
+              ...current,
+              status: "finished",
+              result: nextResult
+            }
+          : current
+      );
     });
     socket.on("match:error", ({ message }) => setError(message));
 
@@ -595,7 +605,7 @@ export default function HomePage() {
 
   const createRoom = () => {
     const socket = socketRef.current;
-    const currentNickname = nicknameRef.current;
+    const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
     const validationError = validateNickname(currentNickname);
 
     if (!realtimeConfigured || !socket || validationError || !guestId) {
@@ -626,7 +636,7 @@ export default function HomePage() {
 
   const joinRoom = () => {
     const socket = socketRef.current;
-    const currentNickname = nicknameRef.current;
+    const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
     const validationError = validateNickname(currentNickname);
 
     if (!realtimeConfigured || !socket || validationError || !guestId) {
@@ -743,6 +753,7 @@ export default function HomePage() {
             <label htmlFor="nickname">ニックネーム</label>
             <input
               id="nickname"
+              ref={nicknameInputRef}
               value={nickname}
               maxLength={18}
               onChange={(event) => setNickname(event.target.value)}
@@ -847,8 +858,8 @@ export default function HomePage() {
           {room?.status === "waiting" && room.players.length < room.maxPlayers ? (
             <div className="difficultySelector">
               <span>対戦ルール</span>
-              <div className="difficultyButtons twoColumns">
-                {(["race", "timeAttack"] as const).map((rule) => (
+              <div className="difficultyButtons">
+                {(["race", "timeAttack", "hpBattle"] as const).map((rule) => (
                   <button
                     key={rule}
                     className={room.matchRule === rule ? "active" : ""}
@@ -951,6 +962,14 @@ export default function HomePage() {
                         : activeResultPlayer?.mistakes ?? 0
                     }
                   />
+                  {((currentPlayer?.maxHp ?? activeResultPlayer?.maxHp) !== undefined) ? (
+                    <Stat
+                      label="HP"
+                      value={`${
+                        isRoomPlaying || isPracticePlaying ? currentPlayer?.hp ?? 0 : activeResultPlayer?.hp ?? 0
+                      }/${currentPlayer?.maxHp ?? activeResultPlayer?.maxHp ?? 0}`}
+                    />
+                  ) : null}
                 </div>
               </div>
 

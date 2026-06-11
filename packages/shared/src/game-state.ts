@@ -2,7 +2,7 @@ export type MatchStatus = "waiting" | "countdown" | "playing" | "finished";
 
 export type BotDifficulty = "easy" | "normal" | "hard";
 
-export type MatchRule = "race" | "timeAttack";
+export type MatchRule = "race" | "timeAttack" | "hpBattle";
 
 export type PlayerState = {
   id: string;
@@ -15,6 +15,8 @@ export type PlayerState = {
   correctCharacters: number;
   totalTypedCharacters: number;
   mistakes: number;
+  hp?: number;
+  maxHp?: number;
   maxStreak: number;
   currentStreak: number;
   wpm: number;

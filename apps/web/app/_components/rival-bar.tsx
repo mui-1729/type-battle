@@ -10,6 +10,8 @@ export function RivalBar({ player, promptLength, isSelf }: RivalBarProps) {
   const progress = calculateProgress(player.progressIndex, promptLength);
   const isForfeited = player.forfeited;
   const isDisconnected = !player.connected && !player.isBot;
+  const hpLabel =
+    player.maxHp !== undefined ? `HP ${player.hp ?? 0}/${player.maxHp}` : `${progress}%`;
 
   return (
     <div className={isSelf ? "rivalBar isSelf" : "rivalBar"}>
@@ -20,7 +22,7 @@ export function RivalBar({ player, promptLength, isSelf }: RivalBarProps) {
         ) : isDisconnected ? (
           <span className="statusTag isDisconnected">再接続中...</span>
         ) : (
-          <span>{progress}%</span>
+          <span>{hpLabel}</span>
         )}
       </div>
       <div className="miniTrack">

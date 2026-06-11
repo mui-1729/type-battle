@@ -18,6 +18,7 @@ export function ResultPanel({ result, isRoomResult, onRetry }: ResultPanelProps)
             <strong>{player.nickname}</strong>
             <small>
               {player.wpm} WPM / 正確率 {player.accuracy}% / ミス {player.mistakes} / 連続正解 {player.maxStreak}
+              {player.maxHp !== undefined ? ` / HP ${player.hp ?? 0}/${player.maxHp}` : ""}
               {player.finishGap !== undefined ? ` / 差 ${player.finishGap}ms` : ""}
             </small>
           </div>

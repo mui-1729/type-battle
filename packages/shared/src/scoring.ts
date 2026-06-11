@@ -1,4 +1,4 @@
-import type { PlayerResult, PlayerState } from "./game-state.js";
+import type { MatchRule, PlayerResult, PlayerState } from "./game-state.js";
 
 const WORD_LENGTH = 5;
 const MIN_ELAPSED_MS = 1;
@@ -28,16 +28,21 @@ export function calculateProgress(progressIndex: number, promptLength: number): 
   return Math.min(100, roundToOne((progressIndex / promptLength) * 100));
 }
 
-export function rankPlayers(players: PlayerState[], promptLength: number): PlayerResult[] {
-  const sorted = [...players].sort((a, b) => comparePlayers(a, b, promptLength));
-  
+export function rankPlayers(
+  players: PlayerState[],
+  promptLength: number,
+  matchRule: MatchRule = "race"
+): PlayerResult[] {
+  const sorted = [...players].sort((a, b) => comparePlayers(a, b, promptLength, matchRule));
+
   const winner = sorted[0];
   const winnerTime = winner?.finishTimeMs ?? 0;
 
   return sorted.map((player, index): PlayerResult => {
     const isFinished = player.progressIndex >= promptLength;
-    const finishGap = isFinished && winner && player.id !== winner.id ? (player.finishTimeMs ?? 0) - winnerTime : undefined;
-    
+    const finishGap =
+      isFinished && winner && player.id !== winner.id ? (player.finishTimeMs ?? 0) - winnerTime : undefined;
+
     return {
       ...player,
       rank: index + 1,
@@ -47,9 +52,29 @@ export function rankPlayers(players: PlayerState[], promptLength: number): Playe
   });
 }
 
-function comparePlayers(a: PlayerState, b: PlayerState, promptLength: number): number {
+function comparePlayers(a: PlayerState, b: PlayerState, promptLength: number, matchRule: MatchRule): number {
   const aFinished = a.progressIndex >= promptLength;
   const bFinished = b.progressIndex >= promptLength;
+
+  if (matchRule === "hpBattle") {
+    if (aFinished && bFinished) {
+      const aHp = a.hp ?? 0;
+      const bHp = b.hp ?? 0;
+
+      if (aHp !== bHp) {
+        return bHp - aHp;
+      }
+    } else if (aFinished !== bFinished) {
+      return aFinished ? -1 : 1;
+    } else {
+      const aHp = a.hp ?? 0;
+      const bHp = b.hp ?? 0;
+
+      if (aHp !== bHp) {
+        return bHp - aHp;
+      }
+    }
+  }
 
   if (aFinished && bFinished) {
     return (a.finishTimeMs ?? Number.MAX_SAFE_INTEGER) - (b.finishTimeMs ?? Number.MAX_SAFE_INTEGER);

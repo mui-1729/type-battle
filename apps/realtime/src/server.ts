@@ -228,11 +228,18 @@ io.on("connection", (socket) => {
     if (!checkProgressLimit(socket.id)) {
       return;
     }
-    const room = updateProgress(socket.id, payload);
+    const result = updateProgress(socket.id, payload);
 
-    if (room) {
-      io.to(room.roomCode).emit("player:progress", room);
+    if (!result) {
+      return;
     }
+
+    if ("status" in result) {
+      io.to(result.roomCode).emit("player:progress", result);
+      return;
+    }
+
+    io.to(result.roomCode).emit("match:result", result);
   });
 
   socket.on("typing:finish", (payload) => {
@@ -242,7 +249,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if ("hostPlayerId" in result) {
+    if ("status" in result) {
       io.to(result.roomCode).emit("player:progress", result);
       return;
     }
