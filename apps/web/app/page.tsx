@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Clipboard, Play, RotateCcw, Settings, Swords, Unplug, Users, X } from "lucide-react";
+import { Clipboard, Play, Swords, Unplug, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import type { Socket } from "socket.io-client";
@@ -22,6 +22,21 @@ import type {
   ServerToClientEvents,
   TypingProgress
 } from "@type-battle/shared";
+import { GameHeader } from "./_components/game-header";
+import { PlayerSettingsModal } from "./_components/player-settings-modal";
+import { ProgressBlock } from "./_components/progress-block";
+import { ResultPanel } from "./_components/result-panel";
+import { RivalBar } from "./_components/rival-bar";
+import { Stat } from "./_components/stat";
+import { StatusPill } from "./_components/status-pill";
+import { TypingPrompt } from "./_components/typing-prompt";
+import { advanceProgress, createEmptyProgress, type ProgressState } from "./_lib/typing-progress";
+import {
+  BOT_DIFFICULTY_LABELS,
+  PROMPT_CATEGORY_LABELS,
+  getPlayerConnectionLabel,
+  getPlayerRoleLabel
+} from "./_lib/ui-labels";
 import {
   applyPlayerSettingsToDocument,
   DEFAULT_PLAYER_SETTINGS,
@@ -38,14 +53,6 @@ import {
 import { playCountdownSound, playTypingSound, primeSoundPlayback } from "../lib/sound";
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
-type ProgressState = {
-  progressIndex: number;
-  correctCharacters: number;
-  totalTypedCharacters: number;
-  mistakes: number;
-  currentStreak: number;
-  maxStreak: number;
-};
 
 type PracticeSession = {
   practiceId: string;
@@ -57,31 +64,6 @@ type PracticeSession = {
 const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL?.trim() ?? "";
 const REALTIME_UNAVAILABLE_MESSAGE = "Realtime の接続先が未設定です。";
 const ROOM_CODE_KEY = "type-battle:room-code";
-
-function createEmptyProgress(): ProgressState {
-  return {
-    progressIndex: 0,
-    correctCharacters: 0,
-    totalTypedCharacters: 0,
-    mistakes: 0,
-    currentStreak: 0,
-    maxStreak: 0
-  };
-}
-
-function advanceProgress(previous: ProgressState, expectedChar: string | undefined, typedChar: string): ProgressState {
-  const correct = typedChar === expectedChar;
-  const nextIndex = correct ? previous.progressIndex + 1 : previous.progressIndex;
-
-  return {
-    progressIndex: nextIndex,
-    correctCharacters: correct ? previous.correctCharacters + 1 : previous.correctCharacters,
-    totalTypedCharacters: previous.totalTypedCharacters + 1,
-    mistakes: correct ? previous.mistakes : previous.mistakes + 1,
-    currentStreak: correct ? previous.currentStreak + 1 : 0,
-    maxStreak: correct ? Math.max(previous.maxStreak, previous.currentStreak + 1) : previous.maxStreak
-  };
-}
 
 export default function HomePage() {
   const socketRef = useRef<ClientSocket | null>(null);
@@ -347,7 +329,7 @@ export default function HomePage() {
 
     const storedRoomCode = window.localStorage.getItem(ROOM_CODE_KEY);
     
-    // Only attempt to resume if we have a room code and we are not currently in a room
+    // Resume only when there is a saved room and this tab is not already in one.
     if (!storedRoomCode || room) {
       setResumeAttempted(true);
       return;
@@ -642,27 +624,14 @@ export default function HomePage() {
 
   return (
     <main className="appShell">
-      <section className="topBar" aria-label="Game status">
-        <div>
-          <p className="eyebrow">TYPE BATTLE</p>
-          <h1>Online typing match</h1>
-        </div>
-        <div className={connected ? "connection isOnline" : "connection"}>
-          <span />
-          {connected ? "online" : realtimeConfigured ? "offline" : "realtime pending"}
-        </div>
-        <button
-          className="iconButton"
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          title="Open settings"
-        >
-          <Settings size={18} />
-        </button>
-      </section>
+      <GameHeader
+        connected={connected}
+        realtimeConfigured={realtimeConfigured}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
 
       <section className="workspace">
-        <aside className="sidePanel" aria-label="Room controls">
+        <aside className="sidePanel" aria-label="ルーム操作">
           {!realtimeConfigured ? (
             <p className="infoText">
               Realtime の接続先が未設定のため、今は Vercel への web deploy はできますが対戦は使えません。
@@ -670,7 +639,7 @@ export default function HomePage() {
           ) : null}
 
           <div className="fieldGroup">
-            <label htmlFor="nickname">Nickname</label>
+            <label htmlFor="nickname">ニックネーム</label>
             <input
               id="nickname"
               value={nickname}
@@ -684,12 +653,12 @@ export default function HomePage() {
             <div className="roomActions">
               <button className="primaryButton" type="button" onClick={createRoom} disabled={!realtimeConfigured}>
                 <Swords size={18} />
-                Create room
+                ルームを作成
               </button>
               <div className="joinRow">
                 <input
-                  aria-label="Room code"
-                  placeholder="ROOM CODE"
+                  aria-label="ルームコード"
+                  placeholder="ルームコード"
                   value={joinCode}
                   maxLength={8}
                   onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
@@ -698,7 +667,7 @@ export default function HomePage() {
                   className="iconButton"
                   type="button"
                   onClick={joinRoom}
-                  title="Join room"
+                  title="ルームに参加"
                   disabled={!realtimeConfigured}
                 >
                   <Users size={18} />
@@ -708,13 +677,13 @@ export default function HomePage() {
           ) : (
             <div className="roomMeta">
               <div>
-                <span>Room</span>
+                <span>ルーム</span>
                 <strong>{room.roomCode}</strong>
               </div>
-              <button className="iconButton" type="button" onClick={copyRoomCode} title="Copy room code">
+              <button className="iconButton" type="button" onClick={copyRoomCode} title="ルームコードをコピー">
                 <Clipboard size={18} />
               </button>
-              <button className="iconButton" type="button" onClick={leaveRoom} title="Leave room">
+              <button className="iconButton" type="button" onClick={leaveRoom} title="ルームを退出">
                 <Unplug size={18} />
               </button>
             </div>
@@ -722,7 +691,7 @@ export default function HomePage() {
 
           {!room ? (
             <div className="difficultySelector">
-              <span>Practice mode</span>
+              <span>練習モード</span>
               <div className="difficultyButtons">
                 {(["short", "standard", "long"] as const).map((category) => (
                   <button
@@ -732,7 +701,7 @@ export default function HomePage() {
                     onClick={() => setPracticeCategory(category)}
                     disabled={!realtimeConfigured || Boolean(practiceSession && !practiceResult)}
                   >
-                    {category}
+                    {PROMPT_CATEGORY_LABELS[category]}
                   </button>
                 ))}
               </div>
@@ -744,17 +713,17 @@ export default function HomePage() {
               >
                 <Swords size={18} />
                 {practiceSession && !practiceResult
-                  ? "Practice running"
+                  ? "練習中"
                   : practiceResult
-                    ? "Practice again"
-                    : "Start practice"}
+                    ? "もう一度練習"
+                    : "練習を開始"}
               </button>
             </div>
           ) : null}
 
           <div className="panelLinks">
             <Link className="secondaryButton" href="/feedback">
-              Report a bug
+              不具合を報告
             </Link>
           </div>
 
@@ -766,19 +735,9 @@ export default function HomePage() {
                 <div className="playerRow" key={player.id}>
                   <div>
                     <strong>{player.nickname}</strong>
-                    <span>
-                      {player.isBot ? "com" : player.isHost ? "host" : player.ready ? "ready" : "waiting"}
-                    </span>
+                    <span>{getPlayerRoleLabel(player)}</span>
                   </div>
-                  <small>
-                    {player.isBot
-                      ? "bot"
-                      : player.finishTimeMs === Infinity
-                        ? "forfeited"
-                        : player.connected
-                          ? "connected"
-                          : "reconnecting..."}
-                  </small>
+                  <small>{getPlayerConnectionLabel(player)}</small>
                 </div>
               ))}
             </div>
@@ -786,7 +745,7 @@ export default function HomePage() {
 
           {room?.status === "waiting" && room.players.length < room.maxPlayers ? (
             <div className="difficultySelector">
-              <span>Prompt Category</span>
+              <span>課題カテゴリ</span>
               <div className="difficultyButtons">
                 {(["short", "standard", "long"] as const).map((c) => (
                   <button
@@ -796,7 +755,7 @@ export default function HomePage() {
                     onClick={() => setPromptCategory(c)}
                     disabled={!currentPlayer?.isHost}
                   >
-                    {c}
+                    {PROMPT_CATEGORY_LABELS[c]}
                   </button>
                 ))}
               </div>
@@ -805,7 +764,7 @@ export default function HomePage() {
 
           {room?.status === "waiting" && room.players.length < room.maxPlayers ? (
             <div className="difficultySelector">
-              <span>COM Difficulty</span>
+              <span>COM の強さ</span>
               <div className="difficultyButtons">
                 {(["easy", "normal", "hard"] as const).map((difficulty) => (
                   <button
@@ -815,7 +774,7 @@ export default function HomePage() {
                     onClick={() => setBotDifficulty(difficulty)}
                     disabled={!currentPlayer?.isHost}
                   >
-                    {difficulty}
+                    {BOT_DIFFICULTY_LABELS[difficulty]}
                   </button>
                 ))}
               </div>
@@ -825,7 +784,7 @@ export default function HomePage() {
           {room?.status === "waiting" ? (
             <div className="lobbyActions">
               <button className="secondaryButton" type="button" onClick={setReady}>
-                {currentPlayer?.ready ? "Ready" : "Set ready"}
+                {currentPlayer?.ready ? "準備完了" : "準備する"}
               </button>
               <button
                 className="primaryButton"
@@ -834,13 +793,13 @@ export default function HomePage() {
                 disabled={!realtimeConfigured || !canStart}
               >
                 <Play size={18} />
-                {room.players.length < room.maxPlayers ? "Start vs COM" : "Start"}
+                {room.players.length < room.maxPlayers ? "COM と開始" : "開始"}
               </button>
             </div>
           ) : null}
         </aside>
 
-        <section className="matchSurface" aria-label="Typing match">
+        <section className="matchSurface" aria-label="タイピング対戦">
           {room || practiceSession || practiceResult ? (
             <>
               <div className="matchHeader">
@@ -880,37 +839,19 @@ export default function HomePage() {
               ) : null}
 
               {activePromptText ? (
-                <div className="promptBox" aria-label="Typing prompt">
-                  {activePromptText.split("").map((char, index) => {
-                    const className =
-                      index < activeProgress.progressIndex
-                        ? "char typed"
-                        : index === activeProgress.progressIndex && settings.inputGuideEnabled
-                          ? "char current"
-                          : "char";
-                    return (
-                      <span className={className} key={`${char}-${index}`}>
-                        {char}
-                      </span>
-                    );
-                  })}
-                </div>
+                <TypingPrompt
+                  promptText={activePromptText}
+                  progressIndex={activeProgress.progressIndex}
+                  inputGuideEnabled={settings.inputGuideEnabled}
+                />
               ) : (
                 <div className="emptyState">
                   <Swords size={42} />
-                  <p>{room ? (room.players.length < room.maxPlayers ? "Waiting for rival" : "Ready to start") : "Start practice"}</p>
+                  <p>{room ? (room.players.length < room.maxPlayers ? "対戦相手を待っています" : "開始できます") : "練習を開始してください"}</p>
                 </div>
               )}
 
-              <div className="progressBlock">
-                <div className="progressLabel">
-                  <span>Your progress</span>
-                  <strong>{activeProgressPercent}%</strong>
-                </div>
-                <div className="progressTrack">
-                  <span style={{ width: `${activeProgressPercent}%` }} />
-                </div>
-              </div>
+              <ProgressBlock progressPercent={activeProgressPercent} />
 
               {room ? (
                 <div className="rivalGrid">
@@ -926,192 +867,26 @@ export default function HomePage() {
               ) : null}
 
               {activeResult ? (
-                <div className="resultPanel">
-                  <div className="resultRows">
-                    {activeResult.players.map((player) => (
-                      <div className="resultRow" key={player.id}>
-                        <span>#{player.rank}</span>
-                        <strong>{player.nickname}</strong>
-                        <small>
-                          {player.wpm} WPM / {player.accuracy}% / {player.mistakes} miss / Streak: {player.maxStreak}
-                          {player.finishGap !== undefined ? ` / Gap: ${player.finishGap}ms` : ""}
-                        </small>
-                      </div>
-                    ))}
-                  </div>
-                  <button
-                    className="primaryButton"
-                    type="button"
-                    onClick={room ? rematch : startPractice}
-                  >
-                    <RotateCcw size={18} />
-                    {room ? "Rematch" : "Practice again"}
-                  </button>
-                  <Link className="secondaryButton" href="/feedback">
-                    Report a bug
-                  </Link>
-                </div>
+                <ResultPanel result={activeResult} isRoomResult={Boolean(room)} onRetry={room ? rematch : startPractice} />
               ) : null}
             </>
           ) : (
             <div className="emptyState large">
               <Swords size={56} />
-              <p>Create or join a room</p>
+              <p>ルームを作成、または参加してください</p>
             </div>
           )}
         </section>
       </section>
 
       {settingsOpen ? (
-        <div className="modalBackdrop" onClick={() => setSettingsOpen(false)}>
-          <div className="modalContent" onClick={(e) => e.stopPropagation()}>
-            <div className="modalHeader">
-              <h2>Player Settings</h2>
-              <button className="iconButton" type="button" onClick={() => setSettingsOpen(false)}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="settingsGrid">
-              <div className="fieldGroup">
-                <label>Nickname</label>
-                <input
-                  value={settings.nickname}
-                  maxLength={18}
-                  onChange={(e) => setNickname(e.target.value)}
-                />
-              </div>
-
-              <div className="fieldGroup">
-                <label>Theme</label>
-                <div className="difficultyButtons">
-                  {(["system", "light", "dark"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      className={settings.theme === t ? "active" : ""}
-                      onClick={() => setSettings((s) => ({ ...s, theme: t }))}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="fieldGroup">
-                <label>Display & Accessibility</label>
-                <div className="toggleGroup">
-                  <label className="toggleLabel">
-                    <input
-                      type="checkbox"
-                      checked={settings.inputGuideEnabled}
-                      onChange={(e) => setSettings((s) => ({ ...s, inputGuideEnabled: e.target.checked }))}
-                    />
-                    Input Guide (Highlight next char)
-                  </label>
-                  <label className="toggleLabel">
-                    <input
-                      type="checkbox"
-                      checked={settings.reducedMotion}
-                      onChange={(e) => setSettings((s) => ({ ...s, reducedMotion: e.target.checked }))}
-                    />
-                    Reduced Motion
-                  </label>
-                </div>
-              </div>
-
-              <div className="fieldGroup">
-                <label>Font Size</label>
-                <div className="difficultyButtons">
-                  {(["small", "normal", "large"] as const).map((f) => (
-                    <button
-                      key={f}
-                      type="button"
-                      className={settings.fontSize === f ? "active" : ""}
-                      onClick={() => setSettings((s) => ({ ...s, fontSize: f }))}
-                    >
-                      {f}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="fieldGroup">
-                <label>Sound</label>
-                <div className="toggleGroup">
-                  <label className="toggleLabel">
-                    <input
-                      type="checkbox"
-                      checked={settings.soundEnabled}
-                      onChange={(e) => setSettings((s) => ({ ...s, soundEnabled: e.target.checked }))}
-                    />
-                    Sound Effects
-                  </label>
-                  <label className="toggleLabel">
-                    <input
-                      type="checkbox"
-                      checked={settings.countdownSoundEnabled}
-                      onChange={(e) => setSettings((s) => ({ ...s, countdownSoundEnabled: e.target.checked }))}
-                    />
-                    Countdown Sound
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <div className="modalActions">
-              <button className="primaryButton" type="button" onClick={() => setSettingsOpen(false)}>
-                Save & Close
-              </button>
-            </div>
-          </div>
-        </div>
+        <PlayerSettingsModal
+          settings={settings}
+          setSettings={setSettings}
+          setNickname={setNickname}
+          onClose={() => setSettingsOpen(false)}
+        />
       ) : null}
     </main>
-  );
-}
-
-function StatusPill({ status }: { status: RoomState["status"] | "result" }) {
-  return <div className={`statusPill status-${status}`}>{status}</div>;
-}
-
-function Stat({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="statItem">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function RivalBar({
-  player,
-  promptLength,
-  isSelf
-}: {
-  player: RoomState["players"][number];
-  promptLength: number;
-  isSelf: boolean;
-}) {
-  const progress = calculateProgress(player.progressIndex, promptLength);
-  const isForfeited = player.forfeited;
-  const isDisconnected = !player.connected && !player.isBot;
-
-  return (
-    <div className={isSelf ? "rivalBar isSelf" : "rivalBar"}>
-      <div className="rivalInfo">
-        <strong>{player.nickname}</strong>
-        {isForfeited ? (
-          <span className="statusTag isForfeited">FORFEITED</span>
-        ) : isDisconnected ? (
-          <span className="statusTag isDisconnected">RECONNECTING...</span>
-        ) : (
-          <span>{progress}%</span>
-        )}
-      </div>
-      <div className="miniTrack">
-        <span style={{ width: `${progress}%` }} className={isForfeited ? "isForfeited" : ""} />
-      </div>
-    </div>
   );
 }

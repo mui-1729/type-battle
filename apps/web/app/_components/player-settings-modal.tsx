@@ -1,0 +1,123 @@
+import { X } from "lucide-react";
+import type { Dispatch, SetStateAction } from "react";
+import type { PlayerSettings } from "../../lib/player-settings";
+import { FONT_SIZE_LABELS, THEME_LABELS } from "../_lib/ui-labels";
+
+type PlayerSettingsModalProps = {
+  settings: PlayerSettings;
+  setSettings: Dispatch<SetStateAction<PlayerSettings>>;
+  setNickname: (nickname: string) => void;
+  onClose: () => void;
+};
+
+export function PlayerSettingsModal({ settings, setSettings, setNickname, onClose }: PlayerSettingsModalProps) {
+  return (
+    <div className="modalBackdrop" onClick={onClose}>
+      <div className="modalContent" onClick={(event) => event.stopPropagation()}>
+        <div className="modalHeader">
+          <h2>プレイヤー設定</h2>
+          <button className="iconButton" type="button" onClick={onClose} aria-label="設定を閉じる">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="settingsGrid">
+          <div className="fieldGroup">
+            <label>ニックネーム</label>
+            <input value={settings.nickname} maxLength={18} onChange={(event) => setNickname(event.target.value)} />
+          </div>
+
+          <div className="fieldGroup">
+            <label>テーマ</label>
+            <div className="difficultyButtons">
+              {(["system", "light", "dark"] as const).map((theme) => (
+                <button
+                  key={theme}
+                  type="button"
+                  className={settings.theme === theme ? "active" : ""}
+                  onClick={() => setSettings((current) => ({ ...current, theme }))}
+                >
+                  {THEME_LABELS[theme]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="fieldGroup">
+            <label>表示とアクセシビリティ</label>
+            <div className="toggleGroup">
+              <label className="toggleLabel">
+                <input
+                  type="checkbox"
+                  checked={settings.inputGuideEnabled}
+                  onChange={(event) =>
+                    setSettings((current) => ({ ...current, inputGuideEnabled: event.target.checked }))
+                  }
+                />
+                入力ガイド（次の文字を強調）
+              </label>
+              <label className="toggleLabel">
+                <input
+                  type="checkbox"
+                  checked={settings.reducedMotion}
+                  onChange={(event) =>
+                    setSettings((current) => ({ ...current, reducedMotion: event.target.checked }))
+                  }
+                />
+                アニメーションを減らす
+              </label>
+            </div>
+          </div>
+
+          <div className="fieldGroup">
+            <label>文字サイズ</label>
+            <div className="difficultyButtons">
+              {(["small", "normal", "large"] as const).map((fontSize) => (
+                <button
+                  key={fontSize}
+                  type="button"
+                  className={settings.fontSize === fontSize ? "active" : ""}
+                  onClick={() => setSettings((current) => ({ ...current, fontSize }))}
+                >
+                  {FONT_SIZE_LABELS[fontSize]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="fieldGroup">
+            <label>サウンド</label>
+            <div className="toggleGroup">
+              <label className="toggleLabel">
+                <input
+                  type="checkbox"
+                  checked={settings.soundEnabled}
+                  onChange={(event) =>
+                    setSettings((current) => ({ ...current, soundEnabled: event.target.checked }))
+                  }
+                />
+                効果音
+              </label>
+              <label className="toggleLabel">
+                <input
+                  type="checkbox"
+                  checked={settings.countdownSoundEnabled}
+                  onChange={(event) =>
+                    setSettings((current) => ({ ...current, countdownSoundEnabled: event.target.checked }))
+                  }
+                />
+                カウントダウン音
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="modalActions">
+          <button className="primaryButton" type="button" onClick={onClose}>
+            保存して閉じる
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

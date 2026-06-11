@@ -4,21 +4,72 @@
   --muted: #666b73;
   --line: #d8dde5;
   --panel: #ffffff;
+  --panel-soft: #f8fafc;
+  --surface: rgba(255, 255, 255, 0.92);
   --paper: #f5f7fa;
+  --input-bg: #ffffff;
+  --control: #ecf1f7;
+  --control-hover: #e1e7ee;
+  --selected-bg: #151515;
+  --selected-ink: #ffffff;
+  --track: #e6ebf1;
+  --prompt-bg: #101418;
+  --prompt-ink: #dbe4ef;
+  --typed-ink: #6ff2af;
+  --focus-ring: rgba(38, 103, 255, 0.14);
+  --grid-blue: rgba(38, 103, 255, 0.06);
+  --grid-green: rgba(24, 166, 106, 0.05);
+  --info-bg: #eef4ff;
+  --info-border: #cfe0ff;
+  --info-ink: #2457cc;
+  --danger-bg: #fff0f0;
+  --danger-border: #ffd0d0;
+  --warning-bg: #fefcf2;
+  --warning-border: #fdf6b2;
+  --warning-ink: #723b13;
   --blue: #2667ff;
   --green: #18a66a;
   --red: #c83d3d;
   --yellow: #f4bd42;
   --shadow: 0 18px 45px rgba(21, 21, 21, 0.08);
+  --backdrop: rgba(0, 0, 0, 0.5);
 }
 
 .theme-dark {
-  --ink: #dbe4ef;
-  --muted: #8899a6;
-  --line: #2f3336;
-  --panel: #15181c;
-  --paper: #101418;
-  --shadow: 0 18px 45px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
+  --ink: #edf4fb;
+  --muted: #9aa8b7;
+  --line: #293748;
+  --panel: #111820;
+  --panel-soft: #17212b;
+  --surface: rgba(17, 24, 32, 0.94);
+  --paper: #070c12;
+  --input-bg: #0b1118;
+  --control: #202b38;
+  --control-hover: #29394a;
+  --selected-bg: #7da0ff;
+  --selected-ink: #07111f;
+  --track: #263342;
+  --prompt-bg: #05080d;
+  --prompt-ink: #e7f0fa;
+  --typed-ink: #7ff0b8;
+  --focus-ring: rgba(125, 160, 255, 0.28);
+  --grid-blue: rgba(125, 160, 255, 0.08);
+  --grid-green: rgba(52, 211, 153, 0.06);
+  --info-bg: #10233c;
+  --info-border: #244a76;
+  --info-ink: #a9c8ff;
+  --danger-bg: #33171a;
+  --danger-border: #70323a;
+  --warning-bg: #302713;
+  --warning-border: #6c5520;
+  --warning-ink: #f5d68a;
+  --blue: #7da0ff;
+  --green: #34d399;
+  --red: #ff7a7a;
+  --yellow: #f2c45a;
+  --shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
+  --backdrop: rgba(0, 0, 0, 0.68);
 }
 
 .font-small .promptBox { font-size: 22px; }
@@ -42,8 +93,8 @@ body {
 body {
   margin: 0;
   background:
-    linear-gradient(90deg, rgba(38, 103, 255, 0.06) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(24, 166, 106, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-blue) 1px, transparent 1px),
+    linear-gradient(0deg, var(--grid-green) 1px, transparent 1px),
     var(--paper);
   background-size: 28px 28px;
   color: var(--ink);
@@ -127,7 +178,7 @@ h1 {
 
 .sidePanel,
 .matchSurface {
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
@@ -156,7 +207,7 @@ label,
 }
 
 input {
-  background: #fff;
+  background: var(--input-bg);
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--ink);
@@ -168,7 +219,11 @@ input {
 
 input:focus {
   border-color: var(--blue);
-  box-shadow: 0 0 0 3px rgba(38, 103, 255, 0.14);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+input::placeholder {
+  color: var(--muted);
 }
 
 .roomActions,
@@ -214,20 +269,20 @@ input:focus {
 }
 
 .secondaryButton {
-  background: #ecf1f7;
+  background: var(--control);
   color: var(--ink);
   padding: 0 16px;
 }
 
 .iconButton {
-  background: #ecf1f7;
+  background: var(--control);
   color: var(--ink);
   width: 44px;
 }
 
 .errorText {
-  background: #fff0f0;
-  border: 1px solid #ffd0d0;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
   border-radius: 8px;
   color: var(--red);
   font-size: 13px;
@@ -236,10 +291,10 @@ input:focus {
 }
 
 .infoText {
-  background: #eef4ff;
-  border: 1px solid #cfe0ff;
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
   border-radius: 8px;
-  color: #2457cc;
+  color: var(--info-ink);
   font-size: 13px;
   margin: 0;
   padding: 10px;
@@ -252,7 +307,7 @@ input:focus {
 
 .playerRow {
   align-items: center;
-  background: #f8fafc;
+  background: var(--panel-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
   display: flex;
@@ -283,7 +338,7 @@ input:focus {
 }
 
 .difficultyButtons button {
-  background: #ecf1f7;
+  background: var(--control);
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--muted);
@@ -294,13 +349,13 @@ input:focus {
 }
 
 .difficultyButtons button:hover:not(:disabled) {
-  background: #e1e7ee;
+  background: var(--control-hover);
 }
 
 .difficultyButtons button.active {
-  background: var(--ink);
-  border-color: var(--ink);
-  color: #fff;
+  background: var(--selected-bg);
+  border-color: var(--selected-bg);
+  color: var(--selected-ink);
 }
 
 .matchSurface {
@@ -350,7 +405,7 @@ input:focus {
 }
 
 .statItem {
-  background: #f8fafc;
+  background: var(--panel-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
@@ -382,9 +437,9 @@ input:focus {
 }
 
 .promptBox {
-  background: #101418;
+  background: var(--prompt-bg);
   border-radius: 8px;
-  color: #dbe4ef;
+  color: var(--prompt-ink);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 30px;
   line-height: 1.65;
@@ -398,7 +453,7 @@ input:focus {
 }
 
 .char.typed {
-  color: #6ff2af;
+  color: var(--typed-ink);
 }
 
 .char.current {
@@ -419,7 +474,7 @@ input:focus {
 
 .progressTrack,
 .miniTrack {
-  background: #e6ebf1;
+  background: var(--track);
   border-radius: 8px;
   height: 14px;
   overflow: hidden;
@@ -441,14 +496,14 @@ input:focus {
 }
 
 .rivalBar {
-  background: #f8fafc;
+  background: var(--panel-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
 }
 
 .rivalBar.isSelf {
-  border-color: rgba(38, 103, 255, 0.5);
+  border-color: var(--blue);
 }
 
 .rivalBar > div:first-child {
@@ -472,15 +527,15 @@ input:focus {
 }
 
 .statusTag.isForfeited {
-  background: #fdf2f2;
-  border: 1px solid #fbd5d5;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
   color: var(--red);
 }
 
 .statusTag.isDisconnected {
-  background: #fefcf2;
-  border: 1px solid #fdf6b2;
-  color: #723b13;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-ink);
 }
 
 .miniTrack span.isForfeited {
@@ -513,7 +568,7 @@ input:focus {
 }
 
 .resultPanel {
-  background: #f8fafc;
+  background: var(--panel-soft);
   border: 1px solid var(--line);
   border-radius: 8px;
   display: grid;
@@ -529,7 +584,7 @@ input:focus {
 
 .resultRow {
   align-items: center;
-  background: #fff;
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
   display: grid;
@@ -606,7 +661,7 @@ input:focus {
 
 .modalBackdrop {
   align-items: center;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--backdrop);
   display: flex;
   inset: 0;
   justify-content: center;
