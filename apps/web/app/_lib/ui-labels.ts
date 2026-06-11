@@ -1,4 +1,4 @@
-import type { BotDifficulty, MatchRule, PromptCategory, RoomState } from "@type-battle/shared";
+import type { BotDifficulty, DeviceKind, MatchRule, PromptCategory, RoomState } from "@type-battle/shared";
 import type { PlayerSettings } from "../../lib/player-settings";
 
 export const PROMPT_CATEGORY_LABELS: Record<PromptCategory, string> = {
@@ -17,6 +17,11 @@ export const MATCH_RULE_LABELS: Record<MatchRule, string> = {
   race: "レース",
   timeAttack: "タイム",
   hpBattle: "HPバトル"
+};
+
+export const DEVICE_KIND_LABELS: Record<DeviceKind, string> = {
+  mobile: "スマホ",
+  desktop: "PC"
 };
 
 export const THEME_LABELS: Record<PlayerSettings["theme"], string> = {
@@ -61,4 +66,16 @@ export function getPlayerConnectionLabel(player: RoomState["players"][number]): 
   }
 
   return player.connected ? "接続中" : "再接続中...";
+}
+
+export function getPlayerDeviceLabel(player: RoomState["players"][number]): string {
+  if (player.isBot) {
+    return "PC";
+  }
+
+  if (player.deviceKind) {
+    return DEVICE_KIND_LABELS[player.deviceKind];
+  }
+
+  return "未設定";
 }

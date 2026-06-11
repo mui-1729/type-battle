@@ -4,6 +4,8 @@ export type BotDifficulty = "easy" | "normal" | "hard";
 
 export type MatchRule = "race" | "timeAttack" | "hpBattle";
 
+export type DeviceKind = "mobile" | "desktop";
+
 export type PlayerState = {
   id: string;
   nickname: string;
@@ -15,6 +17,7 @@ export type PlayerState = {
   correctCharacters: number;
   totalTypedCharacters: number;
   mistakes: number;
+  deviceKind?: DeviceKind;
   hp?: number;
   maxHp?: number;
   maxStreak: number;

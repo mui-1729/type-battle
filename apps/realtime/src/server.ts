@@ -81,7 +81,8 @@ io.on("connection", (socket) => {
       nickname: payload.nickname,
       guestId: payload.guestId,
       socketId: socket.id,
-      sessionId: payload.sessionId
+      sessionId: payload.sessionId,
+      ...(payload.deviceKind ? { deviceKind: payload.deviceKind } : {})
     });
 
     socket.join(room.roomCode);
@@ -115,7 +116,8 @@ io.on("connection", (socket) => {
       nickname: payload.nickname,
       guestId: payload.guestId,
       socketId: socket.id,
-      sessionId: payload.sessionId
+      sessionId: payload.sessionId,
+      ...(payload.deviceKind ? { deviceKind: payload.deviceKind } : {})
     });
 
     if ("error" in result) {

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { RotateCcw } from "lucide-react";
 import type { MatchResult } from "@type-battle/shared";
+import { getPlayerDeviceLabel } from "../_lib/ui-labels";
 
 type ResultPanelProps = {
   result: MatchResult;
@@ -18,6 +19,7 @@ export function ResultPanel({ result, isRoomResult, onRetry }: ResultPanelProps)
             <strong>{player.nickname}</strong>
             <small>
               {player.wpm} WPM / 正確率 {player.accuracy}% / ミス {player.mistakes} / 連続正解 {player.maxStreak}
+              {` / 端末 ${getPlayerDeviceLabel(player)}`}
               {player.maxHp !== undefined ? ` / HP ${player.hp ?? 0}/${player.maxHp}` : ""}
               {player.finishGap !== undefined ? ` / 差 ${player.finishGap}ms` : ""}
             </small>

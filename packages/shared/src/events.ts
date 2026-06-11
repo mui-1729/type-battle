@@ -1,6 +1,7 @@
 import type {
   AckResponse,
   BotDifficulty,
+  DeviceKind,
   MatchRule,
   MatchResult,
   Prompt,
@@ -15,12 +16,14 @@ export type JoinRoomPayload = {
   nickname: string;
   guestId: string;
   sessionId: string;
+  deviceKind?: DeviceKind;
 };
 
 export type CreateRoomPayload = {
   nickname: string;
   guestId: string;
   sessionId: string;
+  deviceKind?: DeviceKind;
 };
 
 export type RoomCodePayload = {

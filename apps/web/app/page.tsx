@@ -38,10 +38,13 @@ import {
   createEmptyProgress,
   type ProgressState
 } from "./_lib/typing-progress";
+import { detectDeviceKind } from "./_lib/device-kind";
 import {
   BOT_DIFFICULTY_LABELS,
+  DEVICE_KIND_LABELS,
   MATCH_RULE_LABELS,
   PROMPT_CATEGORY_LABELS,
+  getPlayerDeviceLabel,
   getPlayerConnectionLabel,
   getPlayerRoleLabel
 } from "./_lib/ui-labels";
@@ -403,7 +406,8 @@ export default function HomePage() {
         roomCode: storedRoomCode,
         nickname: normalizeNickname(nicknameRef.current),
         guestId,
-        sessionId
+        sessionId,
+        deviceKind: detectDeviceKind()
       },
       (response) => {
         if (!response.ok) {
@@ -605,7 +609,7 @@ export default function HomePage() {
 
   const createRoom = () => {
     const socket = socketRef.current;
-    const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
+    const currentNickname = nicknameRef.current;
     const validationError = validateNickname(currentNickname);
 
     if (!realtimeConfigured || !socket || validationError || !guestId) {
@@ -616,7 +620,12 @@ export default function HomePage() {
     void primeSoundPlayback();
     socket.emit(
       "room:create",
-      { nickname: normalizeNickname(currentNickname), guestId, sessionId },
+      {
+        nickname: normalizeNickname(currentNickname),
+        guestId,
+        sessionId,
+        deviceKind: detectDeviceKind()
+      },
       (response) => {
         if (!response.ok) {
           setError(response.error);
@@ -636,7 +645,7 @@ export default function HomePage() {
 
   const joinRoom = () => {
     const socket = socketRef.current;
-    const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
+    const currentNickname = nicknameRef.current;
     const validationError = validateNickname(currentNickname);
 
     if (!realtimeConfigured || !socket || validationError || !guestId) {
@@ -651,7 +660,8 @@ export default function HomePage() {
         roomCode: joinCode.trim().toUpperCase(),
         nickname: normalizeNickname(currentNickname),
         guestId,
-        sessionId
+        sessionId,
+        deviceKind: detectDeviceKind()
       },
       (response) => {
         if (!response.ok) {
@@ -847,12 +857,20 @@ export default function HomePage() {
                 <div className="playerRow" key={player.id}>
                   <div>
                     <strong>{player.nickname}</strong>
-                    <span>{getPlayerRoleLabel(player)}</span>
+                    <span>
+                      {getPlayerRoleLabel(player)} / {getPlayerDeviceLabel(player)}
+                    </span>
                   </div>
                   <small>{getPlayerConnectionLabel(player)}</small>
                 </div>
               ))}
             </div>
+          ) : null}
+
+          {room ? (
+            <p className="infoText">
+              端末の組み合わせ: <strong>{getMatchupLabel(room.players)}</strong>
+            </p>
           ) : null}
 
           {room?.status === "waiting" && room.players.length < room.maxPlayers ? (
@@ -1030,4 +1048,30 @@ export default function HomePage() {
       ) : null}
     </main>
   );
+}
+
+function getMatchupLabel(players: RoomState["players"]): string {
+  if (players.length === 0) {
+    return "";
+  }
+
+  const visiblePlayers = players.filter((player) => !player.forfeited).slice(0, 2);
+
+  if (visiblePlayers.length === 0) {
+    return "";
+  }
+
+  const labels = visiblePlayers.map((player) => {
+    if (player.isBot) {
+      return DEVICE_KIND_LABELS.desktop;
+    }
+
+    return player.deviceKind ? DEVICE_KIND_LABELS[player.deviceKind] : "未設定";
+  });
+
+  if (labels.length === 1) {
+    return `${labels[0]}で待機中`;
+  }
+
+  return `${labels[0] ?? "未設定"}対${labels[1] ?? "未設定"}`;
 }

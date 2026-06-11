@@ -40,6 +40,33 @@ describe("rooms", () => {
     expect(joined.room.players).toHaveLength(2);
   });
 
+  it("stores device kinds for joined players", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_device",
+      socketId: "socket_alice_device",
+      deviceKind: "mobile"
+    });
+
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_device",
+      socketId: "socket_bob_device",
+      deviceKind: "mobile"
+    });
+
+    expect("error" in joined).toBe(false);
+
+    if ("error" in joined) {
+      return;
+    }
+
+    expect(created.room.players[0]?.deviceKind).toBe("mobile");
+    expect(joined.room.players[0]?.deviceKind).toBe("mobile");
+    expect(joined.room.players[1]?.deviceKind).toBe("mobile");
+  });
+
   it("starts a match and produces a result after both players finish", () => {
     const created = createRoom({
       nickname: "Alice",

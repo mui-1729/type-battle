@@ -8,6 +8,7 @@ import {
 } from "@type-battle/shared";
 import type {
   BotDifficulty,
+  DeviceKind,
   MatchRule,
   MatchResult,
   MatchStatus,
@@ -95,12 +96,13 @@ export function createRoom(input: {
   guestId: string;
   socketId: string;
   sessionId?: string;
+  deviceKind?: DeviceKind;
 }): {
   room: RoomState;
   playerId: string;
 } {
   const roomCode = createUniqueRoomCode();
-  const player = createPlayer(input.guestId, input.nickname, input.socketId, true);
+  const player = createPlayer(input.guestId, input.nickname, input.socketId, true, input.deviceKind);
   const room: InternalRoom = {
     roomCode,
     hostPlayerId: player.id,
@@ -132,6 +134,7 @@ export function joinRoom(input: {
   guestId: string;
   socketId: string;
   sessionId?: string;
+  deviceKind?: DeviceKind;
 }): { room: RoomState; playerId: string } | { error: string } {
   const room = rooms.get(input.roomCode.toUpperCase());
 
@@ -147,6 +150,7 @@ export function joinRoom(input: {
     existing.connected = true;
     delete existing.disconnectedAt;
     existing.nickname = normalizeNickname(input.nickname);
+    existing.deviceKind = input.deviceKind ?? existing.deviceKind ?? "desktop";
     socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: existing.id });
     void recordGuestSession({
       sessionId: input.sessionId ?? input.guestId,
@@ -165,7 +169,7 @@ export function joinRoom(input: {
     return { error: "このルームは満員です。" };
   }
 
-  const player = createPlayer(input.guestId, input.nickname, input.socketId, false);
+  const player = createPlayer(input.guestId, input.nickname, input.socketId, false, input.deviceKind);
   room.players.set(player.id, player);
   socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: player.id });
   void recordGuestSession({
@@ -712,6 +716,10 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     publicPlayer.hp = player.hp;
   }
 
+  if (player.deviceKind !== undefined) {
+    publicPlayer.deviceKind = player.deviceKind;
+  }
+
   if (player.maxHp !== undefined) {
     publicPlayer.maxHp = player.maxHp;
   }
@@ -743,6 +751,7 @@ function addBotPlayer(room: InternalRoom): void {
     ready: true,
     isHost: false,
     isBot: true,
+    deviceKind: "desktop",
     progressIndex: 0,
     correctCharacters: 0,
     totalTypedCharacters: 0,
@@ -758,7 +767,8 @@ function createPlayer(
   id: string,
   nickname: string,
   socketId: string,
-  isHost: boolean
+  isHost: boolean,
+  deviceKind: DeviceKind = "desktop"
 ): InternalPlayer {
   return {
     id,
@@ -768,6 +778,7 @@ function createPlayer(
     ready: false,
     isHost,
     isBot: false,
+    deviceKind,
     progressIndex: 0,
     correctCharacters: 0,
     totalTypedCharacters: 0,
