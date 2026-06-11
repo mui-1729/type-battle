@@ -9,6 +9,7 @@ import {
   markPlaying,
   checkForForfeits,
   checkExpiredTimeAttackMatches,
+  explicitLeaveBySocket,
   rematch,
   startMatch,
   setMatchRule,
@@ -225,6 +226,42 @@ describe("rooms", () => {
     expect(rejoined.room.players[0]?.isHost).toBe(true);
   });
 
+  it("frees a waiting room slot when a player explicitly leaves", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_explicit_leave",
+      socketId: "socket_alice_explicit_leave"
+    });
+
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_explicit_leave",
+      socketId: "socket_bob_explicit_leave"
+    });
+
+    expect("error" in joined).toBe(false);
+
+    const afterLeave = explicitLeaveBySocket("socket_bob_explicit_leave");
+    expect(afterLeave?.players).toHaveLength(1);
+
+    const replacement = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Charlie",
+      guestId: "guest_charlie_explicit_leave",
+      socketId: "socket_charlie_explicit_leave"
+    });
+
+    expect("error" in replacement).toBe(false);
+
+    if ("error" in replacement) {
+      return;
+    }
+
+    expect(replacement.room.players).toHaveLength(2);
+    expect(replacement.room.players.some((player) => player.id === "guest_charlie_explicit_leave")).toBe(true);
+  });
+
   it("adds a COM player with difficulty in nickname when a host starts alone", () => {
     const created = createRoom({
       nickname: "Alice",
@@ -292,6 +329,22 @@ describe("rooms", () => {
 
     expect(aliceAfterTyping?.currentStreak).toBe(2);
     expect(aliceAfterTyping?.maxStreak).toBe(2);
+
+    const promptLength = started.room.prompt?.text.length ?? 0;
+    finishTyping("socket_alice_streak", {
+      roomCode: created.room.roomCode,
+      progressIndex: promptLength,
+      correctCharacters: promptLength,
+      totalTypedCharacters: promptLength,
+      mistakes: 0
+    });
+    finishTyping("socket_bob_streak", {
+      roomCode: created.room.roomCode,
+      progressIndex: promptLength,
+      correctCharacters: promptLength,
+      totalTypedCharacters: promptLength,
+      mistakes: 0
+    });
 
     const rematched = rematch("socket_alice_streak", created.room.roomCode);
     expect("error" in rematched).toBe(false);

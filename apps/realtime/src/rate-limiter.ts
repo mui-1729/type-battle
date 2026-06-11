@@ -12,11 +12,16 @@ type RateLimitRecord = {
 
 class RateLimiter {
   private records = new Map<string, RateLimitRecord>();
+  private lastPrunedAt = 0;
+  private readonly pruneIntervalMs: number;
 
-  constructor(private config: RateLimitConfig) {}
+  constructor(private config: RateLimitConfig) {
+    this.pruneIntervalMs = Math.max(config.windowMs, 60 * 1000);
+  }
 
   isAllowed(key: string): boolean {
     const now = Date.now();
+    this.pruneExpired(now);
     const record = this.records.get(key);
 
     if (!record || now > record.resetAt) {
@@ -37,6 +42,19 @@ class RateLimiter {
 
   getResetAt(key: string): number {
     return this.records.get(key)?.resetAt ?? Date.now();
+  }
+
+  private pruneExpired(now: number): void {
+    if (now - this.lastPrunedAt < this.pruneIntervalMs) {
+      return;
+    }
+
+    this.lastPrunedAt = now;
+    for (const [key, record] of this.records.entries()) {
+      if (now > record.resetAt) {
+        this.records.delete(key);
+      }
+    }
   }
 }
 

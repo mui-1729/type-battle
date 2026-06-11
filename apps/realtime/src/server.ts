@@ -18,6 +18,7 @@ import {
   checkForForfeits,
   cleanupExpiredRooms,
   createRoom,
+  explicitLeaveBySocket,
   finishTyping,
   getMetrics,
   joinRoom,
@@ -168,7 +169,7 @@ io.on("connection", (socket) => {
 
   socket.on("room:leave", (payload) => {
     socket.leave(payload.roomCode.toUpperCase());
-    const room = leaveBySocket(socket.id);
+    const room = explicitLeaveBySocket(socket.id);
 
     if (room) {
       logger.info({ event: "room_leave", roomCode: room.roomCode, socketId: socket.id });

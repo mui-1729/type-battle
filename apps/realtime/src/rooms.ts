@@ -293,6 +293,43 @@ export function leaveBySocket(socketId: string): RoomState | null {
   return toPublicRoom(room);
 }
 
+export function explicitLeaveBySocket(socketId: string): RoomState | null {
+  const record = socketIndex.get(socketId);
+
+  if (!record) {
+    return null;
+  }
+
+  const room = rooms.get(record.roomCode);
+
+  if (!room) {
+    socketIndex.delete(socketId);
+    return null;
+  }
+
+  if (room.status === "playing" || room.status === "countdown") {
+    return leaveBySocket(socketId);
+  }
+
+  socketIndex.delete(socketId);
+  room.players.delete(record.playerId);
+  room.lastActivityAt = Date.now();
+
+  if (room.players.size === 0) {
+    rooms.delete(room.roomCode);
+    return null;
+  }
+
+  if (record.playerId === room.hostPlayerId) {
+    const nextHost = [...room.players.values()].find((player) => !player.isBot) ?? [...room.players.values()][0];
+    if (nextHost) {
+      room.hostPlayerId = nextHost.id;
+    }
+  }
+
+  return toPublicRoom(room);
+}
+
 export function setReady(socketId: string, roomCode: string, ready: boolean): RoomState | null {
   const record = socketIndex.get(socketId);
   const room = rooms.get(roomCode.toUpperCase());
@@ -495,6 +532,14 @@ export function rematch(socketId: string, roomCode: string): { room: RoomState }
 
   if (!record || !room || record.roomCode !== room.roomCode) {
     return { error: "ルームに参加していません。" };
+  }
+
+  if (record.playerId !== room.hostPlayerId) {
+    return { error: "ホストだけが再戦できます。" };
+  }
+
+  if (room.status !== "finished") {
+    return { error: "終了した試合だけ再戦できます。" };
   }
 
   room.status = "waiting";
