@@ -94,7 +94,7 @@ describe("rooms", () => {
     const playing = markPlaying(created.room.roomCode);
     expect(playing?.status).toBe("playing");
 
-    const promptLength = started.room.prompt?.text.length ?? 0;
+    const promptLength = started.room.prompt?.typing.romaji.length ?? 0;
     updateProgress("socket_alice_finish", {
       roomCode: created.room.roomCode,
       progressIndex: promptLength,
@@ -330,7 +330,7 @@ describe("rooms", () => {
     expect(aliceAfterTyping?.currentStreak).toBe(2);
     expect(aliceAfterTyping?.maxStreak).toBe(2);
 
-    const promptLength = started.room.prompt?.text.length ?? 0;
+    const promptLength = started.room.prompt?.typing.romaji.length ?? 0;
     finishTyping("socket_alice_streak", {
       roomCode: created.room.roomCode,
       progressIndex: promptLength,
@@ -429,6 +429,73 @@ describe("rooms", () => {
     expect(getRoom(created.room.roomCode)?.status).toBe("finished");
   });
 
+  it("allows the host to change the match rule after a match finishes and before rematch", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_midgame_rule",
+      socketId: "socket_alice_midgame_rule"
+    });
+
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_midgame_rule",
+      socketId: "socket_bob_midgame_rule"
+    });
+
+    expect("error" in joined).toBe(false);
+
+    const started = startMatch("socket_alice_midgame_rule", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    expect(markPlaying(created.room.roomCode)?.status).toBe("playing");
+
+    const promptLength = started.room.prompt?.typing.romaji.length ?? 0;
+    updateProgress("socket_alice_midgame_rule", {
+      roomCode: created.room.roomCode,
+      progressIndex: promptLength,
+      correctCharacters: promptLength,
+      totalTypedCharacters: promptLength,
+      mistakes: 0
+    });
+
+    finishTyping("socket_alice_midgame_rule", {
+      roomCode: created.room.roomCode,
+      progressIndex: promptLength,
+      correctCharacters: promptLength,
+      totalTypedCharacters: promptLength,
+      mistakes: 0
+    });
+
+    finishTyping("socket_bob_midgame_rule", {
+      roomCode: created.room.roomCode,
+      progressIndex: promptLength,
+      correctCharacters: promptLength,
+      totalTypedCharacters: promptLength,
+      mistakes: 0
+    });
+
+    expect(getRoom(created.room.roomCode)?.status).toBe("finished");
+
+    const switched = setMatchRule("socket_alice_midgame_rule", created.room.roomCode, "timeAttack");
+    expect("error" in switched).toBe(false);
+
+    if ("error" in switched) {
+      return;
+    }
+
+    expect(switched.room.matchRule).toBe("timeAttack");
+
+    const rematched = rematch("socket_alice_midgame_rule", created.room.roomCode);
+    expect("error" in rematched).toBe(false);
+
+    if ("error" in rematched) {
+      return;
+    }
+
+    expect(rematched.room.status).toBe("waiting");
+    expect(rematched.room.matchRule).toBe("timeAttack");
+  });
+
   it("finishes an hp battle match when a player deals lethal damage", () => {
     const created = createRoom({
       nickname: "Alice",
@@ -458,7 +525,7 @@ describe("rooms", () => {
     expect(markPlaying(created.room.roomCode)?.status).toBe("playing");
     expect(started.room.players.every((player) => player.maxHp === player.hp)).toBe(true);
 
-    const promptLength = started.room.prompt?.text.length ?? 0;
+    const promptLength = started.room.prompt?.typing.romaji.length ?? 0;
     const outcome = updateProgress("socket_alice_hp_battle", {
       roomCode: created.room.roomCode,
       progressIndex: promptLength,

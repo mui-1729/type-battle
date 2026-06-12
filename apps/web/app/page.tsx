@@ -14,6 +14,7 @@ import {
 } from "@type-battle/shared";
 import type {
   ClientToServerEvents,
+  DeviceKind,
   MatchRule,
   MatchResult,
   PlayerResult,
@@ -70,6 +71,7 @@ type PracticeSession = {
   prompt: Prompt;
   startedAt: number;
   category: PromptCategory;
+  deviceKind: DeviceKind;
 };
 
 const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL?.trim() ?? "";
@@ -120,10 +122,16 @@ export default function HomePage() {
   const activeResult = result ?? practiceResult;
   const activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
   const activePromptText = activePrompt?.text ?? "";
+  const activeInputDeviceKind = room ? currentPlayer?.deviceKind ?? "desktop" : practiceSession?.deviceKind ?? "desktop";
+  const activeTypingText = activePrompt
+    ? activeInputDeviceKind === "mobile"
+      ? activePrompt.typing.hiragana
+      : activePrompt.typing.romaji
+    : "";
   const isRoomPlaying = room?.status === "playing";
   const isPracticePlaying = Boolean(practiceSession && !practiceResult && !room);
   const activeProgress = room ? localProgress : practiceProgress;
-  const activeProgressPercent = calculateProgress(activeProgress.progressIndex, activePromptText.length);
+  const activeProgressPercent = calculateProgress(activeProgress.progressIndex, activeTypingText.length);
   const activeElapsedMs =
     isRoomPlaying && room?.serverStartAt
       ? Date.now() - room.serverStartAt
@@ -211,6 +219,7 @@ export default function HomePage() {
     const socket = socketRef.current;
     const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
     const validationError = validateNickname(currentNickname);
+    const deviceKind = detectDeviceKind();
 
     if (!realtimeConfigured || !socket || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
@@ -230,7 +239,8 @@ export default function HomePage() {
         setError("");
         setPracticeSession({
           ...response.data,
-          category: practiceCategory
+          category: practiceCategory,
+          deviceKind
         });
         setPracticeResult(null);
         setPracticeProgress(createEmptyProgress());
@@ -486,7 +496,7 @@ export default function HomePage() {
     }
 
     typingInputRef.current?.focus();
-  }, [acceptingTextInput, activePromptText]);
+  }, [acceptingTextInput, activeTypingText]);
 
   const emitProgress = useCallback(
     (nextProgress: TypingProgress, finish: boolean) => {
@@ -514,7 +524,7 @@ export default function HomePage() {
 
       if (room?.status === "playing" && room?.prompt) {
         setLocalProgress((previous) => {
-          const next = advanceProgressByText(previous, activePromptText, typedText);
+          const next = advanceProgressByText(previous, activeTypingText, typedText);
           const correct = next.progressIndex > previous.progressIndex;
           const payload: TypingProgress = {
             roomCode: room.roomCode,
@@ -525,7 +535,7 @@ export default function HomePage() {
           };
 
           void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
-          emitProgress(payload, next.progressIndex >= activePromptText.length);
+          emitProgress(payload, next.progressIndex >= activeTypingText.length);
           return next;
         });
         return;
@@ -533,10 +543,10 @@ export default function HomePage() {
 
       if (practiceSession && !practiceResult && !room) {
         setPracticeProgress((previous) => {
-          const next = advanceProgressByText(previous, activePromptText, typedText);
+          const next = advanceProgressByText(previous, activeTypingText, typedText);
           const correct = next.progressIndex > previous.progressIndex;
 
-          if (next.progressIndex >= activePromptText.length) {
+          if (next.progressIndex >= activeTypingText.length) {
             finishPractice(next);
           }
 
@@ -545,7 +555,7 @@ export default function HomePage() {
         });
       }
     },
-    [activePromptText, emitProgress, finishPractice, practiceResult, practiceSession, room]
+    [activeTypingText, emitProgress, finishPractice, practiceResult, practiceSession, room]
   );
 
   useEffect(() => {
@@ -556,7 +566,10 @@ export default function HomePage() {
         return;
       }
 
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+      if (
+        activeInputDeviceKind === "mobile" &&
+        (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)
+      ) {
         return;
       }
 
@@ -568,7 +581,7 @@ export default function HomePage() {
 
       if (room?.status === "playing" && room?.prompt) {
         setLocalProgress((previous) => {
-          const next = advanceProgress(previous, activePromptText[previous.progressIndex], event.key);
+          const next = advanceProgress(previous, activeTypingText[previous.progressIndex], event.key);
           const correct = next.progressIndex > previous.progressIndex;
           const soundOptions = settingsRef.current;
 
@@ -581,7 +594,7 @@ export default function HomePage() {
           };
 
           void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
-          emitProgress(payload, next.progressIndex >= activePromptText.length);
+          emitProgress(payload, next.progressIndex >= activeTypingText.length);
           return next;
         });
         return;
@@ -589,11 +602,11 @@ export default function HomePage() {
 
       if (practiceActive && practiceSession) {
         setPracticeProgress((previous) => {
-          const next = advanceProgress(previous, activePromptText[previous.progressIndex], event.key);
+          const next = advanceProgress(previous, activeTypingText[previous.progressIndex], event.key);
           const correct = next.progressIndex > previous.progressIndex;
           const soundOptions = settingsRef.current;
 
-          if (next.progressIndex >= activePromptText.length) {
+          if (next.progressIndex >= activeTypingText.length) {
             finishPractice(next);
           }
 
@@ -605,7 +618,7 @@ export default function HomePage() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activePromptText, emitProgress, finishPractice, practiceResult, practiceSession, room]);
+  }, [activeTypingText, emitProgress, finishPractice, practiceResult, practiceSession, room]);
 
   const createRoom = () => {
     const socket = socketRef.current;
@@ -875,7 +888,7 @@ export default function HomePage() {
             </p>
           ) : null}
 
-          {room?.status === "waiting" && room.players.length < room.maxPlayers ? (
+          {room ? (
             <div className="difficultySelector">
               <span>対戦ルール</span>
               <div className="difficultyButtons">
@@ -885,7 +898,7 @@ export default function HomePage() {
                     className={room.matchRule === rule ? "active" : ""}
                     type="button"
                     onClick={() => setMatchRule(rule)}
-                    disabled={!currentPlayer?.isHost}
+                    disabled={!currentPlayer?.isHost || (room.status !== "waiting" && room.status !== "finished")}
                   >
                     {MATCH_RULE_LABELS[rule]}
                   </button>
@@ -999,7 +1012,8 @@ export default function HomePage() {
 
               {activePromptText ? (
                 <TypingPrompt
-                  promptText={activePromptText}
+                  displayText={activePromptText}
+                  inputText={activeTypingText}
                   progressIndex={activeProgress.progressIndex}
                   inputGuideEnabled={settings.inputGuideEnabled}
                 />
@@ -1010,7 +1024,12 @@ export default function HomePage() {
                 </div>
               )}
 
-              <TypingInput inputRef={typingInputRef} disabled={!acceptingTextInput} onTextInput={handleTypedText} />
+              <TypingInput
+                inputRef={typingInputRef}
+                disabled={!acceptingTextInput}
+                deviceKind={activeInputDeviceKind}
+                onTextInput={handleTypedText}
+              />
 
               <ProgressBlock progressPercent={activeProgressPercent} />
 
@@ -1020,7 +1039,7 @@ export default function HomePage() {
                     <RivalBar
                       key={player.id}
                       player={player}
-                      promptLength={activePromptText.length}
+                      promptLength={activeTypingText.length}
                       isSelf={player.id === playerId}
                     />
                   ))}

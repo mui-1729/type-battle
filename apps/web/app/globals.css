@@ -466,6 +466,19 @@ textarea::placeholder {
   line-height: 1.65;
   min-height: 190px;
   padding: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.promptDisplay {
+  white-space: pre-wrap;
+}
+
+.promptGuide {
+  font-size: 0.58em;
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .typingInput {

@@ -30,16 +30,17 @@ export function calculateProgress(progressIndex: number, promptLength: number): 
 
 export function rankPlayers(
   players: PlayerState[],
-  promptLength: number,
+  promptLength: number | ((player: PlayerState) => number),
   matchRule: MatchRule = "race"
 ): PlayerResult[] {
   const sorted = [...players].sort((a, b) => comparePlayers(a, b, promptLength, matchRule));
 
   const winner = sorted[0];
   const winnerTime = winner?.finishTimeMs ?? 0;
+  const getPromptLength = typeof promptLength === "function" ? promptLength : () => promptLength;
 
   return sorted.map((player, index): PlayerResult => {
-    const isFinished = player.progressIndex >= promptLength;
+    const isFinished = player.progressIndex >= getPromptLength(player);
     const finishGap =
       isFinished && winner && player.id !== winner.id ? (player.finishTimeMs ?? 0) - winnerTime : undefined;
 
@@ -52,9 +53,17 @@ export function rankPlayers(
   });
 }
 
-function comparePlayers(a: PlayerState, b: PlayerState, promptLength: number, matchRule: MatchRule): number {
-  const aFinished = a.progressIndex >= promptLength;
-  const bFinished = b.progressIndex >= promptLength;
+function comparePlayers(
+  a: PlayerState,
+  b: PlayerState,
+  promptLength: number | ((player: PlayerState) => number),
+  matchRule: MatchRule
+): number {
+  const getPromptLength = typeof promptLength === "function" ? promptLength : () => promptLength;
+  const aPromptLength = getPromptLength(a);
+  const bPromptLength = getPromptLength(b);
+  const aFinished = a.progressIndex >= aPromptLength;
+  const bFinished = b.progressIndex >= bPromptLength;
 
   if (matchRule === "hpBattle") {
     if (aFinished && bFinished) {

@@ -31,10 +31,16 @@ export type PlayerState = {
 
 export type PromptCategory = "short" | "standard" | "long";
 
+export type PromptTyping = {
+  romaji: string;
+  hiragana: string;
+};
+
 export type Prompt = {
   id: string;
   text: string;
   category: PromptCategory;
+  typing: PromptTyping;
 };
 
 export type RoomState = {

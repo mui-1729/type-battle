@@ -243,11 +243,12 @@ export function setMatchRule(
     return { error: "ホストだけがルールを変更できます。" };
   }
 
-  if (context.room.status !== "waiting") {
+  if (context.room.status !== "waiting" && context.room.status !== "finished") {
     return { error: "試合中はルールを変更できません。" };
   }
 
   context.room.matchRule = rule;
+  syncMatchRuleState(context.room);
   return { room: toPublicRoom(context.room) };
 }
 
@@ -401,7 +402,6 @@ export function markPlaying(roomCode: string): RoomState | null {
 }
 
 function areHumansFinished(room: InternalRoom): boolean {
-  const promptLength = room.prompt?.text.length ?? 0;
   return [...room.players.values()]
     .filter((p) => !p.isBot)
     .every((p) => {
@@ -413,14 +413,13 @@ function areHumansFinished(room: InternalRoom): boolean {
         return true;
       }
 
-      return p.progressIndex >= promptLength;
+      return p.progressIndex >= getTypingLength(room, p);
     });
 }
 
 function finalizeUnfinishedBots(room: InternalRoom): void {
-  const promptLength = room.prompt?.text.length ?? 0;
   for (const bot of [...room.players.values()].filter((p) => p.isBot)) {
-    if (bot.progressIndex < promptLength) {
+    if (bot.progressIndex < getTypingLength(room, bot)) {
       bot.finishedAt = Date.now();
       bot.finishTimeMs = Infinity;
     }
@@ -436,7 +435,7 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
 
   const bot = [...room.players.values()].find((player) => player.isBot);
 
-  if (!bot || bot.progressIndex >= room.prompt.text.length) {
+  if (!bot || bot.progressIndex >= getTypingLength(room, bot)) {
     return null;
   }
 
@@ -456,7 +455,7 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
     mistakes: bot.mistakes + (isMistake ? speed : 0)
   });
 
-  const promptLength = room.prompt.text.length;
+  const promptLength = getTypingLength(room, bot);
 
   if (bot.progressIndex >= promptLength) {
     bot.finishedAt = Date.now();
@@ -505,7 +504,7 @@ export function finishTyping(socketId: string, payload: TypingFinish): MatchResu
 
   applyProgress(context.player, context.room, payload);
 
-  const promptLength = context.room.prompt.text.length;
+  const promptLength = getTypingLength(context.room, context.player);
 
   if (context.player.progressIndex >= promptLength) {
     const now = Date.now();
@@ -578,8 +577,13 @@ function getContext(
   return { room, player };
 }
 
+function getTypingLength(room: InternalRoom, player: InternalPlayer): number {
+  const prompt = room.prompt ?? pickPrompt(room.promptCategory, Date.now() + room.round);
+  return (player.deviceKind === "mobile" ? prompt.typing.hiragana : prompt.typing.romaji).length;
+}
+
 function applyProgress(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): void {
-  const promptLength = room.prompt?.text.length ?? 0;
+  const promptLength = getTypingLength(room, player);
   const previousProgressIndex = player.progressIndex;
   const previousCorrectCharacters = player.correctCharacters;
   const previousMistakes = player.mistakes;
@@ -628,7 +632,12 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
 
   if (correctDelta > 0) {
     for (const opponent of room.players.values()) {
-      if (opponent.id === player.id || opponent.hp === undefined || opponent.progressIndex >= promptLength || opponent.hp <= 0) {
+      if (
+        opponent.id === player.id ||
+        opponent.hp === undefined ||
+        opponent.progressIndex >= getTypingLength(room, opponent) ||
+        opponent.hp <= 0
+      ) {
         continue;
       }
 
@@ -680,7 +689,7 @@ function toMatchResult(room: InternalRoom): MatchResult {
   return {
     roomCode: room.roomCode,
     prompt,
-    players: rankPlayers(toPublicPlayers(room), prompt.text.length, room.matchRule)
+    players: rankPlayers(toPublicPlayers(room), (player) => getTypingLength(room, room.players.get(player.id)!), room.matchRule)
   };
 }
 
@@ -955,6 +964,10 @@ function maybeFinalizeRoom(room: InternalRoom): MatchResult | null {
   }
 
   return null;
+}
+
+function syncMatchRuleState(room: InternalRoom): void {
+  delete room.matchEndsAt;
 }
 
 function applyHpDamage(player: InternalPlayer, damage: number, room: InternalRoom, now: number): void {

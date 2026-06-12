@@ -1,12 +1,14 @@
+import type { DeviceKind } from "@type-battle/shared";
 import type { ChangeEvent, CompositionEvent, RefObject } from "react";
 
 type TypingInputProps = {
   inputRef: RefObject<HTMLTextAreaElement | null>;
   disabled: boolean;
+  deviceKind: DeviceKind;
   onTextInput: (text: string) => void;
 };
 
-export function TypingInput({ inputRef, disabled, onTextInput }: TypingInputProps) {
+export function TypingInput({ inputRef, disabled, deviceKind, onTextInput }: TypingInputProps) {
   const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     if (isInputComposing(event.nativeEvent)) {
       return;
@@ -29,9 +31,11 @@ export function TypingInput({ inputRef, disabled, onTextInput }: TypingInputProp
       autoCorrect="off"
       disabled={disabled}
       inputMode="text"
+      readOnly={deviceKind !== "mobile"}
       onChange={handleChange}
       onCompositionEnd={handleCompositionEnd}
       placeholder="ここに入力"
+      lang={deviceKind === "mobile" ? "ja" : "en"}
       rows={1}
       spellCheck={false}
       suppressHydrationWarning
