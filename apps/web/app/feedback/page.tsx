@@ -8,9 +8,10 @@ export default function FeedbackPage() {
   return (
     <main className="appShell">
       <section className="topBar" aria-label="フィードバック">
-        <div>
+        <div className="brandBlock">
           <p className="eyebrow">TYPE BATTLE</p>
           <h1>フィードバック</h1>
+          <p className="topBarCopy">不具合と改善要望を分けて送るための導線です。</p>
         </div>
         <Link className="secondaryButton" href="/">
           ゲームに戻る
@@ -39,7 +40,7 @@ export default function FeedbackPage() {
 
         <section className="matchSurface">
           <div className="emptyState large">
-            <p>テンプレートを開き、詳細を入力してください。</p>
+            <p>テンプレートを開いて、再現条件をそのまま書いてください。</p>
             <a className="primaryButton" href={FEEDBACK_ISSUE_URL} target="_blank" rel="noreferrer">
               GitHub Issue を開く
             </a>

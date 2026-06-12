@@ -12,10 +12,17 @@ type ResultPanelProps = {
 export function ResultPanel({ result, isRoomResult, onRetry }: ResultPanelProps) {
   return (
     <div className="resultPanel">
+      <div className="resultPanelHeader">
+        <div>
+          <p className="eyebrow">RESULT</p>
+          <h2>レースの記録</h2>
+        </div>
+        <span className="resultPanelMeta">{result.players.length} 名</span>
+      </div>
       <div className="resultRows">
         {result.players.map((player) => (
           <div className="resultRow" key={player.id}>
-            <span>#{player.rank}</span>
+            <span className="resultRank">#{player.rank}</span>
             <strong>{player.nickname}</strong>
             <small>
               {player.wpm} WPM / 正確率 {player.accuracy}% / ミス {player.mistakes} / 連続正解 {player.maxStreak}
@@ -26,13 +33,15 @@ export function ResultPanel({ result, isRoomResult, onRetry }: ResultPanelProps)
           </div>
         ))}
       </div>
-      <button className="primaryButton" type="button" onClick={onRetry}>
-        <RotateCcw size={18} />
-        {isRoomResult ? "再戦する" : "もう一度練習"}
-      </button>
-      <Link className="secondaryButton" href="/feedback">
-        不具合を報告
-      </Link>
+      <div className="resultActions">
+        <button className="primaryButton" type="button" onClick={onRetry}>
+          <RotateCcw size={18} />
+          {isRoomResult ? "再戦する" : "もう一度練習"}
+        </button>
+        <Link className="secondaryButton" href="/feedback">
+          不具合を報告
+        </Link>
+      </div>
     </div>
   );
 }

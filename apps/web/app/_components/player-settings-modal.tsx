@@ -15,11 +15,16 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
     <div className="modalBackdrop" onClick={onClose}>
       <div className="modalContent" onClick={(event) => event.stopPropagation()}>
         <div className="modalHeader">
-          <h2>プレイヤー設定</h2>
+          <div>
+            <p className="eyebrow">PLAYER</p>
+            <h2>プレイヤー設定</h2>
+          </div>
           <button className="iconButton" type="button" onClick={onClose} aria-label="設定を閉じる">
             <X size={20} />
           </button>
         </div>
+
+        <p className="modalCopy">表示、入力、音の設定をこの画面でまとめて調整します。</p>
 
         <div className="settingsGrid">
           <div className="fieldGroup">
@@ -123,7 +128,7 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
 
         <div className="modalActions">
           <button className="primaryButton" type="button" onClick={onClose}>
-            保存して閉じる
+            設定を反映
           </button>
         </div>
       </div>
