@@ -24,7 +24,12 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
         <div className="settingsGrid">
           <div className="fieldGroup">
             <label>ニックネーム</label>
-            <input value={settings.nickname} maxLength={18} onChange={(event) => setNickname(event.target.value)} />
+            <input
+              value={settings.nickname}
+              maxLength={18}
+              onChange={(event) => setNickname(event.target.value)}
+              suppressHydrationWarning
+            />
           </div>
 
           <div className="fieldGroup">
@@ -53,6 +58,7 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                   onChange={(event) =>
                     setSettings((current) => ({ ...current, inputGuideEnabled: event.target.checked }))
                   }
+                  suppressHydrationWarning
                 />
                 入力ガイド（次の文字を強調）
               </label>
@@ -63,6 +69,7 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                   onChange={(event) =>
                     setSettings((current) => ({ ...current, reducedMotion: event.target.checked }))
                   }
+                  suppressHydrationWarning
                 />
                 アニメーションを減らす
               </label>
@@ -95,6 +102,7 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                   onChange={(event) =>
                     setSettings((current) => ({ ...current, soundEnabled: event.target.checked }))
                   }
+                  suppressHydrationWarning
                 />
                 効果音
               </label>
@@ -105,6 +113,7 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                   onChange={(event) =>
                     setSettings((current) => ({ ...current, countdownSoundEnabled: event.target.checked }))
                   }
+                  suppressHydrationWarning
                 />
                 カウントダウン音
               </label>

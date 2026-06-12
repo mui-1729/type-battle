@@ -34,6 +34,7 @@ export function TypingInput({ inputRef, disabled, onTextInput }: TypingInputProp
       placeholder="ここに入力"
       rows={1}
       spellCheck={false}
+      suppressHydrationWarning
     />
   );
 }

@@ -768,6 +768,7 @@ export default function HomePage() {
               maxLength={18}
               onChange={(event) => setNickname(event.target.value)}
               disabled={!settingsHydrated || Boolean(room)}
+              suppressHydrationWarning
             />
           </div>
 
@@ -784,6 +785,7 @@ export default function HomePage() {
                   value={joinCode}
                   maxLength={8}
                   onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
+                  suppressHydrationWarning
                 />
                 <button
                   className="iconButton"
