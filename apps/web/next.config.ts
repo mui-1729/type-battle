@@ -6,8 +6,8 @@ const appDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(appDir, "../..");
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["172.16.240.247"],
-  outputFileTracingRoot: repoRoot
+  outputFileTracingRoot: repoRoot,
+  allowedDevOrigins: ["*.*.*.*"]
 };
 
 export default nextConfig;
