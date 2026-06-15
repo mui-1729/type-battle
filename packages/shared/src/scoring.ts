@@ -65,6 +65,31 @@ function comparePlayers(
   const aFinished = a.progressIndex >= aPromptLength;
   const bFinished = b.progressIndex >= bPromptLength;
 
+  if (matchRule === "timeAttack") {
+    const aCompletion = aPromptLength > 0 ? a.progressIndex / aPromptLength : 0;
+    const bCompletion = bPromptLength > 0 ? b.progressIndex / bPromptLength : 0;
+
+    if (aCompletion !== bCompletion) {
+      return bCompletion - aCompletion;
+    }
+
+    if (a.correctCharacters !== b.correctCharacters) {
+      return b.correctCharacters - a.correctCharacters;
+    }
+
+    if (a.totalTypedCharacters !== b.totalTypedCharacters) {
+      return a.totalTypedCharacters - b.totalTypedCharacters;
+    }
+
+    if (a.accuracy !== b.accuracy) {
+      return b.accuracy - a.accuracy;
+    }
+
+    if (a.mistakes !== b.mistakes) {
+      return a.mistakes - b.mistakes;
+    }
+  }
+
   if (matchRule === "hpBattle") {
     if (aFinished && bFinished) {
       const aHp = a.hp ?? 0;

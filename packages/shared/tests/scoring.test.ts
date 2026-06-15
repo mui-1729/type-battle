@@ -88,4 +88,32 @@ describe("scoring", () => {
     expect(finishedPlayers[0]?.id).toBe("highHp");
     expect(finishedPlayers[1]?.id).toBe("lowHp");
   });
+
+  it("ranks time attack players by progress instead of finish time", () => {
+    const players = rankPlayers(
+      [
+        {
+          ...basePlayer,
+          id: "slowerFinished",
+          progressIndex: 9,
+          correctCharacters: 9,
+          totalTypedCharacters: 9,
+          finishTimeMs: 2000
+        },
+        {
+          ...basePlayer,
+          id: "fasterButBehind",
+          progressIndex: 7,
+          correctCharacters: 7,
+          totalTypedCharacters: 7,
+          finishTimeMs: 1000
+        }
+      ],
+      10,
+      "timeAttack"
+    );
+
+    expect(players[0]?.id).toBe("slowerFinished");
+    expect(players[1]?.id).toBe("fasterButBehind");
+  });
 });

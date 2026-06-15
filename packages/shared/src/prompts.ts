@@ -33,7 +33,7 @@ export const PROMPTS: Prompt[] = [
     text: "落ち着いて一文字ずつ進めば、接戦でもミスを減らせます。",
     category: "standard",
     typing: {
-      romaji: "ochitsuitehitomojizutsususumeba,sessendemisuwoherasemasu.",
+      romaji: "ochitsuitehitomojizutsususumeba,sessendemomisuwoherasemasu.",
       hiragana: "おちついてひともじずつすすめば、せっせんでもみすをへらせます。"
     }
   },
@@ -43,7 +43,7 @@ export const PROMPTS: Prompt[] = [
     category: "long",
     typing: {
       romaji:
-        "nagaibunshoudeha,saishokaratobashisugizu,kokyuuwototonoenagaraitteinopesudeuchitsuzukerukotogataisetsudesu.aserazunigamenomite,tsuginomojiokakujitsuninyuuryokushimashou.",
+        "nagaibunshoudeha,saishokaratobashisugizu,kokyuuwototonoenagaraitteinope-sudeuchitsuzukerukotogataisetsudesu.aserazunigamenwomite,tsuginomojiwokakujitsuninyuuryokushimashou.",
       hiragana:
         "ながいぶんしょうでは、さいしょからとばしすぎず、こきゅうをととのえながらいっていのぺーすでうちつづけることがたいせつです。あせらずにがめんをみて、つぎのもじをかくじつににゅうりょくしましょう。"
     }
