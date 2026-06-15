@@ -601,20 +601,20 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
     });
   }
 
-  // Update streaks based on typing success
-  const isCorrect = nextIndex > player.progressIndex;
+  const totalTypedCharacters = Math.max(payload.totalTypedCharacters, player.totalTypedCharacters);
+  const correctCharacters = Math.max(payload.correctCharacters, player.correctCharacters);
+  const mistakes = Math.max(payload.mistakes, player.mistakes);
+  const now = Date.now();
+  const startedAt = room.serverStartAt ?? now;
+
+  // Update streaks based on correctly accepted input, not just unit completion.
+  const isCorrect = correctCharacters > player.correctCharacters;
   if (isCorrect) {
     player.currentStreak += 1;
     player.maxStreak = Math.max(player.maxStreak, player.currentStreak);
   } else {
     player.currentStreak = 0;
   }
-
-  const totalTypedCharacters = Math.max(payload.totalTypedCharacters, player.totalTypedCharacters);
-  const correctCharacters = clamp(payload.correctCharacters, player.correctCharacters, nextIndex);
-  const mistakes = Math.max(payload.mistakes, player.mistakes);
-  const now = Date.now();
-  const startedAt = room.serverStartAt ?? now;
 
   player.progressIndex = nextIndex;
   player.correctCharacters = correctCharacters;
