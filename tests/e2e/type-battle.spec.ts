@@ -180,7 +180,7 @@ test("saves and restores player settings from localStorage", async ({ browser })
   await page.getByRole("button", { name: "大" }).click();
 
   // Close modal
-  await page.getByRole("button", { name: "保存して閉じる" }).click();
+  await page.getByRole("button", { name: "設定を反映" }).click();
   await expect(page.getByText("プレイヤー設定")).not.toBeVisible();
 
   // Verify UI reflects changes
