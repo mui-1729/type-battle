@@ -5,6 +5,7 @@ export type ProgressState = {
   mistakes: number;
   currentStreak: number;
   maxStreak: number;
+  pendingInput: string;
 };
 
 export function createEmptyProgress(): ProgressState {
@@ -14,7 +15,8 @@ export function createEmptyProgress(): ProgressState {
     totalTypedCharacters: 0,
     mistakes: 0,
     currentStreak: 0,
-    maxStreak: 0
+    maxStreak: 0,
+    pendingInput: ""
   };
 }
 
@@ -32,7 +34,8 @@ export function advanceProgress(
     totalTypedCharacters: previous.totalTypedCharacters + 1,
     mistakes: correct ? previous.mistakes : previous.mistakes + 1,
     currentStreak: correct ? previous.currentStreak + 1 : 0,
-    maxStreak: correct ? Math.max(previous.maxStreak, previous.currentStreak + 1) : previous.maxStreak
+    maxStreak: correct ? Math.max(previous.maxStreak, previous.currentStreak + 1) : previous.maxStreak,
+    pendingInput: previous.pendingInput
   };
 }
 

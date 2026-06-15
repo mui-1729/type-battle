@@ -1,21 +1,25 @@
 import Link from "next/link";
 import { RotateCcw } from "lucide-react";
 import type { MatchResult } from "@type-battle/shared";
-import { getPlayerDeviceLabel } from "../_lib/ui-labels";
+import type { MatchRule } from "@type-battle/shared";
+import { MATCH_RULE_DETAILS, getPlayerDeviceLabel } from "../_lib/ui-labels";
 
 type ResultPanelProps = {
   result: MatchResult;
   isRoomResult: boolean;
   onRetry: () => void;
+  matchRule?: MatchRule;
 };
 
-export function ResultPanel({ result, isRoomResult, onRetry }: ResultPanelProps) {
+export function ResultPanel({ result, isRoomResult, onRetry, matchRule }: ResultPanelProps) {
+  const title = matchRule ? `${MATCH_RULE_DETAILS[matchRule].label}の記録` : "練習の記録";
+
   return (
     <div className="resultPanel">
       <div className="resultPanelHeader">
         <div>
           <p className="eyebrow">RESULT</p>
-          <h2>レースの記録</h2>
+          <h2>{title}</h2>
         </div>
         <span className="resultPanelMeta">{result.players.length} 名</span>
       </div>

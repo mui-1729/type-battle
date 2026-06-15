@@ -13,10 +13,31 @@ export const BOT_DIFFICULTY_LABELS: Record<BotDifficulty, string> = {
   hard: "むずかしい"
 };
 
+export const MATCH_RULE_DETAILS: Record<
+  MatchRule,
+  {
+    label: string;
+    description: string;
+  }
+> = {
+  race: {
+    label: "レース",
+    description: "先に最後まで打ち切った人が勝ち。完走速度だけで決まる、いちばんシンプルなルール。"
+  },
+  timeAttack: {
+    label: "タイムアタック",
+    description: "制限時間内にどれだけ進めるかを競う。完走の早さより、時間切れ時点の進捗が重要。"
+  },
+  hpBattle: {
+    label: "HPバトル",
+    description: "正解で相手のHPを削り、ミスでも自分が減る。完走より先にHPを0にした方が勝ち。"
+  }
+};
+
 export const MATCH_RULE_LABELS: Record<MatchRule, string> = {
-  race: "レース",
-  timeAttack: "タイム",
-  hpBattle: "HPバトル"
+  race: MATCH_RULE_DETAILS.race.label,
+  timeAttack: MATCH_RULE_DETAILS.timeAttack.label,
+  hpBattle: MATCH_RULE_DETAILS.hpBattle.label
 };
 
 export const DEVICE_KIND_LABELS: Record<DeviceKind, string> = {

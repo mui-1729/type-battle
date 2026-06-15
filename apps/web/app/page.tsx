@@ -39,11 +39,12 @@ import {
   createEmptyProgress,
   type ProgressState
 } from "./_lib/typing-progress";
+import { advanceRomajiProgressByText, buildRomajiTypingPlan } from "./_lib/romaji-typing";
 import { detectDeviceKind } from "./_lib/device-kind";
 import {
   BOT_DIFFICULTY_LABELS,
   DEVICE_KIND_LABELS,
-  MATCH_RULE_LABELS,
+  MATCH_RULE_DETAILS,
   PROMPT_CATEGORY_LABELS,
   getPlayerDeviceLabel,
   getPlayerConnectionLabel,
@@ -99,6 +100,7 @@ export default function HomePage() {
   const [practiceCategory, setPracticeCategory] = useState<PromptCategory>("standard");
   const [error, setError] = useState("");
   const [countdownMs, setCountdownMs] = useState(0);
+  const [matchTimerMs, setMatchTimerMs] = useState(0);
   const [resumeAttempted, setResumeAttempted] = useState(false);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
@@ -123,10 +125,12 @@ export default function HomePage() {
   const activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
   const activePromptText = activePrompt?.text ?? "";
   const activeInputDeviceKind = room ? currentPlayer?.deviceKind ?? "desktop" : practiceSession?.deviceKind ?? "desktop";
+  const activeRomajiTypingPlan =
+    activePrompt && activeInputDeviceKind !== "mobile" ? buildRomajiTypingPlan(activePrompt.typing.hiragana) : null;
   const activeTypingText = activePrompt
     ? activeInputDeviceKind === "mobile"
       ? activePrompt.typing.hiragana
-      : activePrompt.typing.romaji
+      : activeRomajiTypingPlan?.guide ?? activePrompt.typing.romaji
     : "";
   const isRoomPlaying = room?.status === "playing";
   const isPracticePlaying = Boolean(practiceSession && !practiceResult && !room);
@@ -142,6 +146,8 @@ export default function HomePage() {
   const activeAccuracy = calculateAccuracy(activeProgress.correctCharacters, activeProgress.totalTypedCharacters);
   const activeResultPlayer =
     room?.players.find((player) => player.id === playerId) ?? activePracticePlayer ?? null;
+  const isTimeAttackPlaying = Boolean(isRoomPlaying && room?.matchRule === "timeAttack");
+  const activeTimeAttackRemainingSeconds = Math.max(matchTimerMs / 1000, 0).toFixed(1);
   const canStart =
     room?.status === "waiting" &&
     currentPlayer?.isHost &&
@@ -451,7 +457,8 @@ export default function HomePage() {
         totalTypedCharacters: currentPlayer.totalTypedCharacters,
         mistakes: currentPlayer.mistakes,
         currentStreak: currentPlayer.currentStreak,
-        maxStreak: currentPlayer.maxStreak
+        maxStreak: currentPlayer.maxStreak,
+        pendingInput: previous.pendingInput
       };
     });
   }, [currentPlayer]);
@@ -469,6 +476,21 @@ export default function HomePage() {
 
     return () => window.clearInterval(interval);
   }, [room?.serverStartAt, room?.status]);
+
+  useEffect(() => {
+    const matchEndsAt = room?.matchEndsAt;
+
+    if (!room || room.status !== "playing" || room.matchRule !== "timeAttack" || !matchEndsAt) {
+      setMatchTimerMs(0);
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setMatchTimerMs(Math.max(matchEndsAt - Date.now(), 0));
+    }, 100);
+
+    return () => window.clearInterval(interval);
+  }, [room?.matchEndsAt, room?.matchRule, room?.status]);
 
   useEffect(() => {
     if (!room || room.status !== "countdown") {
@@ -524,8 +546,13 @@ export default function HomePage() {
 
       if (room?.status === "playing" && room?.prompt) {
         setLocalProgress((previous) => {
-          const next = advanceProgressByText(previous, activeTypingText, typedText);
-          const correct = next.progressIndex > previous.progressIndex;
+          const next =
+            activeInputDeviceKind === "mobile"
+              ? advanceProgressByText(previous, activeTypingText, typedText)
+              : activeRomajiTypingPlan
+                ? advanceRomajiProgressByText(previous, activeRomajiTypingPlan, typedText)
+                : advanceProgressByText(previous, activeTypingText, typedText);
+          const correct = next.correctCharacters > previous.correctCharacters;
           const payload: TypingProgress = {
             roomCode: room.roomCode,
             progressIndex: next.progressIndex,
@@ -543,8 +570,13 @@ export default function HomePage() {
 
       if (practiceSession && !practiceResult && !room) {
         setPracticeProgress((previous) => {
-          const next = advanceProgressByText(previous, activeTypingText, typedText);
-          const correct = next.progressIndex > previous.progressIndex;
+          const next =
+            activeInputDeviceKind === "mobile"
+              ? advanceProgressByText(previous, activeTypingText, typedText)
+              : activeRomajiTypingPlan
+                ? advanceRomajiProgressByText(previous, activeRomajiTypingPlan, typedText)
+                : advanceProgressByText(previous, activeTypingText, typedText);
+          const correct = next.correctCharacters > previous.correctCharacters;
 
           if (next.progressIndex >= activeTypingText.length) {
             finishPractice(next);
@@ -555,7 +587,16 @@ export default function HomePage() {
         });
       }
     },
-    [activeTypingText, emitProgress, finishPractice, practiceResult, practiceSession, room]
+    [
+      activeInputDeviceKind,
+      activeRomajiTypingPlan,
+      activeTypingText,
+      emitProgress,
+      finishPractice,
+      practiceResult,
+      practiceSession,
+      room
+    ]
   );
 
   useEffect(() => {
@@ -578,11 +619,14 @@ export default function HomePage() {
       }
 
       event.preventDefault();
+      const typedKey = event.key.toLowerCase();
 
       if (room?.status === "playing" && room?.prompt) {
         setLocalProgress((previous) => {
-          const next = advanceProgress(previous, activeTypingText[previous.progressIndex], event.key);
-          const correct = next.progressIndex > previous.progressIndex;
+          const next = activeRomajiTypingPlan
+            ? advanceRomajiProgressByText(previous, activeRomajiTypingPlan, typedKey)
+            : advanceProgress(previous, activeTypingText[previous.progressIndex], typedKey);
+          const correct = next.correctCharacters > previous.correctCharacters;
           const soundOptions = settingsRef.current;
 
           const payload: TypingProgress = {
@@ -602,8 +646,10 @@ export default function HomePage() {
 
       if (practiceActive && practiceSession) {
         setPracticeProgress((previous) => {
-          const next = advanceProgress(previous, activeTypingText[previous.progressIndex], event.key);
-          const correct = next.progressIndex > previous.progressIndex;
+          const next = activeRomajiTypingPlan
+            ? advanceRomajiProgressByText(previous, activeRomajiTypingPlan, typedKey)
+            : advanceProgress(previous, activeTypingText[previous.progressIndex], typedKey);
+          const correct = next.correctCharacters > previous.correctCharacters;
           const soundOptions = settingsRef.current;
 
           if (next.progressIndex >= activeTypingText.length) {
@@ -618,7 +664,16 @@ export default function HomePage() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeTypingText, emitProgress, finishPractice, practiceResult, practiceSession, room]);
+  }, [
+    activeInputDeviceKind,
+    activeRomajiTypingPlan,
+    activeTypingText,
+    emitProgress,
+    finishPractice,
+    practiceResult,
+    practiceSession,
+    room
+  ]);
 
   const createRoom = () => {
     const socket = socketRef.current;
@@ -891,16 +946,17 @@ export default function HomePage() {
           {room ? (
             <div className="difficultySelector">
               <span>対戦ルール</span>
-              <div className="difficultyButtons">
+              <div className="matchRuleButtons">
                 {(["race", "timeAttack", "hpBattle"] as const).map((rule) => (
                   <button
                     key={rule}
-                    className={room.matchRule === rule ? "active" : ""}
+                    className={room.matchRule === rule ? "matchRuleButton active" : "matchRuleButton"}
                     type="button"
                     onClick={() => setMatchRule(rule)}
                     disabled={!currentPlayer?.isHost || (room.status !== "waiting" && room.status !== "finished")}
                   >
-                    {MATCH_RULE_LABELS[rule]}
+                    <span className="matchRuleLabel">{MATCH_RULE_DETAILS[rule].label}</span>
+                    <span className="matchRuleDescription">{MATCH_RULE_DETAILS[rule].description}</span>
                   </button>
                 ))}
               </div>
@@ -995,6 +1051,7 @@ export default function HomePage() {
                         : activeResultPlayer?.mistakes ?? 0
                     }
                   />
+                  {isTimeAttackPlaying ? <Stat label="残り" value={`${activeTimeAttackRemainingSeconds}s`} /> : null}
                   {((currentPlayer?.maxHp ?? activeResultPlayer?.maxHp) !== undefined) ? (
                     <Stat
                       label="HP"
@@ -1016,6 +1073,8 @@ export default function HomePage() {
                   inputText={activeTypingText}
                   progressIndex={activeProgress.progressIndex}
                   inputGuideEnabled={settings.inputGuideEnabled}
+                  pendingInput={activeProgress.pendingInput}
+                  romajiPlan={activeRomajiTypingPlan}
                 />
               ) : (
                 <div className="emptyState">
@@ -1047,7 +1106,12 @@ export default function HomePage() {
               ) : null}
 
               {activeResult ? (
-                <ResultPanel result={activeResult} isRoomResult={Boolean(room)} onRetry={room ? rematch : startPractice} />
+                <ResultPanel
+                  result={activeResult}
+                  isRoomResult={Boolean(room)}
+                  onRetry={room ? rematch : startPractice}
+                  {...(room?.matchRule ? { matchRule: room.matchRule } : {})}
+                />
               ) : null}
             </>
           ) : (
