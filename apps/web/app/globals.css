@@ -533,6 +533,47 @@ textarea::placeholder {
   gap: 10px;
 }
 
+.matchRuleButtons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.matchRuleButton {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-height: 112px;
+  padding: 14px 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  color: var(--muted);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow-sm);
+  text-align: left;
+}
+
+.matchRuleLabel {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.matchRuleDescription {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.matchRuleButton.active {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 92%, white 8%), var(--accent));
+}
+
+.matchRuleButton.active .matchRuleDescription {
+  color: color-mix(in srgb, white 84%, var(--accent-2) 16%);
+}
+
 .difficultyButtons {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
