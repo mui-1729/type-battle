@@ -32,10 +32,10 @@
 
 ### prompt library
 
-- `feat(prompt): add prompt validation`
+- [ ] `feat(prompt): add prompt validation`
   - 空、短すぎる、長すぎる、不正文字を拒否する。
   - disabled prompt を試合に出さない。
-- `feat(prompt): avoid repeated prompts in a session`
+- [ ] `feat(prompt): avoid repeated prompts in a session`
   - 同じ session 内で直近 prompt を避ける。
 
 ### practice
