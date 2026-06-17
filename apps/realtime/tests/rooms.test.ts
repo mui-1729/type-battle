@@ -360,6 +360,60 @@ describe("rooms", () => {
     expect(aliceAfterRematch?.maxStreak).toBe(0);
   });
 
+  it("chooses a different prompt on rematch when another option exists", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_prompt_cycle",
+      socketId: "socket_alice_prompt_cycle"
+    });
+
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_prompt_cycle",
+      socketId: "socket_bob_prompt_cycle"
+    });
+
+    expect("error" in joined).toBe(false);
+
+    const started = startMatch("socket_alice_prompt_cycle", created.room.roomCode);
+    expect("error" in started).toBe(false);
+
+    if ("error" in started) {
+      return;
+    }
+
+    expect(markPlaying(created.room.roomCode)?.status).toBe("playing");
+
+    const firstPromptId = started.room.prompt?.id;
+    expect(rooms.get(created.room.roomCode.toUpperCase())?.promptHistory).toContain(firstPromptId);
+    const promptLength = started.room.prompt?.typing.romaji.length ?? 0;
+
+    finishTyping("socket_alice_prompt_cycle", {
+      roomCode: created.room.roomCode,
+      progressIndex: promptLength,
+      correctCharacters: promptLength,
+      totalTypedCharacters: promptLength,
+      mistakes: 0
+    });
+    finishTyping("socket_bob_prompt_cycle", {
+      roomCode: created.room.roomCode,
+      progressIndex: promptLength,
+      correctCharacters: promptLength,
+      totalTypedCharacters: promptLength,
+      mistakes: 0
+    });
+
+    const rematched = rematch("socket_alice_prompt_cycle", created.room.roomCode);
+    expect("error" in rematched).toBe(false);
+
+    if ("error" in rematched) {
+      return;
+    }
+
+    expect(rematched.room.prompt?.id).not.toBe(firstPromptId);
+  });
+
   it("forfeits a disconnected player after grace period", () => {
     const created = createRoom({
       nickname: "Alice",
