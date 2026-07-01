@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { PROMPTS } from "@type-battle/shared";
 import {
   advanceRomajiProgressByText,
+  advanceRomajiProgressWithMistakes,
   buildRomajiTypingPlan,
   pickRomajiDisplayCandidate
 } from "../app/_lib/romaji-typing";
@@ -27,6 +28,21 @@ describe("romaji typing", () => {
     expect(ti.progressIndex).toBe(plan.guide.length);
     expect(ti.correctCharacters).toBe(2);
     expect(ti.mistakes).toBe(0);
+  });
+
+  it("keeps romaji aliases working while collecting mistake samples", () => {
+    const plan = buildRomajiTypingPlan("し");
+
+    const si = advanceRomajiProgressWithMistakes(createEmptyProgress(), plan, "si");
+    expect(si.progress.progressIndex).toBe(plan.guide.length);
+    expect(si.progress.correctCharacters).toBe(2);
+    expect(si.progress.mistakes).toBe(0);
+    expect(si.mistakeSamples).toEqual([]);
+
+    const wrong = advanceRomajiProgressWithMistakes(createEmptyProgress(), plan, "sx");
+    expect(wrong.progress.progressIndex).toBe(0);
+    expect(wrong.progress.mistakes).toBe(1);
+    expect(wrong.mistakeSamples).toEqual([{ expectedChar: "し", typedChar: "x" }]);
   });
 
   it("accepts multiple romaji paths for しゅうちゅう", () => {

@@ -41,7 +41,10 @@ import {
   type MistakeSample,
   type ProgressState
 } from "./_lib/typing-progress";
-import { buildRomajiTypingPlan } from "./_lib/romaji-typing";
+import {
+  advanceRomajiProgressWithMistakes,
+  buildRomajiTypingPlan
+} from "./_lib/romaji-typing";
 import { detectDeviceKind } from "./_lib/device-kind";
 import {
   BOT_DIFFICULTY_LABELS,
@@ -661,6 +664,21 @@ export default function HomePage() {
     [room]
   );
 
+  const updateTypingProgress = useCallback(
+    (previous: ProgressState, typedText: string) => {
+      if (activeInputDeviceKind === "mobile") {
+        return advanceProgressWithMistakes(previous, activeTypingText, typedText);
+      }
+
+      if (activeRomajiTypingPlan) {
+        return advanceRomajiProgressWithMistakes(previous, activeRomajiTypingPlan, typedText);
+      }
+
+      return advanceProgressWithMistakes(previous, activeTypingText, typedText);
+    },
+    [activeInputDeviceKind, activeRomajiTypingPlan, activeTypingText]
+  );
+
   const handleTypedText = useCallback(
     (typedText: string) => {
       if (!typedText) {
@@ -669,7 +687,7 @@ export default function HomePage() {
 
       if (room?.status === "playing" && room?.prompt) {
         const previous = localProgressRef.current;
-        const next = advanceProgressWithMistakes(previous, activeTypingText, typedText);
+        const next = updateTypingProgress(previous, typedText);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const payload: TypingProgress = {
           roomCode: room.roomCode,
@@ -681,6 +699,7 @@ export default function HomePage() {
 
         setLocalProgress(next.progress);
         localProgressRef.current = next.progress;
+        recordMistakeSamples(next.mistakeSamples);
         void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
         emitProgress(payload, next.progress.progressIndex >= activeTypingText.length);
         return;
@@ -688,7 +707,7 @@ export default function HomePage() {
 
       if (practiceSession && !practiceResult && !room) {
         const previous = practiceProgressRef.current;
-        const next = advanceProgressWithMistakes(previous, activeTypingText, typedText);
+        const next = updateTypingProgress(previous, typedText);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
 
         setPracticeProgress(next.progress);
@@ -703,13 +722,13 @@ export default function HomePage() {
       }
     },
     [
-      activeInputDeviceKind,
-      activeRomajiTypingPlan,
       activeTypingText,
       emitProgress,
       finishPractice,
       practiceResult,
       practiceSession,
+      recordMistakeSamples,
+      updateTypingProgress,
       room
     ]
   );
@@ -738,7 +757,7 @@ export default function HomePage() {
 
       if (room?.status === "playing" && room?.prompt) {
         const previous = localProgressRef.current;
-        const next = advanceProgressWithMistakes(previous, activeTypingText, typedKey);
+        const next = updateTypingProgress(previous, typedKey);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const soundOptions = settingsRef.current;
 
@@ -752,6 +771,7 @@ export default function HomePage() {
 
         setLocalProgress(next.progress);
         localProgressRef.current = next.progress;
+        recordMistakeSamples(next.mistakeSamples);
         void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
         emitProgress(payload, next.progress.progressIndex >= activeTypingText.length);
         return;
@@ -759,7 +779,7 @@ export default function HomePage() {
 
       if (practiceActive && practiceSession) {
         const previous = practiceProgressRef.current;
-        const next = advanceProgressWithMistakes(previous, activeTypingText, typedKey);
+        const next = updateTypingProgress(previous, typedKey);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const soundOptions = settingsRef.current;
 
@@ -779,12 +799,13 @@ export default function HomePage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     activeInputDeviceKind,
-    activeRomajiTypingPlan,
     activeTypingText,
     emitProgress,
     finishPractice,
     practiceResult,
     practiceSession,
+    recordMistakeSamples,
+    updateTypingProgress,
     room
   ]);
 
@@ -1050,7 +1071,7 @@ export default function HomePage() {
                   const barWidth = Math.max((item.count / (maxCount + 1)) * 100, item.count > 0 ? 12 : 0);
                   const dominantWrongInputLabel =
                     item.dominantWrongInput && item.dominantWrongInputCount > 0
-                      ? `誤入力 ${formatMistakeTarget(item.dominantWrongInput)} ×${item.dominantWrongInputCount + 1}`
+                      ? `誤入力 ${formatMistakeTarget(item.dominantWrongInput)} ×${item.dominantWrongInputCount}`
                       : "誤入力なし";
 
                   return (
