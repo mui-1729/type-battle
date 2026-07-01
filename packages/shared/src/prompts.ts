@@ -150,7 +150,7 @@ export const PROMPTS: Prompt[] = [
     text: "迷ったら、いったん落ち着いてから次の文字に進みましょう",
     category: "standard",
     typing: {
-      romaji: "mayottara,ittanochitsuitekaratsuginomojiwosusumimashou",
+      romaji: "mayottara,ittannochitsuitekaratsuginomojinisusumimashou",
       hiragana: "まよったら、いったんおちついてからつぎのもじにすすみましょう"
     }
   },
@@ -159,7 +159,7 @@ export const PROMPTS: Prompt[] = [
     text: "少し速くなっても、呼吸を崩さずに打ち続けると安定します",
     category: "standard",
     typing: {
-      romaji: "sukoshihakukunattemo,kokyuuwokuzusazunichitsuzukerutoanteishimasu",
+      romaji: "sukoshihayakunattemo,kokyuuwokuzusazuniuchitsuzukerutoanteishimasu",
       hiragana: "すこしはやくなっても、こきゅうをくずさずにうちつづけるとあんていします"
     }
   },
@@ -168,7 +168,7 @@ export const PROMPTS: Prompt[] = [
     text: "画面の端まで視線を送ると、次の文字を拾いやすくなります",
     category: "standard",
     typing: {
-      romaji: "gamennohashimademishisenwookuruto,tsuginomojiwohiroiyasukunarimasu",
+      romaji: "gamennohashimadeshisenwookuruto,tsuginomojiwohiroiyasukunarimasu",
       hiragana: "がめんのはしまでしせんをおくると、つぎのもじをひろいやすくなります"
     }
   },
@@ -186,7 +186,7 @@ export const PROMPTS: Prompt[] = [
     text: "余計な力を抜くと、入力の乱れも自然に減っていきます",
     category: "standard",
     typing: {
-      romaji: "yokeinachikarawonukuto,nyuuryokunomidaremoshizenninihetteikimasu",
+      romaji: "yokeinachikarawonukuto,nyuuryokunomidaremoshizennihetteikimasu",
       hiragana: "よけいなちからをぬくと、にゅうりょくのみだれもしぜんにへっていきます"
     }
   },
@@ -195,7 +195,7 @@ export const PROMPTS: Prompt[] = [
     text: "文の区切りを意識すると、視線の移動が少し楽になります",
     category: "standard",
     typing: {
-      romaji: "bunnokugiriwoshikisuruto,shisennoidougasukoshirakuninarimasu",
+      romaji: "bunnokugiriwoishikisuruto,shisennoidougasukoshirakuninarimasu",
       hiragana: "ぶんのくぎりをいしきすると、しせんのいどうがすこしらくになります"
     }
   },
@@ -231,7 +231,7 @@ export const PROMPTS: Prompt[] = [
     text: "キーを強く押しすぎず、指先を軽く動かすと整います",
     category: "standard",
     typing: {
-      romaji: "kiiwotsuyokuoshisugizu,yubisasakiwokarukumugokasutototonoimasu",
+      romaji: "ki-wotsuyokuoshisugizu,yubisakiwokarukuugokasutototonoimasu",
       hiragana: "きーをつよくおしすぎず、ゆびさきをかるくうごかすとととのいます"
     }
   },
@@ -252,7 +252,7 @@ export const PROMPTS: Prompt[] = [
     category: "long",
     typing: {
       romaji:
-        "nagaikadaibundeha,saishonichikarawoiresuginaiokotogajuuyoudesutochuudesukoshimidaretemo,aserazunishiseiwototonoereba,saigomadepe-suwotamotsuyasukunarimasu",
+        "nagaikadaibundeha,saishonichikarawoiresuginaikotogajuuyoudesutochuudesukoshimidaretemo,aserazunishiseiwototonoereba,saigomadepe-suwotamochiyasukunarimasu",
       hiragana:
         "ながいかだいぶんでは、さいしょにちからをいれすぎないことがじゅうようですとちゅうですこしみだれても、あせらずにしせいをととのえれば、さいごまでぺーすをたもちやすくなります"
     }
@@ -263,7 +263,7 @@ export const PROMPTS: Prompt[] = [
     category: "long",
     typing: {
       romaji:
-        "choubundeha,saishokaratobashisugizu,tochuudesukoshiokuretemo,sonomamaitteinorizumuwomamorukotogataisetsudesushisenwosakinioki,temotohaochitsuiteoikakemashou",
+        "choubundeha,saishokaratobashisugizu,tochuudesukoshiokuretemo,sonomamaitteinorizumuwomamorukotogataisetsudesushisenwosakinioite,temotohaochitsuiteoikakemashou",
       hiragana:
         "ちょうぶんでは、さいしょからとばしすぎず、とちゅうですこしおくれても、そのままいっていのりずむをまもることがたいせつですしせんをさきにおいて、てもとはおちついておいかけましょう"
     }
@@ -274,7 +274,7 @@ export const PROMPTS: Prompt[] = [
     category: "long",
     typing: {
       romaji:
-        "nagaikadaibunwoutsutokiha,kokyuuwototonoenagara,kotobawoourizumuwokuzusanaiokotogajuuyoudesumisuwoshitemomotarisugizu,tsuginonagareheshizennimodoshiteikutotanteishimasu",
+        "nagaikadaibunwoutsutokiha,kokyuuwototonoenagara,kotobawoourizumuwokuzusanaikotogajuuyoudesumisuwoshitemotomarisugizu,tsuginonagareheshizennimodoshiteikutoanteishimasu",
       hiragana:
         "ながいかだいぶんをうつときは、こきゅうをととのえながら、ことばをおうりずむをくずさないことがじゅうようですみすをしてもとまりすぎず、つぎのながれへしぜんにもどしていくとあんていします"
     }
@@ -285,7 +285,7 @@ export const PROMPTS: Prompt[] = [
     category: "long",
     typing: {
       romaji:
-        "nagaibunhodo,saishonoichidanikimochiwonosesesugizu,tantantoshitape-suwotamotsutokouhanmoanteishimasushisennoidouwochiisakushite,tsuginomojiwosakiyomisurukankakudesususumemashou",
+        "nagaibunhodo,saishonoichidanikimochiwonosesugizu,tantantoshitape-suwotamotsutokouhanmoanteishimasushisennoidouwochiisakushite,tsuginomojiwosakiyomisurukankakudesusumemashou",
       hiragana:
         "ながいぶんほど、さいしょのいちだにきもちをのせすぎず、たんたんとしたぺーすをたもつとこうはんもあんていしますしせんのいどうをちいさくして、つぎのもじをさきよみするかんかくですすめましょう"
     }
