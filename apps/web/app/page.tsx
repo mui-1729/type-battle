@@ -963,7 +963,7 @@ export default function HomePage() {
               <div className="dailyChallengeStats">
                 <div>
                   <span>今日の最高 WPM</span>
-                  <strong>{dailyChallengeRecord ? dailyChallengeRecord.bestAccuracy : "—"}</strong>
+                  <strong>{dailyChallengeRecord ? dailyChallengeRecord.bestWpm : "—"}</strong>
                 </div>
                 <div>
                   <span>挑戦回数</span>
