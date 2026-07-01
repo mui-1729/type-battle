@@ -34,6 +34,13 @@ export type ReadyPayload = RoomCodePayload & {
   ready: boolean;
 };
 
+export type PracticeSessionData = {
+  practiceId: string;
+  prompt: Prompt;
+  startedAt: number;
+  challengeKey?: string;
+};
+
 export type CreateRoomData = {
   roomCode: string;
   playerId: string;
@@ -80,7 +87,11 @@ export type ClientToServerEvents = {
   ) => void;
   "practice:start": (
     payload: { nickname: string; category: PromptCategory },
-    ack: (response: AckResponse<{ practiceId: string; prompt: Prompt; startedAt: number }>) => void
+    ack: (response: AckResponse<PracticeSessionData>) => void
+  ) => void;
+  "practice:dailyStart": (
+    payload: { nickname: string },
+    ack: (response: AckResponse<PracticeSessionData>) => void
   ) => void;
 };
 

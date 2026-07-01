@@ -339,6 +339,36 @@ export function pickPrompt(
   return pool[index] ?? pool[0]!;
 }
 
+export type DailyChallengeInfo = {
+  challengeKey: string;
+  seed: number;
+};
+
+export function getDailyChallengeInfo(date = new Date()): DailyChallengeInfo {
+  const challengeKey = date.toISOString().slice(0, 10);
+
+  return {
+    challengeKey,
+    seed: hashString(challengeKey)
+  };
+}
+
+export function pickDailyChallengePrompt(date = new Date()): Prompt {
+  const { seed } = getDailyChallengeInfo(date);
+  return pickPrompt("standard", seed);
+}
+
 export function getTypingText(prompt: Prompt, deviceKind: DeviceKind = "desktop"): string {
   return deviceKind === "mobile" ? prompt.typing.hiragana : prompt.typing.romaji;
+}
+
+function hashString(value: string): number {
+  let hash = 0x811c9dc5;
+
+  for (const char of value) {
+    hash ^= char.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return hash >>> 0;
 }

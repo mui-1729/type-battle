@@ -40,6 +40,9 @@
 
 ### practice
 
+- [x] `feat(practice): add daily challenge`
+  - 今日だけの固定 prompt を出して、日ごとの記録を残せるようにする。
+  - 練習モードとは別に、継続用の入口を用意する。
 - `feat(practice): add retry same prompt`
   - 同じ prompt を再挑戦できる。
   - retry と next prompt を分ける。

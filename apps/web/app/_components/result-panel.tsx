@@ -9,10 +9,18 @@ type ResultPanelProps = {
   isRoomResult: boolean;
   onRetry: () => void;
   matchRule?: MatchRule;
+  practiceMode?: "practice" | "daily";
 };
 
-export function ResultPanel({ result, isRoomResult, onRetry, matchRule }: ResultPanelProps) {
-  const title = matchRule ? `${MATCH_RULE_DETAILS[matchRule].label}の記録` : "練習の記録";
+export function ResultPanel({ result, isRoomResult, onRetry, matchRule, practiceMode = "practice" }: ResultPanelProps) {
+  const title = isRoomResult
+    ? matchRule
+      ? `${MATCH_RULE_DETAILS[matchRule].label}の記録`
+      : "対戦の記録"
+    : practiceMode === "daily"
+      ? "デイリーチャレンジの記録"
+      : "練習の記録";
+  const retryLabel = isRoomResult ? "再戦する" : practiceMode === "daily" ? "もう一度挑戦" : "もう一度練習";
 
   return (
     <div className="resultPanel">
@@ -40,7 +48,7 @@ export function ResultPanel({ result, isRoomResult, onRetry, matchRule }: Result
       <div className="resultActions">
         <button className="primaryButton" type="button" onClick={onRetry}>
           <RotateCcw size={18} />
-          {isRoomResult ? "再戦する" : "もう一度練習"}
+          {retryLabel}
         </button>
         <Link className="secondaryButton" href="/feedback">
           不具合を報告

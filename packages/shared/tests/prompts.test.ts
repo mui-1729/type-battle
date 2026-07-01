@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PROMPTS, pickPrompt, validatePrompt } from "../src";
+import { PROMPTS, getDailyChallengeInfo, pickDailyChallengePrompt, pickPrompt, validatePrompt } from "../src";
 
 describe("prompts", () => {
   it("validates the bundled prompts", () => {
@@ -27,5 +27,20 @@ describe("prompts", () => {
         }
       })
     ).toBe("prompt id を入力してください。");
+  });
+
+  it("creates a deterministic daily challenge key and prompt", () => {
+    const date = new Date("2026-07-01T03:00:00Z");
+
+    expect(getDailyChallengeInfo(date)).toEqual({
+      challengeKey: "2026-07-01",
+      seed: expect.any(Number)
+    });
+
+    const firstDailyPrompt = pickDailyChallengePrompt(date);
+    const secondDailyPrompt = pickDailyChallengePrompt(date);
+
+    expect(firstDailyPrompt).toEqual(secondDailyPrompt);
+    expect(firstDailyPrompt.category).toBe("standard");
   });
 });

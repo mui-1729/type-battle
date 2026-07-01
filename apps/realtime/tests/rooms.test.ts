@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createRoom,
   setBotDifficulty,
@@ -12,6 +12,7 @@ import {
   explicitLeaveBySocket,
   rematch,
   startMatch,
+  startDailyPractice,
   setMatchRule,
   updateProgress,
   rooms
@@ -281,6 +282,22 @@ describe("rooms", () => {
 
     expect(started.room.players).toHaveLength(2);
     expect(started.room.players.some((player) => player.isBot && player.nickname === "COM (Hard)")).toBe(true);
+  });
+
+  it("starts a daily practice session with a stable challenge key", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-01T03:00:00Z"));
+
+    try {
+      const first = startDailyPractice("Alice");
+      const second = startDailyPractice("Alice");
+
+      expect(first.challengeKey).toBe("2026-07-01");
+      expect(first.prompt.category).toBe("standard");
+      expect(second.prompt.id).toBe(first.prompt.id);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("tracks streaks during typing and resets them on rematch", () => {
