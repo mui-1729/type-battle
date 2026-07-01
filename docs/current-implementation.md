@@ -63,6 +63,8 @@
 
 ### Result analytics
 
+- ミス傾向を localStorage に蓄積し、よくミスする文字を棒グラフで表示している。
+- 期待文字ごとのミス回数と、最頻の誤入力を確認できる。
 - `PlayerResult` に `finishGap` と `maxStreak` の field がある。
 - `finishGap` は完走者同士の差分として計算される。
 - `maxStreak` は typing progress の累積から更新される。

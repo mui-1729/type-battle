@@ -681,7 +681,6 @@ export default function HomePage() {
 
         setLocalProgress(next.progress);
         localProgressRef.current = next.progress;
-        recordMistakeSamples(next.mistakeSamples);
         void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
         emitProgress(payload, next.progress.progressIndex >= activeTypingText.length);
         return;
@@ -753,7 +752,6 @@ export default function HomePage() {
 
         setLocalProgress(next.progress);
         localProgressRef.current = next.progress;
-        recordMistakeSamples(next.mistakeSamples);
         void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
         emitProgress(payload, next.progress.progressIndex >= activeTypingText.length);
         return;
@@ -1049,10 +1047,10 @@ export default function HomePage() {
               <div className="mistakeTrendList">
                 {mistakeTrendSummary.map((item) => {
                   const maxCount = mistakeTrendSummary[0]?.count ?? 1;
-                  const barWidth = Math.max((item.count / maxCount) * 100, item.count > 0 ? 12 : 0);
+                  const barWidth = Math.max((item.count / (maxCount + 1)) * 100, item.count > 0 ? 12 : 0);
                   const dominantWrongInputLabel =
                     item.dominantWrongInput && item.dominantWrongInputCount > 0
-                      ? `誤入力 ${formatMistakeTarget(item.dominantWrongInput)} ×${item.dominantWrongInputCount}`
+                      ? `誤入力 ${formatMistakeTarget(item.dominantWrongInput)} ×${item.dominantWrongInputCount + 1}`
                       : "誤入力なし";
 
                   return (
