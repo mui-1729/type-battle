@@ -9,7 +9,9 @@ import {
   calculateAccuracy,
   calculateProgress,
   calculateWpm,
+  getDailyChallengeInfo,
   normalizeNickname,
+  pickDailyChallengePrompt,
   validateNickname
 } from "@type-battle/shared";
 import type {
@@ -64,6 +66,12 @@ import {
   type GuestSession
 } from "../lib/guest-session";
 import { playCountdownSound, playTypingSound, primeSoundPlayback } from "../lib/sound";
+import {
+  loadDailyChallengeRecord,
+  persistDailyChallengeRecord,
+  updateDailyChallengeRecord,
+  type DailyChallengeRecord
+} from "../lib/daily-challenge";
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -73,6 +81,8 @@ type PracticeSession = {
   startedAt: number;
   category: PromptCategory;
   deviceKind: DeviceKind;
+  mode: "practice" | "daily";
+  challengeKey?: string;
 };
 
 const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL?.trim() ?? "";
@@ -98,6 +108,7 @@ export default function HomePage() {
   const [practiceSession, setPracticeSession] = useState<PracticeSession | null>(null);
   const [practiceResult, setPracticeResult] = useState<MatchResult | null>(null);
   const [practiceCategory, setPracticeCategory] = useState<PromptCategory>("standard");
+  const [dailyChallengeRecord, setDailyChallengeRecord] = useState<DailyChallengeRecord | null>(null);
   const [error, setError] = useState("");
   const [countdownMs, setCountdownMs] = useState(0);
   const [matchTimerMs, setMatchTimerMs] = useState(0);
@@ -120,11 +131,15 @@ export default function HomePage() {
     () => room?.players.find((player) => player.id === playerId) ?? null,
     [playerId, room]
   );
+  const dailyChallengeDate = useMemo(() => new Date(), []);
   const activePracticePlayer = practiceResult?.players[0] ?? null;
   const activeResult = result ?? practiceResult;
   const activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
   const activePromptText = activePrompt?.text ?? "";
   const activeInputDeviceKind = room ? currentPlayer?.deviceKind ?? "desktop" : practiceSession?.deviceKind ?? "desktop";
+  const dailyChallengeInfo = useMemo(() => getDailyChallengeInfo(dailyChallengeDate), [dailyChallengeDate]);
+  const dailyChallengePrompt = useMemo(() => pickDailyChallengePrompt(dailyChallengeDate), [dailyChallengeDate]);
+  const activePracticeMode = practiceSession?.mode ?? "practice";
   const activeRomajiTypingPlan =
     activePrompt && activeInputDeviceKind !== "mobile" ? buildRomajiTypingPlan(activePrompt.typing.hiragana) : null;
   const activeTypingText = activePrompt
@@ -246,7 +261,8 @@ export default function HomePage() {
         setPracticeSession({
           ...response.data,
           category: practiceCategory,
-          deviceKind
+          deviceKind,
+          mode: "practice"
         });
         setPracticeResult(null);
         setPracticeProgress(createEmptyProgress());
@@ -254,6 +270,38 @@ export default function HomePage() {
       }
     );
   }, [guestId, practiceCategory, realtimeConfigured, resetTyping]);
+
+  const startDailyChallenge = useCallback(() => {
+    const socket = socketRef.current;
+    const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
+    const validationError = validateNickname(currentNickname);
+    const deviceKind = detectDeviceKind();
+
+    if (!realtimeConfigured || !socket || validationError || !guestId) {
+      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
+      return;
+    }
+
+    void primeSoundPlayback();
+    socket.emit("practice:dailyStart", { nickname: normalizeNickname(currentNickname) }, (response) => {
+      if (!response.ok) {
+        setError(response.error);
+        return;
+      }
+
+      setError("");
+      setPracticeSession({
+        ...response.data,
+        category: "standard",
+        deviceKind,
+        mode: "daily",
+        ...(response.data.challengeKey ? { challengeKey: response.data.challengeKey } : {})
+      });
+      setPracticeResult(null);
+      setPracticeProgress(createEmptyProgress());
+      resetTyping();
+    });
+  }, [guestId, realtimeConfigured, resetTyping]);
 
   const finishPractice = useCallback(
     (finalProgress: ProgressState) => {
@@ -288,8 +336,22 @@ export default function HomePage() {
         prompt: practiceSession.prompt,
         players: [player]
       });
+
+      if (practiceSession.mode === "daily" && practiceSession.challengeKey) {
+        const nextRecord = updateDailyChallengeRecord(dailyChallengeRecord, {
+          challengeKey: practiceSession.challengeKey,
+          promptId: practiceSession.prompt.id,
+          wpm: player.wpm,
+          accuracy: player.accuracy,
+          finishTimeMs,
+          completedAt: player.finishedAt ?? Date.now()
+        });
+
+        persistDailyChallengeRecord(window.localStorage, nextRecord);
+        setDailyChallengeRecord(nextRecord);
+      }
     },
-    [practiceSession]
+    [dailyChallengeRecord, practiceSession]
   );
 
   useEffect(() => {
@@ -381,6 +443,14 @@ export default function HomePage() {
 
     persistGuestSession(window.localStorage, guestSession);
   }, [guestSession]);
+
+  useEffect(() => {
+    if (!settingsHydrated) {
+      return;
+    }
+
+    setDailyChallengeRecord(loadDailyChallengeRecord(window.localStorage, dailyChallengeInfo.challengeKey));
+  }, [dailyChallengeInfo.challengeKey, settingsHydrated]);
 
   useEffect(() => {
     const handlePrimeSound = () => {
@@ -803,6 +873,8 @@ export default function HomePage() {
     });
   };
 
+  const retryPractice = activePracticeMode === "daily" ? startDailyChallenge : startPractice;
+
   const copyRoomCode = async () => {
     if (!room) {
       return;
@@ -880,6 +952,43 @@ export default function HomePage() {
               </button>
             </div>
           )}
+
+          {!room ? (
+            <div className="dailyChallengePanel">
+              <div className="dailyChallengeHeader">
+                <span>デイリーチャレンジ</span>
+                <small>{dailyChallengeInfo.challengeKey}</small>
+              </div>
+              <p className="dailyChallengePrompt">{dailyChallengePrompt.text}</p>
+              <div className="dailyChallengeStats">
+                <div>
+                  <span>今日の最高 WPM</span>
+                  <strong>{dailyChallengeRecord ? dailyChallengeRecord.bestAccuracy : "—"}</strong>
+                </div>
+                <div>
+                  <span>挑戦回数</span>
+                  <strong>{dailyChallengeRecord?.attempts ?? 0}</strong>
+                </div>
+                <div>
+                  <span>ベスト正確率</span>
+                  <strong>{dailyChallengeRecord ? `${dailyChallengeRecord.bestAccuracy}%` : "—"}</strong>
+                </div>
+                <div>
+                  <span>ベスト時間</span>
+                  <strong>{dailyChallengeRecord ? `${Math.round(dailyChallengeRecord.bestFinishTimeMs / 1000)}s` : "—"}</strong>
+                </div>
+              </div>
+              <button
+                className="secondaryButton"
+                type="button"
+                onClick={startDailyChallenge}
+                disabled={!realtimeConfigured || Boolean(practiceSession && !practiceResult)}
+              >
+                <Swords size={18} />
+                今日の挑戦を開始
+              </button>
+            </div>
+          ) : null}
 
           {!room ? (
             <div className="difficultySelector">
@@ -1109,7 +1218,8 @@ export default function HomePage() {
                 <ResultPanel
                   result={activeResult}
                   isRoomResult={Boolean(room)}
-                  onRetry={room ? rematch : startPractice}
+                  onRetry={room ? rematch : retryPractice}
+                  practiceMode={activePracticeMode}
                   {...(room?.matchRule ? { matchRule: room.matchRule } : {})}
                 />
               ) : null}

@@ -533,6 +533,65 @@ textarea::placeholder {
   gap: 10px;
 }
 
+.dailyChallengePanel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-soft) 88%, var(--accent-soft)), var(--surface-soft));
+  box-shadow: var(--shadow-sm);
+}
+
+.dailyChallengeHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dailyChallengeHeader span,
+.dailyChallengeHeader small,
+.dailyChallengeStats span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dailyChallengeHeader small {
+  flex-shrink: 0;
+}
+
+.dailyChallengePrompt {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.dailyChallengeStats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dailyChallengeStats div {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-strong);
+}
+
+.dailyChallengeStats strong {
+  font-size: 18px;
+  line-height: 1.2;
+}
+
 .matchRuleButtons {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
