@@ -6,8 +6,8 @@ import { validateNickname } from "@type-battle/shared";
 import type {
   AckResponse,
   ClientToServerEvents,
-  Prompt,
   PromptCategory,
+  PracticeSessionData,
   ServerToClientEvents,
   RoomState
 } from "@type-battle/shared";
@@ -29,6 +29,7 @@ import {
   setMatchRule,
   setPromptCategory,
   setReady,
+  startDailyPractice,
   startMatch,
   startPractice,
   updateProgress
@@ -300,9 +301,15 @@ io.on("connection", (socket) => {
     emitRoomState(result.room);
   });
 
-  socket.on("practice:start", (payload: { nickname: string; category: PromptCategory }, ack: (response: AckResponse<{ practiceId: string; prompt: Prompt; startedAt: number }>) => void) => {
+  socket.on("practice:start", (payload: { nickname: string; category: PromptCategory }, ack: (response: AckResponse<PracticeSessionData>) => void) => {
     const practice = startPractice(payload.nickname, payload.category);
     logger.info({ event: "practice_start", practiceId: practice.practiceId, category: payload.category });
+    ack({ ok: true, data: practice });
+  });
+
+  socket.on("practice:dailyStart", (payload: { nickname: string }, ack: (response: AckResponse<PracticeSessionData>) => void) => {
+    const practice = startDailyPractice(payload.nickname);
+    logger.info({ event: "practice_daily_start", practiceId: practice.practiceId, challengeKey: practice.challengeKey });
     ack({ ok: true, data: practice });
   });
 

@@ -58,6 +58,8 @@
 - `practice:start` event と server 側の prompt 発行がある。
 - Web UI に practice の入口、typing UI、result UI がある。
 - practice result を client-side で表示し、`Practice again` で再実行できる。
+- daily challenge で日ごとに固定された prompt を開始できる。
+- daily challenge の結果を localStorage に保存し、今日のベストを表示する。
 
 ### Result analytics
 

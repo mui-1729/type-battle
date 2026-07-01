@@ -2,9 +2,11 @@ import {
   calculateAccuracy,
   calculateWpm,
   createRoomCode,
+  getDailyChallengeInfo,
   PROMPTS,
   normalizeNickname,
   pickPrompt,
+  pickDailyChallengePrompt,
   rankPlayers
 } from "@type-battle/shared";
 import type {
@@ -964,12 +966,28 @@ export function checkExpiredTimeAttackMatches(): MatchResult[] {
 }
 
 export function startPractice(nickname: string, category: PromptCategory): { practiceId: string; prompt: Prompt; startedAt: number } {
+  void nickname;
   const practiceId = createRoomCode(); // Reuse room code generator for practice ID
   const prompt = pickPrompt(category, Date.now());
   return {
     practiceId,
     prompt,
     startedAt: Date.now()
+  };
+}
+
+export function startDailyPractice(nickname: string): { practiceId: string; prompt: Prompt; startedAt: number; challengeKey: string } {
+  void nickname;
+  const practiceId = createRoomCode();
+  const now = new Date();
+  const prompt = pickDailyChallengePrompt(now);
+  const { challengeKey } = getDailyChallengeInfo(now);
+
+  return {
+    practiceId,
+    prompt,
+    startedAt: Date.now(),
+    challengeKey
   };
 }
 
