@@ -43,6 +43,9 @@
 - [x] `feat(practice): add daily challenge`
   - 今日だけの固定 prompt を出して、日ごとの記録を残せるようにする。
   - 練習モードとは別に、継続用の入口を用意する。
+- [x] `feat(analytics): add mistake tendency visualization`
+  - よくミスする文字と誤入力傾向を見える化する。
+  - localStorage に蓄積して、繰り返しの苦手箇所を確認できるようにする。
 - `feat(practice): add retry same prompt`
   - 同じ prompt を再挑戦できる。
   - retry と next prompt を分ける。

@@ -1,4 +1,4 @@
-import type { ProgressState } from "./typing-progress";
+import type { MistakeSample, ProgressState } from "./typing-progress";
 
 export type RomajiTypingUnit = {
   hiragana: string;
@@ -9,6 +9,11 @@ export type RomajiTypingUnit = {
 export type RomajiTypingPlan = {
   guide: string;
   units: RomajiTypingUnit[];
+};
+
+export type RomajiProgressUpdate = {
+  progress: ProgressState;
+  mistakeSamples: MistakeSample[];
 };
 
 const BASIC_KANA_MAP: Record<string, { guide: string; accepted: string[] }> = {
@@ -188,6 +193,39 @@ export function advanceRomajiProgressByText(
   return Array.from(typedText).reduce(
     (progress, typedChar) => advanceRomajiProgress(progress, plan, typedChar),
     previous
+  );
+}
+
+export function advanceRomajiProgressWithMistakes(
+  previous: ProgressState,
+  plan: RomajiTypingPlan,
+  typedText: string
+): RomajiProgressUpdate {
+  return Array.from(typedText).reduce<RomajiProgressUpdate>(
+    (state, typedChar) => {
+      const unitIndex = findCurrentUnitIndex(plan, state.progress.progressIndex);
+      const unit = plan.units[unitIndex];
+
+      if (!unit) {
+        return state;
+      }
+
+      const nextProgress = advanceRomajiProgress(state.progress, plan, typedChar);
+
+      if (nextProgress.mistakes > state.progress.mistakes) {
+        state.mistakeSamples.push({
+          expectedChar: unit.hiragana,
+          typedChar
+        });
+      }
+
+      state.progress = nextProgress;
+      return state;
+    },
+    {
+      progress: previous,
+      mistakeSamples: []
+    }
   );
 }
 

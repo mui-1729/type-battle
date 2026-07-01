@@ -20,6 +20,16 @@ export function createEmptyProgress(): ProgressState {
   };
 }
 
+export type MistakeSample = {
+  expectedChar: string;
+  typedChar: string;
+};
+
+export type ProgressUpdate = {
+  progress: ProgressState;
+  mistakeSamples: MistakeSample[];
+};
+
 export function advanceProgress(
   previous: ProgressState,
   expectedChar: string | undefined,
@@ -39,13 +49,37 @@ export function advanceProgress(
   };
 }
 
+export function advanceProgressWithMistakes(
+  previous: ProgressState,
+  promptText: string,
+  typedText: string
+): ProgressUpdate {
+  return Array.from(typedText).reduce<ProgressUpdate>(
+    (state, typedChar) => {
+      const expectedChar = promptText[state.progress.progressIndex];
+      const nextProgress = advanceProgress(state.progress, expectedChar, typedChar);
+
+      if (nextProgress.mistakes > state.progress.mistakes) {
+        state.mistakeSamples.push({
+          expectedChar: expectedChar ?? "",
+          typedChar
+        });
+      }
+
+      state.progress = nextProgress;
+      return state;
+    },
+    {
+      progress: previous,
+      mistakeSamples: []
+    }
+  );
+}
+
 export function advanceProgressByText(
   previous: ProgressState,
   promptText: string,
   typedText: string
 ): ProgressState {
-  return Array.from(typedText).reduce(
-    (progress, typedChar) => advanceProgress(progress, promptText[progress.progressIndex], typedChar),
-    previous
-  );
+  return advanceProgressWithMistakes(previous, promptText, typedText).progress;
 }

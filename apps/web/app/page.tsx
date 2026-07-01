@@ -36,12 +36,15 @@ import { TypingInput } from "./_components/typing-input";
 import { StatusPill } from "./_components/status-pill";
 import { TypingPrompt } from "./_components/typing-prompt";
 import {
-  advanceProgress,
-  advanceProgressByText,
   createEmptyProgress,
+  advanceProgressWithMistakes,
+  type MistakeSample,
   type ProgressState
 } from "./_lib/typing-progress";
-import { advanceRomajiProgressByText, buildRomajiTypingPlan } from "./_lib/romaji-typing";
+import {
+  advanceRomajiProgressWithMistakes,
+  buildRomajiTypingPlan
+} from "./_lib/romaji-typing";
 import { detectDeviceKind } from "./_lib/device-kind";
 import {
   BOT_DIFFICULTY_LABELS,
@@ -72,6 +75,14 @@ import {
   updateDailyChallengeRecord,
   type DailyChallengeRecord
 } from "../lib/daily-challenge";
+import {
+  formatMistakeTarget,
+  loadMistakeTrendRecord,
+  persistMistakeTrendRecord,
+  summarizeMistakeTrendRecord,
+  updateMistakeTrendRecord,
+  type MistakeTrendRecord
+} from "../lib/mistake-trends";
 
 type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -109,6 +120,7 @@ export default function HomePage() {
   const [practiceResult, setPracticeResult] = useState<MatchResult | null>(null);
   const [practiceCategory, setPracticeCategory] = useState<PromptCategory>("standard");
   const [dailyChallengeRecord, setDailyChallengeRecord] = useState<DailyChallengeRecord | null>(null);
+  const [mistakeTrendRecord, setMistakeTrendRecord] = useState<MistakeTrendRecord | null>(null);
   const [error, setError] = useState("");
   const [countdownMs, setCountdownMs] = useState(0);
   const [matchTimerMs, setMatchTimerMs] = useState(0);
@@ -116,6 +128,8 @@ export default function HomePage() {
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
+  const localProgressRef = useRef<ProgressState>(createEmptyProgress());
+  const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
   const realtimeUrl = REALTIME_URL || localRealtimeUrl;
   const realtimeConfigured = realtimeUrl.length > 0;
   const guestId = guestSession?.guestId ?? "";
@@ -140,6 +154,11 @@ export default function HomePage() {
   const dailyChallengeInfo = useMemo(() => getDailyChallengeInfo(dailyChallengeDate), [dailyChallengeDate]);
   const dailyChallengePrompt = useMemo(() => pickDailyChallengePrompt(dailyChallengeDate), [dailyChallengeDate]);
   const activePracticeMode = practiceSession?.mode ?? "practice";
+  const mistakeTrendSummary = useMemo(() => summarizeMistakeTrendRecord(mistakeTrendRecord), [mistakeTrendRecord]);
+  const mistakeTrendTotal = useMemo(
+    () => (mistakeTrendRecord?.items ?? []).reduce((total, item) => total + item.count, 0),
+    [mistakeTrendRecord]
+  );
   const activeRomajiTypingPlan =
     activePrompt && activeInputDeviceKind !== "mobile" ? buildRomajiTypingPlan(activePrompt.typing.hiragana) : null;
   const activeTypingText = activePrompt
@@ -219,10 +238,23 @@ export default function HomePage() {
     setPracticeSession(null);
     setPracticeResult(null);
     setPracticeProgress(createEmptyProgress());
+    practiceProgressRef.current = createEmptyProgress();
   }, []);
+
+  const recordMistakeSamples = useCallback(
+    (samples: MistakeSample[]) => {
+      if (!settingsHydrated || samples.length === 0) {
+        return;
+      }
+
+      setMistakeTrendRecord((current) => updateMistakeTrendRecord(current, samples));
+    },
+    [settingsHydrated]
+  );
 
   const resetTyping = useCallback(() => {
     setLocalProgress(createEmptyProgress());
+    localProgressRef.current = createEmptyProgress();
     setResult(null);
   }, []);
 
@@ -453,6 +485,14 @@ export default function HomePage() {
   }, [dailyChallengeInfo.challengeKey, settingsHydrated]);
 
   useEffect(() => {
+    if (!settingsHydrated) {
+      return;
+    }
+
+    setMistakeTrendRecord(loadMistakeTrendRecord(window.localStorage));
+  }, [settingsHydrated]);
+
+  useEffect(() => {
     const handlePrimeSound = () => {
       void primeSoundPlayback();
     };
@@ -465,6 +505,22 @@ export default function HomePage() {
       window.removeEventListener("keydown", handlePrimeSound);
     };
   }, []);
+
+  useEffect(() => {
+    localProgressRef.current = localProgress;
+  }, [localProgress]);
+
+  useEffect(() => {
+    practiceProgressRef.current = practiceProgress;
+  }, [practiceProgress]);
+
+  useEffect(() => {
+    if (!settingsHydrated || !mistakeTrendRecord) {
+      return;
+    }
+
+    persistMistakeTrendRecord(window.localStorage, mistakeTrendRecord);
+  }, [mistakeTrendRecord, settingsHydrated]);
 
   useEffect(() => {
     if (!connected || !guestId || !sessionId || !settingsHydrated || resumeAttempted) {
@@ -608,6 +664,21 @@ export default function HomePage() {
     [room]
   );
 
+  const updateTypingProgress = useCallback(
+    (previous: ProgressState, typedText: string) => {
+      if (activeInputDeviceKind === "mobile") {
+        return advanceProgressWithMistakes(previous, activeTypingText, typedText);
+      }
+
+      if (activeRomajiTypingPlan) {
+        return advanceRomajiProgressWithMistakes(previous, activeRomajiTypingPlan, typedText);
+      }
+
+      return advanceProgressWithMistakes(previous, activeTypingText, typedText);
+    },
+    [activeInputDeviceKind, activeRomajiTypingPlan, activeTypingText]
+  );
+
   const handleTypedText = useCallback(
     (typedText: string) => {
       if (!typedText) {
@@ -615,56 +686,49 @@ export default function HomePage() {
       }
 
       if (room?.status === "playing" && room?.prompt) {
-        setLocalProgress((previous) => {
-          const next =
-            activeInputDeviceKind === "mobile"
-              ? advanceProgressByText(previous, activeTypingText, typedText)
-              : activeRomajiTypingPlan
-                ? advanceRomajiProgressByText(previous, activeRomajiTypingPlan, typedText)
-                : advanceProgressByText(previous, activeTypingText, typedText);
-          const correct = next.correctCharacters > previous.correctCharacters;
-          const payload: TypingProgress = {
-            roomCode: room.roomCode,
-            progressIndex: next.progressIndex,
-            correctCharacters: next.correctCharacters,
-            totalTypedCharacters: next.totalTypedCharacters,
-            mistakes: next.mistakes
-          };
+        const previous = localProgressRef.current;
+        const next = updateTypingProgress(previous, typedText);
+        const correct = next.progress.correctCharacters > previous.correctCharacters;
+        const payload: TypingProgress = {
+          roomCode: room.roomCode,
+          progressIndex: next.progress.progressIndex,
+          correctCharacters: next.progress.correctCharacters,
+          totalTypedCharacters: next.progress.totalTypedCharacters,
+          mistakes: next.progress.mistakes
+        };
 
-          void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
-          emitProgress(payload, next.progressIndex >= activeTypingText.length);
-          return next;
-        });
+        setLocalProgress(next.progress);
+        localProgressRef.current = next.progress;
+        recordMistakeSamples(next.mistakeSamples);
+        void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
+        emitProgress(payload, next.progress.progressIndex >= activeTypingText.length);
         return;
       }
 
       if (practiceSession && !practiceResult && !room) {
-        setPracticeProgress((previous) => {
-          const next =
-            activeInputDeviceKind === "mobile"
-              ? advanceProgressByText(previous, activeTypingText, typedText)
-              : activeRomajiTypingPlan
-                ? advanceRomajiProgressByText(previous, activeRomajiTypingPlan, typedText)
-                : advanceProgressByText(previous, activeTypingText, typedText);
-          const correct = next.correctCharacters > previous.correctCharacters;
+        const previous = practiceProgressRef.current;
+        const next = updateTypingProgress(previous, typedText);
+        const correct = next.progress.correctCharacters > previous.correctCharacters;
 
-          if (next.progressIndex >= activeTypingText.length) {
-            finishPractice(next);
-          }
+        setPracticeProgress(next.progress);
+        practiceProgressRef.current = next.progress;
+        recordMistakeSamples(next.mistakeSamples);
 
-          void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
-          return next;
-        });
+        if (next.progress.progressIndex >= activeTypingText.length) {
+          finishPractice(next.progress);
+        }
+
+        void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
       }
     },
     [
-      activeInputDeviceKind,
-      activeRomajiTypingPlan,
       activeTypingText,
       emitProgress,
       finishPractice,
       practiceResult,
       practiceSession,
+      recordMistakeSamples,
+      updateTypingProgress,
       room
     ]
   );
@@ -692,43 +756,42 @@ export default function HomePage() {
       const typedKey = event.key.toLowerCase();
 
       if (room?.status === "playing" && room?.prompt) {
-        setLocalProgress((previous) => {
-          const next = activeRomajiTypingPlan
-            ? advanceRomajiProgressByText(previous, activeRomajiTypingPlan, typedKey)
-            : advanceProgress(previous, activeTypingText[previous.progressIndex], typedKey);
-          const correct = next.correctCharacters > previous.correctCharacters;
-          const soundOptions = settingsRef.current;
+        const previous = localProgressRef.current;
+        const next = updateTypingProgress(previous, typedKey);
+        const correct = next.progress.correctCharacters > previous.correctCharacters;
+        const soundOptions = settingsRef.current;
 
-          const payload: TypingProgress = {
-            roomCode: room.roomCode,
-            progressIndex: next.progressIndex,
-            correctCharacters: next.correctCharacters,
-            totalTypedCharacters: next.totalTypedCharacters,
-            mistakes: next.mistakes
-          };
+        const payload: TypingProgress = {
+          roomCode: room.roomCode,
+          progressIndex: next.progress.progressIndex,
+          correctCharacters: next.progress.correctCharacters,
+          totalTypedCharacters: next.progress.totalTypedCharacters,
+          mistakes: next.progress.mistakes
+        };
 
-          void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
-          emitProgress(payload, next.progressIndex >= activeTypingText.length);
-          return next;
-        });
+        setLocalProgress(next.progress);
+        localProgressRef.current = next.progress;
+        recordMistakeSamples(next.mistakeSamples);
+        void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
+        emitProgress(payload, next.progress.progressIndex >= activeTypingText.length);
         return;
       }
 
       if (practiceActive && practiceSession) {
-        setPracticeProgress((previous) => {
-          const next = activeRomajiTypingPlan
-            ? advanceRomajiProgressByText(previous, activeRomajiTypingPlan, typedKey)
-            : advanceProgress(previous, activeTypingText[previous.progressIndex], typedKey);
-          const correct = next.correctCharacters > previous.correctCharacters;
-          const soundOptions = settingsRef.current;
+        const previous = practiceProgressRef.current;
+        const next = updateTypingProgress(previous, typedKey);
+        const correct = next.progress.correctCharacters > previous.correctCharacters;
+        const soundOptions = settingsRef.current;
 
-          if (next.progressIndex >= activeTypingText.length) {
-            finishPractice(next);
-          }
+        setPracticeProgress(next.progress);
+        practiceProgressRef.current = next.progress;
+        recordMistakeSamples(next.mistakeSamples);
 
-          void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
-          return next;
-        });
+        if (next.progress.progressIndex >= activeTypingText.length) {
+          finishPractice(next.progress);
+        }
+
+        void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
       }
     };
 
@@ -736,12 +799,13 @@ export default function HomePage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     activeInputDeviceKind,
-    activeRomajiTypingPlan,
     activeTypingText,
     emitProgress,
     finishPractice,
     practiceResult,
     practiceSession,
+    recordMistakeSamples,
+    updateTypingProgress,
     room
   ]);
 
@@ -989,6 +1053,45 @@ export default function HomePage() {
               </button>
             </div>
           ) : null}
+
+          <div className="mistakeTrendPanel">
+            <div className="mistakeTrendHeader">
+              <div>
+                <span>ミス傾向</span>
+                <small>{mistakeTrendTotal} 件</small>
+              </div>
+              <small>{mistakeTrendSummary.length > 0 ? "上位 5 件" : "未記録"}</small>
+            </div>
+            {mistakeTrendSummary.length === 0 ? (
+              <p className="mistakeTrendEmpty">まだミスの記録がありません。</p>
+            ) : (
+              <div className="mistakeTrendList">
+                {mistakeTrendSummary.map((item) => {
+                  const maxCount = mistakeTrendSummary[0]?.count ?? 1;
+                  const barWidth = Math.max((item.count / (maxCount + 1)) * 100, item.count > 0 ? 12 : 0);
+                  const dominantWrongInputLabel =
+                    item.dominantWrongInput && item.dominantWrongInputCount > 0
+                      ? `誤入力 ${formatMistakeTarget(item.dominantWrongInput)} ×${item.dominantWrongInputCount}`
+                      : "誤入力なし";
+
+                  return (
+                    <div className="mistakeTrendRow" key={item.expectedChar}>
+                      <div className="mistakeTrendRowTop">
+                        <div className="mistakeTrendLabel">
+                          <strong>{formatMistakeTarget(item.expectedChar)}</strong>
+                          <small>{dominantWrongInputLabel}</small>
+                        </div>
+                        <span className="mistakeTrendCount">{item.count}</span>
+                      </div>
+                      <div className="mistakeTrendBarTrack" aria-hidden="true">
+                        <div className="mistakeTrendBarFill" style={{ width: `${barWidth}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {!room ? (
             <div className="difficultySelector">

@@ -592,6 +592,97 @@ textarea::placeholder {
   line-height: 1.2;
 }
 
+.mistakeTrendPanel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-soft) 90%, var(--danger-soft)), var(--surface-soft));
+  box-shadow: var(--shadow-sm);
+}
+
+.mistakeTrendHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mistakeTrendHeader div {
+  display: grid;
+  gap: 3px;
+}
+
+.mistakeTrendHeader span,
+.mistakeTrendHeader small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.mistakeTrendEmpty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.mistakeTrendList {
+  display: grid;
+  gap: 10px;
+}
+
+.mistakeTrendRow {
+  display: grid;
+  gap: 8px;
+}
+
+.mistakeTrendRowTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mistakeTrendLabel {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.mistakeTrendLabel strong {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.mistakeTrendLabel small,
+.mistakeTrendCount {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mistakeTrendCount {
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.mistakeTrendBarTrack {
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-strong);
+}
+
+.mistakeTrendBarFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--danger) 88%, white 12%), color-mix(in srgb, var(--accent) 72%, white 28%));
+}
+
 .matchRuleButtons {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
