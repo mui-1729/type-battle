@@ -50,6 +50,8 @@
 - category は `short | standard | long`。
 - waiting lobby で host が prompt category を変更できる。
 - match start 時に server が category に応じて prompt を選ぶ。
+- prompt 定義の空文字や制御文字を検証して、無効なものを弾く。
+- room の再戦では直前と同じ prompt をできるだけ避ける。
 
 ### Practice mode
 

@@ -2,6 +2,7 @@ import {
   calculateAccuracy,
   calculateWpm,
   createRoomCode,
+  PROMPTS,
   normalizeNickname,
   pickPrompt,
   rankPlayers
@@ -64,6 +65,7 @@ type InternalRoom = {
   botDifficulty: BotDifficulty;
   promptCategory: PromptCategory;
   prompt?: Prompt;
+  promptHistory: string[];
   serverStartAt?: number;
   matchEndsAt?: number;
   result?: MatchResult;
@@ -110,6 +112,7 @@ export function createRoom(input: {
     matchRule: "race",
     botDifficulty: "normal",
     promptCategory: "standard",
+    promptHistory: [],
     players: new Map([[player.id, player]]),
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
@@ -376,7 +379,10 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
   }
 
   room.status = "countdown";
-  room.prompt = pickPrompt(room.promptCategory, Date.now());
+  room.prompt = selectPromptForRoom(room, Date.now());
+  if (!room.promptHistory.includes(room.prompt.id)) {
+    room.promptHistory.push(room.prompt.id);
+  }
   room.serverStartAt = Date.now() + COUNTDOWN_MS;
   if (room.matchRule === "timeAttack") {
     room.matchEndsAt = room.serverStartAt + TIME_ATTACK_MS;
@@ -543,7 +549,10 @@ export function rematch(socketId: string, roomCode: string): { room: RoomState }
 
   room.status = "waiting";
   room.round += 1;
-  room.prompt = pickPrompt(room.promptCategory, Date.now() + room.round);
+  room.prompt = selectPromptForRoom(room, Date.now() + room.round);
+  if (!room.promptHistory.includes(room.prompt.id)) {
+    room.promptHistory.push(room.prompt.id);
+  }
   delete room.serverStartAt;
   delete room.matchEndsAt;
   delete room.result;
@@ -852,6 +861,25 @@ function createUniqueRoomCode(): string {
   }
 
   return roomCode;
+}
+
+function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
+  const prompts = PROMPTS.filter((prompt) => prompt.category === room.promptCategory);
+  const unseenPrompts = prompts.filter((prompt) => !room.promptHistory.includes(prompt.id));
+  const pool = unseenPrompts.length > 0 ? unseenPrompts : prompts;
+
+  if (pool.length === 0) {
+    return pickPrompt(room.promptCategory, seed);
+  }
+
+  const index = Math.abs(seed) % pool.length;
+  let selected = pool[index] ?? pool[0]!;
+
+  if (room.prompt && pool.length > 1 && selected.id === room.prompt.id) {
+    selected = pool[(index + 1) % pool.length]!;
+  }
+
+  return selected;
 }
 
 const ROOM_TTL_MS = 60 * 1000; // 1 minute
