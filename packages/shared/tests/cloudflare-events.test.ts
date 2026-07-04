@@ -30,7 +30,7 @@ describe("cloudflare events", () => {
     }
   } satisfies CloudflareClientMessage;
 
-  const assertClientMessage = (_message: CloudflareClientMessage) => undefined;
+  const assertClientMessage = (message: CloudflareClientMessage) => message;
 
   assertClientMessage({
     id: "msg_invalid_create_room",
@@ -54,7 +54,7 @@ describe("cloudflare events", () => {
     }
   } satisfies CloudflareAckEnvelope<"client:room:create">;
 
-  const assertAckEnvelope = (_message: CloudflareAckEnvelope) => undefined;
+  const assertAckEnvelope = (message: CloudflareAckEnvelope) => message;
 
   assertAckEnvelope({
     id: "ack_invalid_create_room",
@@ -96,7 +96,7 @@ describe("cloudflare events", () => {
     }
   } satisfies CloudflareServerMessage;
 
-  const assertServerMessage = (_message: CloudflareServerMessage) => undefined;
+  const assertServerMessage = (message: CloudflareServerMessage) => message;
 
   assertServerMessage({
     id: "state_invalid",
