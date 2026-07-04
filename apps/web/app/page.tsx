@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { Clipboard, Play, Swords, Unplug, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { io } from "socket.io-client";
-import type { Socket } from "socket.io-client";
+import { createRealtimeSocket, getDefaultRealtimeUrl, type RealtimeSocket, type RealtimeTransport } from "./_lib/realtime-client";
 import {
   calculateAccuracy,
   calculateProgress,
@@ -15,7 +14,6 @@ import {
   validateNickname
 } from "@type-battle/shared";
 import type {
-  ClientToServerEvents,
   DeviceKind,
   MatchRule,
   MatchResult,
@@ -23,7 +21,6 @@ import type {
   Prompt,
   PromptCategory,
   RoomState,
-  ServerToClientEvents,
   TypingProgress
 } from "@type-battle/shared";
 import { GameHeader } from "./_components/game-header";
@@ -84,7 +81,7 @@ import {
   type MistakeTrendRecord
 } from "../lib/mistake-trends";
 
-type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+type ClientSocket = RealtimeSocket;
 
 type PracticeSession = {
   practiceId: string;
@@ -96,8 +93,10 @@ type PracticeSession = {
   challengeKey?: string;
 };
 
-const REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL?.trim() ?? "";
-const REALTIME_UNAVAILABLE_MESSAGE = "Realtime の接続先が未設定です。";
+const REALTIME_TRANSPORT = (process.env.NEXT_PUBLIC_REALTIME_TRANSPORT?.trim() === "cloudflare" ? "cloudflare" : "socketio") as RealtimeTransport;
+const SOCKET_IO_REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL?.trim() ?? "";
+const CLOUDFLARE_REALTIME_URL = process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL?.trim() ?? "";
+const REALTIME_UNAVAILABLE_MESSAGE = "Realtime transport is not configured.";
 const ROOM_CODE_KEY = "type-battle:room-code";
 
 export default function HomePage() {
@@ -130,7 +129,7 @@ export default function HomePage() {
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
   const localProgressRef = useRef<ProgressState>(createEmptyProgress());
   const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
-  const realtimeUrl = REALTIME_URL || localRealtimeUrl;
+  const realtimeUrl = (REALTIME_TRANSPORT === "cloudflare" ? CLOUDFLARE_REALTIME_URL : SOCKET_IO_REALTIME_URL) || localRealtimeUrl;
   const realtimeConfigured = realtimeUrl.length > 0;
   const guestId = guestSession?.guestId ?? "";
   const sessionId = guestSession?.sessionId ?? "";
@@ -387,14 +386,12 @@ export default function HomePage() {
   );
 
   useEffect(() => {
-    if (!REALTIME_URL && typeof window !== "undefined") {
-      const hostname = window.location.hostname;
-      const isVercelHost = hostname === "vercel.app" || hostname.endsWith(".vercel.app");
-
-      if (!isVercelHost && hostname) {
-        setLocalRealtimeUrl(`http://${hostname}:3001`);
-      }
+    if (typeof window === "undefined") {
+      return;
     }
+
+    const fallbackRealtimeUrl = getDefaultRealtimeUrl(REALTIME_TRANSPORT, window.location);
+    setLocalRealtimeUrl(fallbackRealtimeUrl ?? "");
   }, []);
 
   useEffect(() => {
@@ -410,9 +407,7 @@ export default function HomePage() {
       return;
     }
 
-    const socket: ClientSocket = io(realtimeUrl, {
-      transports: ["websocket"]
-    });
+    const socket: ClientSocket = createRealtimeSocket({ transport: REALTIME_TRANSPORT, url: realtimeUrl });
     socketRef.current = socket;
 
     socket.on("connect", () => setConnected(true));
