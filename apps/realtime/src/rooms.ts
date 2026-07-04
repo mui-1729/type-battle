@@ -1,4 +1,4 @@
-﻿import { logger } from "./logger.js";
+import { logger } from "./logger.js";
 import { recordGuestSession, recordMatchResult } from "./persistence.js";
 import {
   BOT_TICK_MS,
@@ -21,17 +21,22 @@ import {
   setMatchRule,
   setPromptCategory,
   setReady,
+  setRoomEngineConfig,
+  setRoomEngineHooks,
   startDailyPractice,
   startMatch,
   startPractice,
-  updateProgress,
-  setRoomEngineHooks
-} from "@type-battle/shared";
+  updateProgress
+} from "@type-battle/shared/room-engine";
 
 setRoomEngineHooks({
   logger,
   recordGuestSession,
   recordMatchResult
+});
+
+setRoomEngineConfig({
+  timeAttackMs: Number(process.env.TIME_ATTACK_MS ?? (process.env.NODE_ENV === "test" ? 5_000 : 30_000))
 });
 
 export {

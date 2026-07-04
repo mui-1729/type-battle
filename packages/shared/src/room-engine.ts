@@ -17,7 +17,6 @@ import type {
 
 const MAX_PLAYERS = 2;
 const COUNTDOWN_MS = 3_000;
-const TIME_ATTACK_MS = 30_000;
 const HP_BATTLE_HP_PER_PROMPT_CHAR = 5;
 const HP_BATTLE_MIN_HP = 50;
 const HP_BATTLE_ATTACK_DAMAGE = 5;
@@ -55,10 +54,26 @@ export type RoomEngineHooks = {
   recordMatchResult?: (input: MatchResultRecord) => void | Promise<void>;
 };
 
+export type RoomEngineConfig = {
+  timeAttackMs?: number;
+};
+
+const DEFAULT_TIME_ATTACK_MS = 30_000;
+
 let engineHooks: RoomEngineHooks = {};
+let engineConfig = {
+  timeAttackMs: DEFAULT_TIME_ATTACK_MS
+};
 
 export function setRoomEngineHooks(hooks: RoomEngineHooks): void {
   engineHooks = hooks;
+}
+
+export function setRoomEngineConfig(config: RoomEngineConfig): void {
+  engineConfig = {
+    ...engineConfig,
+    ...config
+  };
 }
 
 const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistakeChance: number }> = {
@@ -412,7 +427,7 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
   }
   room.serverStartAt = Date.now() + COUNTDOWN_MS;
   if (room.matchRule === "timeAttack") {
-    room.matchEndsAt = room.serverStartAt + TIME_ATTACK_MS;
+    room.matchEndsAt = room.serverStartAt + engineConfig.timeAttackMs;
   } else {
     delete room.matchEndsAt;
   }

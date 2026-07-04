@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { calculateAccuracy, calculateProgress, calculateWpm, rankPlayers } from "../src";
-import type { PlayerState } from "../src";
+import { calculateAccuracy, calculateProgress, calculateWpm, rankPlayers } from "../src/index.js";
+import type { PlayerState } from "../src/index.js";
 
 const basePlayer: PlayerState = {
   id: "p1",

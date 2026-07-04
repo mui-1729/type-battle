@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PROMPTS, getDailyChallengeInfo, pickDailyChallengePrompt, pickPrompt, validatePrompt } from "../src";
+import { PROMPTS, getDailyChallengeInfo, pickDailyChallengePrompt, pickPrompt, validatePrompt } from "../src/index.js";
 
 describe("prompts", () => {
   it("validates the bundled prompts", () => {

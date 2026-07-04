@@ -1,11 +1,11 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   CLOUDFLARE_CLIENT_MESSAGE_TYPES,
   CLOUDFLARE_SERVER_EVENT_TYPES,
   type CloudflareAckEnvelope,
   type CloudflareClientMessage,
   type CloudflareServerMessage
-} from "../src";
+} from "../src/index.js";
 
 describe("cloudflare events", () => {
   const createRoomMessage = {
@@ -30,6 +30,19 @@ describe("cloudflare events", () => {
     }
   } satisfies CloudflareClientMessage;
 
+  const assertClientMessage = (_message: CloudflareClientMessage) => undefined;
+
+  assertClientMessage({
+    id: "msg_invalid_create_room",
+    type: "client:typing:finish",
+    payload: {
+      // @ts-expect-error request payloads must stay coupled to their message type
+      nickname: "Alice",
+      guestId: "guest_alice",
+      sessionId: "session_alice"
+    }
+  });
+
   const ackMessage = {
     id: "ack_create_room",
     type: "server:ack",
@@ -40,6 +53,33 @@ describe("cloudflare events", () => {
       error: "rate_limited"
     }
   } satisfies CloudflareAckEnvelope<"client:room:create">;
+
+  const assertAckEnvelope = (_message: CloudflareAckEnvelope) => undefined;
+
+  assertAckEnvelope({
+    id: "ack_invalid_create_room",
+    type: "server:ack",
+    replyTo: "msg_invalid_create_room",
+    command: "client:room:join",
+    payload: {
+      ok: true,
+      data: {
+        // @ts-expect-error ack command payloads must stay coupled to their command
+        roomCode: "ABC123",
+        playerId: "player_1",
+        room: {
+          roomCode: "ABC123",
+          hostPlayerId: "player_1",
+          status: "waiting",
+          matchRule: "race",
+          botDifficulty: "normal",
+          promptCategory: "standard",
+          players: [],
+          maxPlayers: 2
+        }
+      }
+    }
+  });
 
   const stateMessage = {
     id: "state_1",
@@ -55,6 +95,17 @@ describe("cloudflare events", () => {
       maxPlayers: 2
     }
   } satisfies CloudflareServerMessage;
+
+  const assertServerMessage = (_message: CloudflareServerMessage) => undefined;
+
+  assertServerMessage({
+    id: "state_invalid",
+    type: "server:room:state",
+    payload: {
+      // @ts-expect-error server events must keep their discriminant and payload aligned
+      message: "boom"
+    }
+  });
 
   it("lists the supported client and server message types", () => {
     expect(CLOUDFLARE_CLIENT_MESSAGE_TYPES).toContain("client:room:create");

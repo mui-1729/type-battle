@@ -107,25 +107,34 @@ export const CLOUDFLARE_SERVER_EVENT_TYPES = [
 export type CloudflareClientMessageType = keyof CloudflareClientCommandMap;
 export type CloudflareServerEventType = keyof CloudflareServerEventMap;
 
-export type CloudflareRequestEnvelope<TType extends CloudflareClientMessageType = CloudflareClientMessageType> = {
-  id: string;
-  type: TType;
-  payload: CloudflareClientCommandMap[TType]["request"];
-};
+export type CloudflareRequestEnvelope<TType extends CloudflareClientMessageType = CloudflareClientMessageType> =
+  TType extends CloudflareClientMessageType
+    ? {
+        id: string;
+        type: TType;
+        payload: CloudflareClientCommandMap[TType]["request"];
+      }
+    : never;
 
-export type CloudflareAckEnvelope<TType extends CloudflareClientMessageType = CloudflareClientMessageType> = {
-  id: string;
-  type: "server:ack";
-  replyTo: string;
-  command: TType;
-  payload: AckResponse<CloudflareClientCommandMap[TType]["response"]>;
-};
+export type CloudflareAckEnvelope<TType extends CloudflareClientMessageType = CloudflareClientMessageType> =
+  TType extends CloudflareClientMessageType
+    ? {
+        id: string;
+        type: "server:ack";
+        replyTo: string;
+        command: TType;
+        payload: AckResponse<CloudflareClientCommandMap[TType]["response"]>;
+      }
+    : never;
 
-export type CloudflareServerEventEnvelope<TType extends CloudflareServerEventType = CloudflareServerEventType> = {
-  id: string;
-  type: TType;
-  payload: CloudflareServerEventMap[TType];
-};
+export type CloudflareServerEventEnvelope<TType extends CloudflareServerEventType = CloudflareServerEventType> =
+  TType extends CloudflareServerEventType
+    ? {
+        id: string;
+        type: TType;
+        payload: CloudflareServerEventMap[TType];
+      }
+    : never;
 
 export type CloudflareServerMessage =
   | CloudflareAckEnvelope
