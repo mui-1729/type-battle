@@ -248,4 +248,19 @@ describe("worker handler", () => {
     expect(env.ROOMS.stub.fetchCalls).toBe(1);
     expect(env.ROOMS.stub.lastRequest?.method).toBe("POST");
   });
+
+  it("forwards socket requests to the room DO", async () => {
+    const env = createEnv();
+    const response = await fetchWorker(
+      new Request("https://example.com/rooms/ab12cd/socket", {
+        method: "GET"
+      }) as Request,
+      env as unknown as Env
+    );
+
+    expect(response.status).toBe(200);
+    expect(env.ROOMS.ids).toEqual(["AB12CD"]);
+    expect(env.ROOMS.stub.fetchCalls).toBe(1);
+    expect(env.ROOMS.stub.lastRequest?.url).toContain("/rooms/ab12cd/socket");
+  });
 });

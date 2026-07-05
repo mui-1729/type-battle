@@ -80,6 +80,24 @@ npm run dev
 
 環境変数の雛形は [.env.example](.env.example) を参照してください。
 
+### Cloudflare Worker
+
+Cloudflare の room transport を試すときは、`apps/cloudflare-worker` を使います。
+
+```bash
+npm run test --workspace @type-battle/cloudflare-worker
+npm run typecheck --workspace @type-battle/cloudflare-worker
+```
+
+`/rooms/:roomCode/state` は内部更新用の入口として `ROOM_STATE_WRITE_TOKEN` が必要です。
+
+```bash
+cd apps/cloudflare-worker
+wrangler secret put ROOM_STATE_WRITE_TOKEN
+```
+
+ローカル開発では `apps/cloudflare-worker/.dev.vars` に `ROOM_STATE_WRITE_TOKEN` を置いても動かせます。
+
 ローカルでは次の URL を使います。
 
 - Web: http://127.0.0.1:3000
