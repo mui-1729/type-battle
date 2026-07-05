@@ -193,5 +193,5 @@ type RoomState = {
 ## Cloudflare 移行メモ
 
 - 既に shared の Cloudflare event contract と web の transport adapter はあるため、次の実装は backend 側の room authority の移植に集中できる。
-- `apps/cloudflare-worker/*` は未作成なので、worker skeleton と wrangler 設定が最初の実装対象になる。
+- `apps/cloudflare-worker/*` は最小 skeleton と room-state relay があるので、wrangler 設定・deploy 導線・room authority の本格移植が次の実装対象になる。
 - Web は現時点では Vercel 維持を前提にし、Cloudflare Pages への web 移行は別判断にする。
