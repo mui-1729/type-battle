@@ -6,6 +6,7 @@ class FakeStorage {
   readonly values = new Map<string, unknown>();
   putResolved = false;
   putCalls = 0;
+  shouldFailPut = false;
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
     return this.values.get(key) as T | undefined;
@@ -13,6 +14,11 @@ class FakeStorage {
 
   async put<T = unknown>(key: string, value: T): Promise<void> {
     this.putCalls += 1;
+
+    if (this.shouldFailPut) {
+      throw new Error("storage write failed");
+    }
+
     this.values.set(key, value);
 
     await new Promise<void>((resolve) => {
@@ -87,5 +93,59 @@ describe("room durable object", () => {
     expect(storage.putCalls).toBe(1);
     expect(storage.putResolved).toBe(true);
     expect(storage.values.get("room-state")).toEqual(baseRoom);
+  });
+
+  it("canonicalizes room codes before persistence", async () => {
+    const storage = new FakeStorage();
+    const durableObject = new RoomDurableObject(new FakeDurableObjectState(storage));
+
+    const response = await durableObject.fetch(
+      new Request("https://example.com/rooms/ab12cd/state", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          ...baseRoom,
+          roomCode: " ab12cd "
+        })
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(storage.values.get("room-state")).toEqual(baseRoom);
+  });
+
+  it("returns 500 when room state persistence fails", async () => {
+    const storage = new FakeStorage();
+    storage.shouldFailPut = true;
+    const durableObject = new RoomDurableObject(new FakeDurableObjectState(storage));
+
+    const response = await durableObject.fetch(
+      new Request("https://example.com/rooms/ab12cd/state", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(baseRoom)
+      })
+    );
+
+    expect(response.status).toBe(500);
+    expect(storage.putCalls).toBe(1);
+    expect(storage.values.has("room-state")).toBe(false);
+  });
+
+  it("rejects non-websocket upgrades on the socket route", async () => {
+    const storage = new FakeStorage();
+    const durableObject = new RoomDurableObject(new FakeDurableObjectState(storage));
+
+    const response = await durableObject.fetch(
+      new Request("https://example.com/rooms/ab12cd/socket", {
+        method: "GET"
+      })
+    );
+
+    expect(response.status).toBe(400);
   });
 });

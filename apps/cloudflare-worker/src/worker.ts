@@ -138,9 +138,14 @@ async function parseRoomState(request: Request, expectedRoomCode: string): Promi
     return null;
   }
 
-  if (normalizeRoomCode(room.roomCode) !== expectedRoomCode) {
+  const roomCode = normalizeRoomCode(room.roomCode);
+
+  if (roomCode !== expectedRoomCode) {
     return null;
   }
 
-  return room;
+  return {
+    ...room,
+    roomCode: expectedRoomCode
+  };
 }

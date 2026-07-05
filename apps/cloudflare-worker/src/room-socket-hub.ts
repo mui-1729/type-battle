@@ -1,4 +1,5 @@
 import type { RoomState } from "@type-battle/shared";
+import { normalizeRoomCode } from "./room-routing.js";
 import { serializeRoomStateBroadcast } from "./room-protocol.js";
 
 export interface RoomSocket {
@@ -40,12 +41,17 @@ export class RoomSocketHub {
   }
 
   setRoomState(room: RoomState): void {
-    if (room.roomCode.toUpperCase() !== this.roomCode) {
+    const normalizedRoom = {
+      ...room,
+      roomCode: normalizeRoomCode(room.roomCode)
+    };
+
+    if (normalizedRoom.roomCode !== this.roomCode) {
       throw new Error(`roomCode mismatch: expected ${this.roomCode}, received ${room.roomCode}`);
     }
 
-    this.currentRoom = room;
-    this.broadcast(room);
+    this.currentRoom = normalizedRoom;
+    this.broadcast(normalizedRoom);
   }
 
   private broadcast(room: RoomState): void {
