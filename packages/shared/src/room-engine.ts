@@ -328,7 +328,7 @@ export function leaveBySocket(socketId: string): RoomState | null {
     if (activePlayers.length === 0) {
       return toPublicRoom(room);
     }
-    
+
     // Transfer host to the first active human player, or remain if no humans
     const nextHost = activePlayers.find(p => !p.isBot) || activePlayers[0];
     if (nextHost) {

@@ -116,6 +116,12 @@
 - web は Vercel 前提で進める。
 - realtime の外部デプロイは当面行わない。
 
+### Cloudflare transport contract
+
+- `packages/shared/src/cloudflare-events.ts` に Cloudflare 向けの message contract がある。
+- `apps/web/app/_lib/realtime-client.ts` で Socket.IO / Cloudflare transport を切り替えられる。
+- ただし Cloudflare 側の realtime backend はまだ repo になく、実運用は Node/Socket.IO server が担当している。
+
 ## 未実装
 
 - branch protection
