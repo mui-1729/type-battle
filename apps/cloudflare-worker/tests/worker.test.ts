@@ -212,6 +212,21 @@ describe("room durable object", () => {
 });
 
 describe("worker handler", () => {
+  it("serves a health endpoint without a durable object lookup", async () => {
+    const env = createEnv();
+    const response = await fetchWorker(
+      new Request("https://example.com/health"),
+      env as unknown as Env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      service: "type-battle-cloudflare-worker"
+    });
+    expect(env.ROOMS.ids).toEqual([]);
+  });
+
   it("rejects state writes without the internal token", async () => {
     const env = createEnv();
     const response = await fetchWorker(

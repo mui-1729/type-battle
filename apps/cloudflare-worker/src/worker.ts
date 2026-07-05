@@ -12,6 +12,14 @@ const ROOM_STATE_STORAGE_KEY = "room-state";
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/health") {
+      return Response.json({
+        ok: true,
+        service: "type-battle-cloudflare-worker"
+      });
+    }
+
     const route = resolveRoomRoute(url.pathname);
 
     if (!route) {

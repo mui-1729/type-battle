@@ -12,13 +12,15 @@
 
 ```txt
 Web App: Vercel
-Realtime Server: local / self-hosted / later
-Database: PostgreSQL, optional at first
+Realtime Server: Node.js / Socket.IO now, Cloudflare Worker after #19
+Cloudflare Worker: apps/cloudflare-worker
+Database: PostgreSQL now, D1 or Durable Object storage for Cloudflare follow-up
 Redis: optional until public matchmaking
 ```
 
-MVP の web は Vercel に置く。realtime server はこの段階では外部デプロイしない。
-この repo には realtime server の `Dockerfile` と `tests/smoke-test.ts` があり、ローカル / self-hosted 前提の確認はできる。
+MVP の web は Vercel に置く。Cloudflare Pages への web 移行は #18 で再評価するが、現時点では Vercel 維持を既定にする。
+
+realtime server は現在 `apps/realtime` が active path。Cloudflare path は `apps/cloudflare-worker` の Worker / Durable Object skeleton から段階的に育て、#19 で default realtime transport を Cloudflare に切り替える。
 
 ## 必須環境変数
 
@@ -41,6 +43,14 @@ CLIENT_ORIGIN=https://web.example.com
 NODE_ENV=production
 ```
 
+### Cloudflare Worker
+
+```txt
+ROOM_STATE_WRITE_TOKEN=...
+```
+
+`ROOM_STATE_WRITE_TOKEN` は `/rooms/:roomCode/state` の内部更新口だけで使う。client command を Worker が authoritative に処理するようになった後は、公開 API として扱わない。
+
 Private beta 後:
 
 ```txt
@@ -57,7 +67,51 @@ LOG_LEVEL=info
 4. Preview / Production の URL を共有
 5. realtime 接続先が整った段階で smoke test を実行する
 
-上の flow のうち、repo 内で明示しているのは web の Vercel 前提と smoke test の手順までで、realtime の公開 deploy は別途決める。
+上の flow のうち、repo 内で明示しているのは web の Vercel 前提、Cloudflare Worker skeleton の deploy 手順、smoke test の手順まで。Cloudflare を active backend にする cutover は #19 で行う。
+
+## Cloudflare Worker deploy
+
+既存の Cloudflare project には触れず、`type-battle-cloudflare-worker` として独立した Worker を使う。
+
+```bash
+cd apps/cloudflare-worker
+wrangler dev --local
+curl http://127.0.0.1:8787/health
+```
+
+deploy 前に dry run する。
+
+```bash
+cd apps/cloudflare-worker
+wrangler deploy --dry-run
+```
+
+secret を設定してから deploy する。
+
+```bash
+cd apps/cloudflare-worker
+wrangler secret put ROOM_STATE_WRITE_TOKEN
+wrangler deploy
+```
+
+deploy 後は Worker URL を `NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL` に設定する。WebSocket endpoint は `/rooms/:roomCode/socket`。
+
+```txt
+NEXT_PUBLIC_REALTIME_TRANSPORT=cloudflare
+NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL=wss://type-battle-cloudflare-worker.<account>.workers.dev/rooms/<roomCode>/socket
+```
+
+現時点では Worker が active backend ではないため、deploy 後の確認対象は `/health`、room socket upgrade、room-state relay までに限定する。create / join / match progression / COM / persistence は #12 から #15 と #17 の対象。
+
+## Frontend deploy
+
+現時点の既定は Vercel 維持。
+
+```bash
+npm run build --workspace @type-battle/web
+```
+
+Cloudflare Pages に寄せる場合は #18 で別途 `apps/web` の build output、environment variables、preview / production branch の扱いを決める。
 
 ## Smoke Test
 
