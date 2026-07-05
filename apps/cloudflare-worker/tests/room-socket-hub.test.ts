@@ -3,9 +3,10 @@ import type { RoomState } from "@type-battle/shared";
 import { RoomSocketHub, type RoomSocket } from "../src/room-socket-hub.js";
 
 class FakeRoomSocket implements RoomSocket {
+  accept(): void {}
   readyState = 1;
   onmessage: ((event: { data: string }) => void) | null = null;
-  onclose: ((event: { code?: number; reason?: string }) => void) | null = null;
+  onclose: ((this: WebSocket, event: CloseEvent) => void) | null = null;
   readonly messages: string[] = [];
 
   send(data: string): void {
@@ -14,22 +15,15 @@ class FakeRoomSocket implements RoomSocket {
 
   close(code?: number, reason?: string): void {
     this.readyState = 3;
-    const event: { code?: number; reason?: string } = {};
+    const event = { code: code ?? 1000, reason: reason ?? "", wasClean: true } as CloseEvent;
 
-    if (code !== undefined) {
-      event.code = code;
-    }
-
-    if (reason !== undefined) {
-      event.reason = reason;
-    }
-
-    this.onclose?.(event);
+    this.onclose?.call(this as unknown as WebSocket, event);
   }
 
   receive(data: string): void {
     this.onmessage?.({ data });
   }
+
 }
 
 const baseRoom: RoomState = {
@@ -95,21 +89,26 @@ describe("room socket hub", () => {
     ).toThrow(/roomCode mismatch/);
   });
 
-  it("accepts room state messages from connected sockets", () => {
+  it("ignores incoming socket messages", () => {
     const hub = new RoomSocketHub("AB12CD");
     const sender = new FakeRoomSocket();
     const receiver = new FakeRoomSocket();
 
     hub.attach(sender);
     hub.attach(receiver);
+    hub.setRoomState(baseRoom);
     sender.receive(
       JSON.stringify({
         type: "room:state",
         roomCode: "ab12cd",
-        room: baseRoom
+        room: {
+          ...baseRoom,
+          status: "active"
+        }
       })
     );
 
     expect(receiver.messages).toHaveLength(1);
+    expect(hub.snapshot).toEqual(baseRoom);
   });
 });

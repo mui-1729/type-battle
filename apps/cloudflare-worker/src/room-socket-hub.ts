@@ -1,12 +1,12 @@
 import type { RoomState } from "@type-battle/shared";
-import { parseRoomStateBroadcast, serializeRoomStateBroadcast } from "./room-protocol.js";
+import { serializeRoomStateBroadcast } from "./room-protocol.js";
 
 export interface RoomSocket {
+  accept(): void;
   readyState: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
-  onmessage: ((event: { data: string }) => void) | null;
-  onclose: ((event: { code?: number; reason?: string }) => void) | null;
+  onclose: ((this: WebSocket, event: CloseEvent) => void) | null;
 }
 
 export class RoomSocketHub {
@@ -25,15 +25,6 @@ export class RoomSocketHub {
 
   attach(socket: RoomSocket): void {
     this.sockets.add(socket);
-    socket.onmessage = (event) => {
-      const message = parseRoomStateBroadcast(event.data);
-
-      if (!message || message.roomCode !== this.roomCode) {
-        return;
-      }
-
-      this.setRoomState(message.room);
-    };
     socket.onclose = () => {
       this.detach(socket);
     };
@@ -45,7 +36,6 @@ export class RoomSocketHub {
 
   detach(socket: RoomSocket): void {
     this.sockets.delete(socket);
-    socket.onmessage = null;
     socket.onclose = null;
   }
 
