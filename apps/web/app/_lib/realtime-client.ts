@@ -169,11 +169,18 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
     }
 
     if (parsed.type === "server:ack") {
-      const replyTo = ("replyTo" in parsed ? parsed.replyTo : parsed.id) as string;
-      const ackPayload = ("payload" in parsed ? parsed.payload : parsed.response) as AckResponse<unknown>;
+      const ackMessage = parsed as {
+        id: string;
+        type: "server:ack";
+        replyTo?: string;
+        payload?: AckResponse<unknown>;
+        response?: AckResponse<unknown>;
+      };
+      const replyTo = ackMessage.replyTo ?? ackMessage.id;
+      const ackPayload = ackMessage.payload ?? ackMessage.response;
       const ack = pendingAcks.get(replyTo);
 
-      if (ack) {
+      if (ack && ackPayload) {
         ack(ackPayload);
         pendingAcks.delete(replyTo);
       }
