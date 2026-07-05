@@ -177,8 +177,10 @@ describe("realtime client", () => {
     firstSocket.receive(
       JSON.stringify({
         type: "server:ack",
-        id: secondMessage.id,
-        response: { ok: true, data: { accepted: true } }
+        id: "ack-2",
+        replyTo: secondMessage.id,
+        command: "client:match:start",
+        payload: { ok: true, data: { accepted: true } }
       })
     );
     expect(secondAck).toHaveBeenCalledWith({ ok: true, data: { accepted: true } });

@@ -30,6 +30,8 @@ PostgreSQL
 
 MVP では Next.js と Socket.IO server を同じ Node.js プロジェクト内で管理してもよい。ただし内輪向け private beta から public beta へ広げる可能性があるため、Web UI と realtime server は分離可能な構成にする。
 
+Cloudflare 移行の目標構成と free tier リスクの整理は [docs/cloudflare-migration-plan.md](cloudflare-migration-plan.md) にまとめる。
+
 ## 推奨ディレクトリ構成
 
 ```txt
@@ -127,6 +129,7 @@ type RoomState = {
 - reload rejoin は localStorage の guest id / room code を使う。
 - playing 中の long disconnect は server state で forfeit 判定できる。
 - practice は server event だけ先に実装してあり、UI は未実装。
+- Web 側には Cloudflare realtime の transport contract と adapter があるが、backend 本体はまだ `apps/realtime` の Node/Socket.IO server のまま。
 
 ## サーバー authoritative 方針
 
@@ -186,3 +189,9 @@ type RoomState = {
 - Integration: Socket.IO event handler
 - E2E: Playwright で 2 context を使った room 作成・参加・対戦・結果表示
 - Load: k6 または autocannon で同時 room と progress events を確認
+
+## Cloudflare 移行メモ
+
+- 既に shared の Cloudflare event contract と web の transport adapter はあるため、次の実装は backend 側の room authority の移植に集中できる。
+- `apps/cloudflare-worker/*` は未作成なので、worker skeleton と wrangler 設定が最初の実装対象になる。
+- Web は現時点では Vercel 維持を前提にし、Cloudflare Pages への web 移行は別判断にする。

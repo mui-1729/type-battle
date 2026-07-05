@@ -1,53 +1,158 @@
-import type { CreateRoomPayload, JoinRoomPayload, ReadyPayload, RoomCodePayload } from "./events.js";
-import type { AckResponse, BotDifficulty, MatchRule, PromptCategory, MatchResult, RoomState, TypingFinish, TypingProgress } from "./game-state.js";
+import type {
+  CreateRoomData,
+  CreateRoomPayload,
+  JoinRoomData,
+  JoinRoomPayload,
+  PracticeSessionData,
+  ReadyPayload,
+  RoomCodePayload
+} from "./events.js";
+import type {
+  AckResponse,
+  BotDifficulty,
+  MatchResult,
+  MatchRule,
+  PromptCategory,
+  RoomState,
+  TypingFinish,
+  TypingProgress
+} from "./game-state.js";
 
-export type CloudflareClientEventMap = {
-  "client:room:create": CreateRoomPayload;
-  "client:room:join": JoinRoomPayload;
-  "client:room:leave": RoomCodePayload;
-  "client:player:ready": ReadyPayload;
-  "client:room:setPromptCategory": RoomCodePayload & { category: PromptCategory };
-  "client:room:setBotDifficulty": RoomCodePayload & { difficulty: BotDifficulty };
-  "client:room:setMatchRule": RoomCodePayload & { rule: MatchRule };
-  "client:match:start": RoomCodePayload;
-  "client:typing:progress": TypingProgress;
-  "client:typing:finish": TypingFinish;
-  "client:match:rematch": RoomCodePayload;
-  "client:practice:start": { nickname: string; category: PromptCategory };
-  "client:practice:dailyStart": { nickname: string };
+type CloudflareClientCommandMap = {
+  "client:room:create": {
+    request: CreateRoomPayload;
+    response: CreateRoomData;
+  };
+  "client:room:join": {
+    request: JoinRoomPayload;
+    response: JoinRoomData;
+  };
+  "client:room:leave": {
+    request: RoomCodePayload;
+    response: RoomState;
+  };
+  "client:player:ready": {
+    request: ReadyPayload;
+    response: RoomState;
+  };
+  "client:room:setPromptCategory": {
+    request: RoomCodePayload & { category: PromptCategory };
+    response: RoomState;
+  };
+  "client:room:setBotDifficulty": {
+    request: RoomCodePayload & { difficulty: BotDifficulty };
+    response: RoomState;
+  };
+  "client:room:setMatchRule": {
+    request: RoomCodePayload & { rule: MatchRule };
+    response: RoomState;
+  };
+  "client:match:start": {
+    request: RoomCodePayload;
+    response: RoomState;
+  };
+  "client:typing:progress": {
+    request: TypingProgress;
+    response: RoomState | MatchResult;
+  };
+  "client:typing:finish": {
+    request: TypingFinish;
+    response: RoomState | MatchResult;
+  };
+  "client:match:rematch": {
+    request: RoomCodePayload;
+    response: RoomState;
+  };
+  "client:practice:start": {
+    request: { nickname: string; category: PromptCategory };
+    response: PracticeSessionData;
+  };
+  "client:practice:dailyStart": {
+    request: { nickname: string };
+    response: PracticeSessionData;
+  };
 };
 
-export type CloudflareServerEventMap = {
+type CloudflareServerEventMap = {
   "server:room:state": RoomState;
   "server:player:progress": RoomState;
-  "server:match:countdown": { room: RoomState; serverStartAt: number };
+  "server:match:countdown": {
+    room: RoomState;
+    serverStartAt: number;
+  };
   "server:match:started": RoomState;
   "server:match:result": MatchResult;
-  "server:error": { message: string };
+  "server:error": {
+    message: string;
+  };
 };
 
-export type CloudflareClientEventName = keyof CloudflareClientEventMap;
-export type CloudflareServerEventName = keyof CloudflareServerEventMap;
+export const CLOUDFLARE_CLIENT_MESSAGE_TYPES = [
+  "client:room:create",
+  "client:room:join",
+  "client:room:leave",
+  "client:player:ready",
+  "client:room:setPromptCategory",
+  "client:room:setBotDifficulty",
+  "client:room:setMatchRule",
+  "client:match:start",
+  "client:typing:progress",
+  "client:typing:finish",
+  "client:match:rematch",
+  "client:practice:start",
+  "client:practice:dailyStart"
+] as const satisfies readonly CloudflareClientMessageType[];
 
-export type CloudflareClientMessage = {
-  [K in CloudflareClientEventName]: {
-    id: string;
-    type: K;
-    payload: CloudflareClientEventMap[K];
-  };
-}[CloudflareClientEventName];
+export const CLOUDFLARE_SERVER_EVENT_TYPES = [
+  "server:room:state",
+  "server:player:progress",
+  "server:match:countdown",
+  "server:match:started",
+  "server:match:result",
+  "server:error"
+] as const satisfies readonly CloudflareServerEventType[];
 
-export type CloudflareServerEventMessage = {
-  [K in CloudflareServerEventName]: {
-    type: K;
-    payload: CloudflareServerEventMap[K];
-  };
-}[CloudflareServerEventName];
+export type CloudflareClientMessageType = keyof CloudflareClientCommandMap;
+export type CloudflareServerEventType = keyof CloudflareServerEventMap;
 
-export type CloudflareAckMessage = {
-  type: "server:ack";
-  id: string;
-  response: AckResponse<unknown>;
-};
+export type CloudflareRequestEnvelope<TType extends CloudflareClientMessageType = CloudflareClientMessageType> =
+  TType extends CloudflareClientMessageType
+    ? {
+        id: string;
+        type: TType;
+        payload: CloudflareClientCommandMap[TType]["request"];
+      }
+    : never;
 
-export type CloudflareInboundMessage = CloudflareAckMessage | CloudflareServerEventMessage;
+export type CloudflareAckEnvelope<TType extends CloudflareClientMessageType = CloudflareClientMessageType> =
+  TType extends CloudflareClientMessageType
+    ? {
+        id: string;
+        type: "server:ack";
+        replyTo: string;
+        command: TType;
+        payload: AckResponse<CloudflareClientCommandMap[TType]["response"]>;
+      }
+    : never;
+
+export type CloudflareServerEventEnvelope<TType extends CloudflareServerEventType = CloudflareServerEventType> =
+  TType extends CloudflareServerEventType
+    ? {
+        id: string;
+        type: TType;
+        payload: CloudflareServerEventMap[TType];
+      }
+    : never;
+
+export type CloudflareServerMessage = CloudflareAckEnvelope | CloudflareServerEventEnvelope;
+export type CloudflareClientMessage = CloudflareRequestEnvelope;
+export type CloudflareRequestPayload<TType extends CloudflareClientMessageType> =
+  CloudflareClientCommandMap[TType]["request"];
+export type CloudflareResponsePayload<TType extends CloudflareClientMessageType> =
+  CloudflareClientCommandMap[TType]["response"];
+export type CloudflareServerEventPayload<TType extends CloudflareServerEventType> =
+  CloudflareServerEventMap[TType];
+
+export type CloudflareClientEventName = CloudflareClientMessageType;
+export type CloudflareServerEventName = CloudflareServerEventType;
+export type CloudflareInboundMessage = CloudflareServerMessage;
