@@ -8,8 +8,13 @@ class FakeRoomSocket implements RoomSocket {
   onmessage: ((event: { data: string }) => void) | null = null;
   onclose: ((this: WebSocket, event: CloseEvent) => void) | null = null;
   readonly messages: string[] = [];
+  shouldThrowOnSend = false;
 
   send(data: string): void {
+    if (this.shouldThrowOnSend) {
+      throw new Error("send failed");
+    }
+
     this.messages.push(data);
   }
 
@@ -110,5 +115,20 @@ describe("room socket hub", () => {
 
     expect(receiver.messages).toHaveLength(1);
     expect(hub.snapshot).toEqual(baseRoom);
+  });
+
+  it("detaches sockets that fail to send", () => {
+    const hub = new RoomSocketHub("AB12CD");
+    const failing = new FakeRoomSocket();
+    const healthy = new FakeRoomSocket();
+
+    failing.shouldThrowOnSend = true;
+
+    hub.attach(failing);
+    hub.attach(healthy);
+    hub.setRoomState(baseRoom);
+
+    expect(hub.connectedCount).toBe(1);
+    expect(healthy.messages).toHaveLength(1);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RoomState } from "@type-battle/shared";
-import { RoomDurableObject } from "../src/worker.js";
+import type { Env } from "../src/worker.js";
+import worker, { RoomDurableObject } from "../src/worker.js";
 
 class FakeStorage {
   readonly values = new Map<string, unknown>();
@@ -34,11 +35,46 @@ class FakeStorage {
   }
 }
 
-class FakeDurableObjectState implements DurableObjectState {
+class FakeDurableObjectState {
   constructor(public readonly storage: FakeStorage) {}
 
   async blockConcurrencyWhile<T>(callback: () => Promise<T> | T): Promise<T> {
     return await callback();
+  }
+}
+
+class FakeDurableObjectId {
+  constructor(private readonly id: string) {}
+
+  toString(): string {
+    return this.id;
+  }
+}
+
+class FakeDurableObjectStub {
+  fetchCalls = 0;
+  lastRequest: Request | null = null;
+
+  async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    this.fetchCalls += 1;
+    this.lastRequest = input instanceof Request ? input : new Request(input, init);
+
+    return new Response("ok", { status: 200 });
+  }
+}
+
+class FakeDurableObjectNamespace {
+  readonly ids: string[] = [];
+  readonly stub = new FakeDurableObjectStub();
+
+  idFromName(name: string): DurableObjectId {
+    this.ids.push(name);
+    return new FakeDurableObjectId(name) as unknown as DurableObjectId;
+  }
+
+  get(id: DurableObjectId): DurableObjectStub {
+    void id;
+    return this.stub as unknown as DurableObjectStub;
   }
 }
 
@@ -53,10 +89,27 @@ const baseRoom: RoomState = {
   maxPlayers: 2
 };
 
+const fetchWorker = worker.fetch as unknown as (
+  request: Request,
+  env: Env
+) => Promise<Response>;
+
+function createEnv(): {
+  ROOMS: FakeDurableObjectNamespace;
+  ROOM_STATE_WRITE_TOKEN: string;
+} {
+  return {
+    ROOMS: new FakeDurableObjectNamespace(),
+    ROOM_STATE_WRITE_TOKEN: "secret-token"
+  };
+}
+
 describe("room durable object", () => {
   it("rejects state updates for a mismatched room code", async () => {
     const storage = new FakeStorage();
-    const durableObject = new RoomDurableObject(new FakeDurableObjectState(storage));
+    const durableObject = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
 
     const response = await durableObject.fetch(
       new Request("https://example.com/rooms/ab12cd/state", {
@@ -77,7 +130,9 @@ describe("room durable object", () => {
 
   it("waits for room state persistence before responding", async () => {
     const storage = new FakeStorage();
-    const durableObject = new RoomDurableObject(new FakeDurableObjectState(storage));
+    const durableObject = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
 
     const response = await durableObject.fetch(
       new Request("https://example.com/rooms/ab12cd/state", {
@@ -97,7 +152,9 @@ describe("room durable object", () => {
 
   it("canonicalizes room codes before persistence", async () => {
     const storage = new FakeStorage();
-    const durableObject = new RoomDurableObject(new FakeDurableObjectState(storage));
+    const durableObject = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
 
     const response = await durableObject.fetch(
       new Request("https://example.com/rooms/ab12cd/state", {
@@ -119,7 +176,9 @@ describe("room durable object", () => {
   it("returns 500 when room state persistence fails", async () => {
     const storage = new FakeStorage();
     storage.shouldFailPut = true;
-    const durableObject = new RoomDurableObject(new FakeDurableObjectState(storage));
+    const durableObject = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
 
     const response = await durableObject.fetch(
       new Request("https://example.com/rooms/ab12cd/state", {
@@ -138,7 +197,9 @@ describe("room durable object", () => {
 
   it("rejects non-websocket upgrades on the socket route", async () => {
     const storage = new FakeStorage();
-    const durableObject = new RoomDurableObject(new FakeDurableObjectState(storage));
+    const durableObject = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
 
     const response = await durableObject.fetch(
       new Request("https://example.com/rooms/ab12cd/socket", {
@@ -147,5 +208,44 @@ describe("room durable object", () => {
     );
 
     expect(response.status).toBe(400);
+  });
+});
+
+describe("worker handler", () => {
+  it("rejects state writes without the internal token", async () => {
+    const env = createEnv();
+    const response = await fetchWorker(
+      new Request("https://example.com/rooms/ab12cd/state", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(baseRoom)
+      }) as Request,
+      env as unknown as Env
+    );
+
+    expect(response.status).toBe(403);
+    expect(env.ROOMS.stub.fetchCalls).toBe(0);
+  });
+
+  it("forwards authorized state writes to the room DO", async () => {
+    const env = createEnv();
+    const response = await fetchWorker(
+      new Request("https://example.com/rooms/ab12cd/state", {
+        method: "POST",
+        headers: {
+          "authorization": "Bearer secret-token",
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(baseRoom)
+      }) as Request,
+      env as unknown as Env
+    );
+
+    expect(response.status).toBe(200);
+    expect(env.ROOMS.ids).toEqual(["AB12CD"]);
+    expect(env.ROOMS.stub.fetchCalls).toBe(1);
+    expect(env.ROOMS.stub.lastRequest?.method).toBe("POST");
   });
 });

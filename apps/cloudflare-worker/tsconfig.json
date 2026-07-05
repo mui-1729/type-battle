@@ -6,6 +6,7 @@
     "declaration": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "types": ["@cloudflare/workers-types"],
     "noEmit": false
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "tests/**/*.ts"],

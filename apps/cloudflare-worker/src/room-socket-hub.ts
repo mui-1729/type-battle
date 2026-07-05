@@ -59,10 +59,15 @@ export class RoomSocketHub {
 
     for (const socket of this.sockets) {
       if (socket.readyState !== 1) {
+        this.detach(socket);
         continue;
       }
 
-      socket.send(payload);
+      try {
+        socket.send(payload);
+      } catch {
+        this.detach(socket);
+      }
     }
   }
 }

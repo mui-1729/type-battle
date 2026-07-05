@@ -4,6 +4,7 @@ import { normalizeRoomCode, resolveRoomRoute } from "./room-routing.js";
 
 export interface Env {
   ROOMS: DurableObjectNamespace;
+  ROOM_STATE_WRITE_TOKEN: string;
 }
 
 const ROOM_STATE_STORAGE_KEY = "room-state";
@@ -15,6 +16,12 @@ export default {
 
     if (!route) {
       return new Response("Not found", { status: 404 });
+    }
+
+    if (route.action === "state" && (request.method === "POST" || request.method === "PUT")) {
+      if (!isAuthorizedStateWrite(request, env)) {
+        return new Response("Forbidden", { status: 403 });
+      }
     }
 
     const roomId = env.ROOMS.idFromName(route.roomCode);
@@ -96,6 +103,14 @@ export class RoomDurableObject {
 
     await this.hydration;
   }
+}
+
+function isAuthorizedStateWrite(request: Request, env: Env): boolean {
+  if (!env.ROOM_STATE_WRITE_TOKEN) {
+    return false;
+  }
+
+  return request.headers.get("Authorization") === `Bearer ${env.ROOM_STATE_WRITE_TOKEN}`;
 }
 
 async function handleSocketUpgrade(request: Request, target: RoomSocketHub): Promise<Response> {
