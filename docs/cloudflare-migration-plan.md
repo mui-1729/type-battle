@@ -79,7 +79,7 @@ Cloudflare の無料枠や beta 運用で特に意識する点は次の通り。
 - issue #9 で event contract を固める
 - web 側の adapter が Socket.IO と Cloudflare の両方を扱えることを維持する
 
-### Phase 2: Cloudflare worker の骨格を作る
+### Phase 2: Cloudflare worker の骨格と deploy 導線を整える
 
 - issue #8 で worker workspace と wrangler 設定・deploy 導線を固める
 - local dev と deploy の最小導線を作る
