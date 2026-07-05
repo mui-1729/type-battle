@@ -90,6 +90,7 @@ npm run typecheck --workspace @type-battle/cloudflare-worker
 ```
 
 `/rooms/:roomCode/state` は内部更新用の入口として `ROOM_STATE_WRITE_TOKEN` が必要です。
+現時点では room engine のイベント駆動化前の内部/暫定口として扱い、本番の永続 API にしない前提です。
 
 ```bash
 cd apps/cloudflare-worker
