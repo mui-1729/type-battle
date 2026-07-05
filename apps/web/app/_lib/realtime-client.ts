@@ -1,4 +1,4 @@
-﻿import { io } from "socket.io-client";
+import { io } from "socket.io-client";
 import type { Socket } from "socket.io-client";
 import type { AckResponse, ClientToServerEvents, ServerToClientEvents } from "@type-battle/shared";
 import type {
@@ -185,6 +185,11 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
     }
 
     const appEvent = CLOUDFLARE_SERVER_EVENT_TO_APP_EVENT[parsed.type];
+
+    if (!appEvent) {
+      return;
+    }
+
     notify(appEvent, parsed.payload as never);
   };
 

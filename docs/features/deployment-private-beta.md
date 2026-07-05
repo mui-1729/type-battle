@@ -31,7 +31,7 @@ NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL=wss://cloudflare-realtime.example.com
 NEXT_PUBLIC_FEEDBACK_ISSUE_URL=https://github.com/mui-1729/type-battle/issues/new?template=private-beta-feedback.yml
 ```
 
-`NEXT_PUBLIC_REALTIME_TRANSPORT` ? `socketio` ? `cloudflare` ???????`socketio` ???? `NEXT_PUBLIC_REALTIME_URL`?`cloudflare` ???? `NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL` ????????????? web ????????????
+`NEXT_PUBLIC_REALTIME_TRANSPORT` は `socketio` と `cloudflare` を切り替えるフラグです。`socketio` の場合は `NEXT_PUBLIC_REALTIME_URL` を使い、`cloudflare` の場合は `NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL` を使います。未指定時は `socketio` を既定値として扱います。
 
 ### Realtime
 

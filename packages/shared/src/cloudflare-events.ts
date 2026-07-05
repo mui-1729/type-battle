@@ -1,4 +1,4 @@
-﻿import type { CreateRoomPayload, JoinRoomPayload, ReadyPayload, RoomCodePayload } from "./events.js";
+import type { CreateRoomPayload, JoinRoomPayload, ReadyPayload, RoomCodePayload } from "./events.js";
 import type { AckResponse, BotDifficulty, MatchRule, PromptCategory, MatchResult, RoomState, TypingFinish, TypingProgress } from "./game-state.js";
 
 export type CloudflareClientEventMap = {
