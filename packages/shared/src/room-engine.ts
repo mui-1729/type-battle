@@ -56,13 +56,25 @@ export type RoomEngineHooks = {
 
 export type RoomEngineConfig = {
   timeAttackMs?: number;
+  waitingRoomTtlMs?: number;
+  finishedRoomTtlMs?: number;
+  countdownDisconnectGraceMs?: number;
+  playingDisconnectGraceMs?: number;
 };
 
 const DEFAULT_TIME_ATTACK_MS = 30_000;
+const DEFAULT_WAITING_ROOM_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_FINISHED_ROOM_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_COUNTDOWN_DISCONNECT_GRACE_MS = 10_000;
+const DEFAULT_PLAYING_DISCONNECT_GRACE_MS = 20_000;
 
 let engineHooks: RoomEngineHooks = {};
 let engineConfig = {
-  timeAttackMs: DEFAULT_TIME_ATTACK_MS
+  timeAttackMs: DEFAULT_TIME_ATTACK_MS,
+  waitingRoomTtlMs: DEFAULT_WAITING_ROOM_TTL_MS,
+  finishedRoomTtlMs: DEFAULT_FINISHED_ROOM_TTL_MS,
+  countdownDisconnectGraceMs: DEFAULT_COUNTDOWN_DISCONNECT_GRACE_MS,
+  playingDisconnectGraceMs: DEFAULT_PLAYING_DISCONNECT_GRACE_MS
 };
 
 export function setRoomEngineHooks(hooks: RoomEngineHooks): void {
@@ -746,6 +758,7 @@ function toMatchResult(room: InternalRoom): MatchResult {
 
 function finalizeRoom(room: InternalRoom): MatchResult {
   room.status = "finished";
+  room.lastActivityAt = Date.now();
   room.result = toMatchResult(room);
   metrics.matchesFinished += 1;
 
@@ -905,6 +918,43 @@ function createUniqueRoomCode(): string {
   return roomCode;
 }
 
+function getRoomTtlMs(status: MatchStatus): number | null {
+  if (status === "waiting") {
+    return engineConfig.waitingRoomTtlMs ?? DEFAULT_WAITING_ROOM_TTL_MS;
+  }
+
+  if (status === "finished") {
+    return engineConfig.finishedRoomTtlMs ?? DEFAULT_FINISHED_ROOM_TTL_MS;
+  }
+
+  return null;
+}
+
+function cancelCountdown(room: InternalRoom): void {
+  room.status = "waiting";
+  room.lastActivityAt = Date.now();
+  delete room.serverStartAt;
+  delete room.matchEndsAt;
+  delete room.result;
+
+  for (const player of room.players.values()) {
+    player.ready = false;
+    player.progressIndex = 0;
+    player.correctCharacters = 0;
+    player.totalTypedCharacters = 0;
+    player.mistakes = 0;
+    player.maxStreak = 0;
+    player.currentStreak = 0;
+    player.wpm = 0;
+    player.accuracy = 100;
+    delete player.hp;
+    delete player.maxHp;
+    delete player.finishedAt;
+    delete player.finishTimeMs;
+    delete player.forfeited;
+  }
+}
+
 function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
   const prompts = PROMPTS.filter((prompt) => prompt.category === room.promptCategory);
   const unseenPrompts = prompts.filter((prompt) => !room.promptHistory.includes(prompt.id));
@@ -924,21 +974,12 @@ function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
   return selected;
 }
 
-const ROOM_TTL_MS = 60 * 1000; // 1 minute
-const DISCONNECT_GRACE_MS = 30_000;
-
 export function cleanupExpiredRooms(): void {
   const now = Date.now();
   for (const [roomCode, room] of rooms.entries()) {
-    const isAbandoned = [...room.players.values()].every(p => !p.connected);
-    const isFinished = room.status === "finished";
+    const ttlMs = getRoomTtlMs(room.status);
 
-    // Expire waiting rooms, finished rooms, and abandoned rooms
-    if (
-      (room.status === "waiting" && now - room.lastActivityAt > ROOM_TTL_MS) ||
-      (isFinished && now - room.lastActivityAt > ROOM_TTL_MS) ||
-      (isAbandoned && now - room.lastActivityAt > ROOM_TTL_MS)
-    ) {
+    if (ttlMs !== null && now - room.lastActivityAt > ttlMs) {
       rooms.delete(roomCode);
     }
   }
@@ -949,13 +990,33 @@ export function checkForForfeits(): RoomState[] {
   const updatedRooms: RoomState[] = [];
 
   for (const room of rooms.values()) {
+    if (room.status === "countdown") {
+      let changed = false;
+
+      for (const player of room.players.values()) {
+        if (!player.connected && player.disconnectedAt) {
+          const elapsed = now - player.disconnectedAt;
+          if (elapsed > engineConfig.countdownDisconnectGraceMs!) {
+            cancelCountdown(room);
+            changed = true;
+            break;
+          }
+        }
+      }
+
+      if (changed) {
+        updatedRooms.push(toPublicRoom(room));
+      }
+      continue;
+    }
+
     if (room.status === "playing") {
       let changed = false;
 
       for (const player of room.players.values()) {
         if (!player.connected && player.disconnectedAt) {
           const elapsed = now - player.disconnectedAt;
-          if (elapsed > DISCONNECT_GRACE_MS) {
+          if (elapsed > engineConfig.playingDisconnectGraceMs!) {
             if (player.forfeited) {
               continue;
             }
