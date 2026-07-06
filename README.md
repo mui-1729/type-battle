@@ -96,15 +96,16 @@ Worker skeleton は `/health`、`/rooms/:roomCode/socket`、`/rooms/:roomCode/st
 現時点では room engine のイベント駆動化前の内部/暫定口として扱い、本番の永続 API にしない前提です。
 
 ```bash
-cd apps/cloudflare-worker
-wrangler secret put ROOM_STATE_WRITE_TOKEN
+npm run dev --workspace @type-battle/cloudflare-worker
+npm run deploy:dry-run --workspace @type-battle/cloudflare-worker
+npm run deploy --workspace @type-battle/cloudflare-worker
 ```
 
+`wrangler` は `@type-battle/cloudflare-worker` の workspace 依存として解決される前提です。
 ローカル開発では `apps/cloudflare-worker/.dev.vars` に `ROOM_STATE_WRITE_TOKEN` を置いても動かせます。
 
 ```bash
-cd apps/cloudflare-worker
-wrangler dev --local
+npm exec --workspace @type-battle/cloudflare-worker -- wrangler secret put ROOM_STATE_WRITE_TOKEN
 curl http://127.0.0.1:8787/health
 ```
 

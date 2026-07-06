@@ -16,6 +16,7 @@
     "@type-battle/shared": "0.1.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260705.1"
+    "@cloudflare/workers-types": "^5.20260705.1",
+    "wrangler": "^4.107.0"
   }
 }

@@ -29,11 +29,11 @@ realtime server は現在 `apps/realtime` が active path。Cloudflare path は 
 ```txt
 NEXT_PUBLIC_REALTIME_TRANSPORT=socketio
 NEXT_PUBLIC_REALTIME_URL=https://realtime.example.com
-NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL=wss://cloudflare-realtime.example.com
+NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL=wss://type-battle-cloudflare-worker.<account>.workers.dev
 NEXT_PUBLIC_FEEDBACK_ISSUE_URL=https://github.com/mui-1729/type-battle/issues/new?template=private-beta-feedback.yml
 ```
 
-`NEXT_PUBLIC_REALTIME_TRANSPORT` は `socketio` と `cloudflare` を切り替えるフラグです。`socketio` の場合は `NEXT_PUBLIC_REALTIME_URL` を使い、`cloudflare` の場合は `NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL` を使います。未指定時は `socketio` を既定値として扱います。
+`NEXT_PUBLIC_REALTIME_TRANSPORT` は `socketio` と `cloudflare` を切り替えるフラグです。`socketio` の場合は `NEXT_PUBLIC_REALTIME_URL` を使い、`cloudflare` の場合は `NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL` を使います。未指定時は `socketio` を既定値として扱います。`NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL` は #19 の cutover 用で、現時点の private beta runbook ではまだ active backend に切り替えない前提です。
 
 ### Realtime
 
@@ -74,34 +74,24 @@ LOG_LEVEL=info
 既存の Cloudflare project には触れず、`type-battle-cloudflare-worker` として独立した Worker を使う。
 
 ```bash
-cd apps/cloudflare-worker
-wrangler dev --local
+npm run dev --workspace @type-battle/cloudflare-worker
 curl http://127.0.0.1:8787/health
 ```
 
 deploy 前に dry run する。
 
 ```bash
-cd apps/cloudflare-worker
-wrangler deploy --dry-run
+npm run deploy:dry-run --workspace @type-battle/cloudflare-worker
 ```
 
 secret を設定してから deploy する。
 
 ```bash
-cd apps/cloudflare-worker
-wrangler secret put ROOM_STATE_WRITE_TOKEN
-wrangler deploy
+npm exec --workspace @type-battle/cloudflare-worker -- wrangler secret put ROOM_STATE_WRITE_TOKEN
+npm run deploy --workspace @type-battle/cloudflare-worker
 ```
 
-deploy 後は Worker URL を `NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL` に設定する。WebSocket endpoint は `/rooms/:roomCode/socket`。
-
-```txt
-NEXT_PUBLIC_REALTIME_TRANSPORT=cloudflare
-NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL=wss://type-battle-cloudflare-worker.<account>.workers.dev/rooms/<roomCode>/socket
-```
-
-現時点では Worker が active backend ではないため、deploy 後の確認対象は `/health`、room socket upgrade、room-state relay までに限定する。create / join / match progression / COM / persistence は #12 から #15 と #17 の対象。
+現時点では Worker が active backend ではないため、deploy 後の確認対象は `/health`、room socket upgrade、room-state relay までに限定する。create / join / match progression / COM / persistence は #12 から #15 と #17 の対象。`NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL` の実運用切替は #19 で行う。
 
 ## Frontend deploy
 
