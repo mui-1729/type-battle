@@ -25,7 +25,7 @@ export class RoomSocketHub {
     return this.currentRoom;
   }
 
-  attach(socket: RoomSocket): void {
+  attach(socket: RoomSocket): RoomSocket[] {
     this.sockets.add(socket);
     this.previousOnClose.set(socket, socket.onclose);
     socket.onclose = (event) => {
@@ -34,9 +34,11 @@ export class RoomSocketHub {
       previous?.call(socket as WebSocket, event);
     };
 
-    if (this.currentRoom) {
-      socket.send(serializeRoomStateBroadcast(this.currentRoom));
+    if (this.currentRoom && !this.send(socket, serializeRoomStateBroadcast(this.currentRoom))) {
+      return [socket];
     }
+
+    return [];
   }
 
   detach(socket: RoomSocket): void {
@@ -45,7 +47,7 @@ export class RoomSocketHub {
     this.previousOnClose.delete(socket);
   }
 
-  setRoomState(room: RoomState): void {
+  setRoomState(room: RoomState): RoomSocket[] {
     const normalizedRoom = {
       ...room,
       roomCode: normalizeRoomCode(room.roomCode)
@@ -56,21 +58,33 @@ export class RoomSocketHub {
     }
 
     this.currentRoom = normalizedRoom;
-    this.broadcastMessage(serializeRoomStateBroadcast(normalizedRoom));
+    return this.broadcastMessage(serializeRoomStateBroadcast(normalizedRoom));
   }
 
-  broadcastMessage(payload: string): void {
-    for (const socket of this.sockets) {
-      if (socket.readyState !== 1) {
-        this.detach(socket);
-        continue;
-      }
+  broadcastMessage(payload: string): RoomSocket[] {
+    const detachedSockets: RoomSocket[] = [];
 
-      try {
-        socket.send(payload);
-      } catch {
-        this.detach(socket);
+    for (const socket of this.sockets) {
+      if (!this.send(socket, payload)) {
+        detachedSockets.push(socket);
       }
+    }
+
+    return detachedSockets;
+  }
+
+  private send(socket: RoomSocket, payload: string): boolean {
+    if (socket.readyState !== 1) {
+      this.detach(socket);
+      return false;
+    }
+
+    try {
+      socket.send(payload);
+      return true;
+    } catch {
+      this.detach(socket);
+      return false;
     }
   }
 }

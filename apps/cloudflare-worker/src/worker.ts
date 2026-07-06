@@ -1,11 +1,21 @@
 import type {
   AckResponse,
+  BotDifficulty,
   CloudflareClientMessage,
   CloudflareClientMessageType,
+  CloudflareRequestPayload,
   CloudflareResponsePayload,
-  CloudflareServerEventName,
+  CloudflareServerEventType,
   CloudflareServerEventPayload,
+  CreateRoomPayload,
+  JoinRoomPayload,
+  MatchRule,
+  PromptCategory,
+  ReadyPayload,
+  RoomCodePayload,
   RoomState,
+  TypingFinish,
+  TypingProgress,
 } from "@type-battle/shared";
 import { validateNickname } from "@type-battle/shared";
 import {
@@ -18,10 +28,10 @@ import {
   explicitLeaveBySocket,
   finishTyping,
   joinRoom,
-  leaveBySocket,
   markPlaying,
   rematch,
   rooms as engineRooms,
+  restoreRoomState,
   setBotDifficulty,
   setMatchRule,
   setPromptCategory,
@@ -31,7 +41,7 @@ import {
   startPractice,
   updateProgress
 } from "@type-battle/shared/room-engine";
-import { RoomSocketHub } from "./room-socket-hub.js";
+import { RoomSocketHub, type RoomSocket } from "./room-socket-hub.js";
 import { normalizeRoomCode, resolveRoomRoute } from "./room-routing.js";
 
 export interface Env {
@@ -83,14 +93,35 @@ export class RoomDurableObject {
   private readonly socketContexts = new WeakMap<WebSocket, SocketContext>();
   private readonly roomTimers = new Map<string, RoomTimers>();
   private maintenanceStarted = false;
+  private hydrationPromise: Promise<void> | null = null;
 
   constructor(private readonly state: DurableObjectState) {
     this.startMaintenanceIfNeeded();
   }
 
+  private ensureHydrated(): Promise<void> {
+    if (!this.hydrationPromise) {
+      this.hydrationPromise = this.hydrateFromStorage();
+    }
+
+    return this.hydrationPromise;
+  }
+
+  private async hydrateFromStorage(): Promise<void> {
+    const storedRooms = await this.state.storage.list<RoomState>({ prefix: ROOM_STATE_STORAGE_PREFIX });
+
+    for (const room of storedRooms.values()) {
+      if (isRoomState(room)) {
+        restoreRoomState(room);
+      }
+    }
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const upgradeHeader = request.headers.get("Upgrade")?.toLowerCase();
+
+    await this.ensureHydrated();
 
     if (upgradeHeader === "websocket") {
       return this.handleWebSocketUpgrade();
@@ -121,7 +152,7 @@ export class RoomDurableObject {
     }
 
     socket.onmessage = (event) => {
-      this.handleSocketMessage(socket, event);
+      void this.handleSocketMessage(socket, event);
     };
 
     socket.onclose = () => {
@@ -166,10 +197,12 @@ export class RoomDurableObject {
     return new Response(null, responseInit);
   }
 
-  private handleSocketMessage(socket: WebSocket, event: MessageEvent): void {
+  private async handleSocketMessage(socket: WebSocket, event: MessageEvent): Promise<void> {
     if (typeof event.data !== "string") {
       return;
     }
+
+    await this.ensureHydrated();
 
     const message = parseClientMessage(event.data);
 
@@ -180,43 +213,134 @@ export class RoomDurableObject {
 
     switch (message.type) {
       case "client:room:create":
-        this.handleCreateRoom(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:room:create");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleCreateRoom(socket, request);
+        }
         break;
       case "client:room:join":
-        this.handleJoinRoom(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:room:join");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleJoinRoom(socket, request);
+        }
         break;
       case "client:room:leave":
-        this.handleLeaveRoom(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:room:leave");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleLeaveRoom(socket, request);
+        }
         break;
       case "client:player:ready":
-        this.handleReady(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:player:ready");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleReady(socket, request);
+        }
         break;
       case "client:room:setPromptCategory":
-        this.handleSetPromptCategory(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:room:setPromptCategory");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleSetPromptCategory(socket, request);
+        }
         break;
       case "client:room:setBotDifficulty":
-        this.handleSetBotDifficulty(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:room:setBotDifficulty");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleSetBotDifficulty(socket, request);
+        }
         break;
       case "client:room:setMatchRule":
-        this.handleSetMatchRule(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:room:setMatchRule");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleSetMatchRule(socket, request);
+        }
         break;
       case "client:match:start":
-        this.handleStartMatch(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:match:start");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleStartMatch(socket, request);
+        }
         break;
       case "client:typing:progress":
-        this.handleTypingProgress(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:typing:progress");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleTypingProgress(socket, request);
+        }
         break;
       case "client:typing:finish":
-        this.handleTypingFinish(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:typing:finish");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleTypingFinish(socket, request);
+        }
         break;
       case "client:match:rematch":
-        this.handleRematch(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:match:rematch");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleRematch(socket, request);
+        }
         break;
       case "client:practice:start":
-        this.handlePracticeStart(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:practice:start");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handlePracticeStart(socket, request);
+        }
         break;
       case "client:practice:dailyStart":
-        this.handleDailyPracticeStart(socket, message);
+        {
+          const request = parseTypedClientMessage(message, "client:practice:dailyStart");
+          if (!request) {
+            this.sendServerError(socket, "Invalid Cloudflare realtime payload.");
+            return;
+          }
+          this.handleDailyPracticeStart(socket, request);
+        }
         break;
       default:
         this.sendServerError(socket, "Unsupported Cloudflare realtime command.");
@@ -224,6 +348,10 @@ export class RoomDurableObject {
   }
 
   private handleSocketClose(socket: WebSocket): void {
+    this.handleSocketDisconnect(socket);
+  }
+
+  private handleSocketDisconnect(socket: WebSocket): void {
     const context = this.socketContexts.get(socket);
 
     if (!context) {
@@ -231,9 +359,12 @@ export class RoomDurableObject {
     }
 
     const roomCode = context.roomCode;
-    this.detachSocketFromRoom(socket);
 
-    const room = leaveBySocket(context.socketId);
+    if (roomCode) {
+      this.detachSocketFromRoom(socket);
+    }
+
+    const room = explicitLeaveBySocket(context.socketId);
 
     if (room) {
       this.broadcastRoomState(room);
@@ -241,6 +372,28 @@ export class RoomDurableObject {
     }
 
     if (roomCode && !engineRooms.has(roomCode)) {
+      this.cleanupRoom(roomCode);
+    }
+  }
+
+  private leaveCurrentRoom(socket: WebSocket): void {
+    const context = this.socketContexts.get(socket);
+
+    if (!context?.roomCode) {
+      return;
+    }
+
+    const roomCode = context.roomCode;
+    this.detachSocketFromRoom(socket);
+
+    const room = explicitLeaveBySocket(context.socketId);
+
+    if (room) {
+      this.broadcastRoomState(room);
+      return;
+    }
+
+    if (!engineRooms.has(roomCode)) {
       this.cleanupRoom(roomCode);
     }
   }
@@ -257,6 +410,7 @@ export class RoomDurableObject {
     }
 
     const context = this.getSocketContext(socket);
+    this.leaveCurrentRoom(socket);
 
     const created = createRoom({
       nickname: message.payload.nickname,
@@ -266,11 +420,15 @@ export class RoomDurableObject {
       ...(message.payload.deviceKind ? { deviceKind: message.payload.deviceKind } : {})
     });
 
-    this.sendAck(socket, message, {
+    if (
+      !this.sendAck(socket, message, {
       roomCode: created.room.roomCode,
       playerId: created.playerId,
       room: created.room
-    });
+      })
+    ) {
+      return;
+    }
     this.broadcastRoomState(created.room);
     this.attachSocketToRoom(socket, created.room.roomCode);
   }
@@ -287,9 +445,14 @@ export class RoomDurableObject {
     }
 
     const context = this.getSocketContext(socket);
+    const targetRoomCode = normalizeRoomCode(message.payload.roomCode);
+
+    if (context.roomCode !== targetRoomCode) {
+      this.leaveCurrentRoom(socket);
+    }
 
     const joined = joinRoom({
-      roomCode: message.payload.roomCode,
+      roomCode: targetRoomCode,
       nickname: message.payload.nickname,
       guestId: message.payload.guestId,
       socketId: context.socketId,
@@ -302,10 +465,14 @@ export class RoomDurableObject {
       return;
     }
 
-    this.sendAck(socket, message, {
+    if (
+      !this.sendAck(socket, message, {
       playerId: joined.playerId,
       room: joined.room
-    });
+      })
+    ) {
+      return;
+    }
     this.broadcastRoomState(joined.room);
     this.attachSocketToRoom(socket, joined.room.roomCode);
   }
@@ -316,6 +483,7 @@ export class RoomDurableObject {
   ): void {
     const context = this.getSocketContext(socket);
     if (!context.roomCode) {
+      this.sendAckError(socket, message, "ルームに参加していません。");
       return;
     }
 
@@ -324,12 +492,15 @@ export class RoomDurableObject {
 
     if (room) {
       this.broadcastRoomState(room);
+      this.sendAck(socket, message, room);
       return;
     }
 
     if (!engineRooms.has(normalizeRoomCode(message.payload.roomCode))) {
       this.cleanupRoom(message.payload.roomCode);
     }
+
+    this.sendAck(socket, message, null);
   }
 
   private handleReady(
@@ -338,9 +509,13 @@ export class RoomDurableObject {
   ): void {
     const room = setReady(this.getSocketContext(socket).socketId, message.payload.roomCode, message.payload.ready);
 
-    if (room) {
-      this.broadcastRoomState(room);
+    if (!room) {
+      this.sendAckError(socket, message, "ルームに参加していません。");
+      return;
     }
+
+    this.broadcastRoomState(room);
+    this.sendAck(socket, message, room);
   }
 
   private handleSetPromptCategory(
@@ -355,7 +530,9 @@ export class RoomDurableObject {
     }
 
     this.broadcastRoomState(result.room);
-    this.sendAck(socket, message, result.room);
+    if (!this.sendAck(socket, message, result.room)) {
+      return;
+    }
   }
 
   private handleSetBotDifficulty(
@@ -370,7 +547,9 @@ export class RoomDurableObject {
     }
 
     this.broadcastRoomState(result.room);
-    this.sendAck(socket, message, result.room);
+    if (!this.sendAck(socket, message, result.room)) {
+      return;
+    }
   }
 
   private handleSetMatchRule(
@@ -385,7 +564,9 @@ export class RoomDurableObject {
     }
 
     this.broadcastRoomState(result.room);
-    this.sendAck(socket, message, result.room);
+    if (!this.sendAck(socket, message, result.room)) {
+      return;
+    }
   }
 
   private handleStartMatch(
@@ -399,7 +580,9 @@ export class RoomDurableObject {
       return;
     }
 
-    this.sendAck(socket, message, result.room);
+    if (!this.sendAck(socket, message, result.room)) {
+      return;
+    }
     this.broadcastServerEvent("server:match:countdown", {
       room: result.room,
       serverStartAt: result.room.serverStartAt ?? Date.now()
@@ -414,16 +597,19 @@ export class RoomDurableObject {
     const result = updateProgress(this.getSocketContext(socket).socketId, message.payload);
 
     if (!result) {
+      this.sendAckError(socket, message, "ルームに参加していません。");
       return;
     }
 
     if ("status" in result) {
       this.broadcastServerEvent("server:player:progress", result);
+      this.sendAck(socket, message, result);
       return;
     }
 
     this.broadcastServerEvent("server:match:result", result);
     this.clearRoomTimers(result.roomCode);
+    this.sendAck(socket, message, result);
   }
 
   private handleTypingFinish(
@@ -433,16 +619,19 @@ export class RoomDurableObject {
     const result = finishTyping(this.getSocketContext(socket).socketId, message.payload);
 
     if (!result) {
+      this.sendAckError(socket, message, "ルームに参加していません。");
       return;
     }
 
     if ("status" in result) {
       this.broadcastServerEvent("server:player:progress", result);
+      this.sendAck(socket, message, result);
       return;
     }
 
     this.broadcastServerEvent("server:match:result", result);
     this.clearRoomTimers(result.roomCode);
+    this.sendAck(socket, message, result);
   }
 
   private handleRematch(
@@ -457,7 +646,9 @@ export class RoomDurableObject {
     }
 
     this.clearRoomTimers(result.room.roomCode);
-    this.sendAck(socket, message, result.room);
+    if (!this.sendAck(socket, message, result.room)) {
+      return;
+    }
     this.broadcastRoomState(result.room);
   }
 
@@ -466,7 +657,9 @@ export class RoomDurableObject {
     message: Extract<CloudflareClientMessage, { type: "client:practice:start" }>
   ): void {
     const practice = startPractice(message.payload.nickname, message.payload.category);
-    this.sendAck(socket, message, practice);
+    if (!this.sendAck(socket, message, practice)) {
+      return;
+    }
   }
 
   private handleDailyPracticeStart(
@@ -474,14 +667,16 @@ export class RoomDurableObject {
     message: Extract<CloudflareClientMessage, { type: "client:practice:dailyStart" }>
   ): void {
     const practice = startDailyPractice(message.payload.nickname);
-    this.sendAck(socket, message, practice);
+    if (!this.sendAck(socket, message, practice)) {
+      return;
+    }
   }
 
   private attachSocketToRoom(socket: WebSocket, roomCode: string): void {
     const normalizedRoomCode = normalizeRoomCode(roomCode);
     const context = this.getSocketContext(socket);
     context.roomCode = normalizedRoomCode;
-    this.getRoomHub(normalizedRoomCode).attach(socket);
+    this.handleDetachedSockets(this.getRoomHub(normalizedRoomCode).attach(socket));
   }
 
   private detachSocketFromRoom(socket: WebSocket): void {
@@ -497,10 +692,10 @@ export class RoomDurableObject {
   }
 
   private broadcastRoomState(room: RoomState): void {
-    this.getRoomHub(room.roomCode).setRoomState(room);
+    this.handleDetachedSockets(this.getRoomHub(room.roomCode).setRoomState(room));
   }
 
-  private broadcastServerEvent<TType extends CloudflareServerEventName>(
+  private broadcastServerEvent<TType extends CloudflareServerEventType>(
     type: TType,
     payload: CloudflareServerEventPayload<TType>
   ): void {
@@ -510,9 +705,13 @@ export class RoomDurableObject {
       return;
     }
 
-    this.getRoomHub(roomCode).broadcastMessage(
-      serializeServerEvent(type, payload, roomCode)
-    );
+    this.handleDetachedSockets(this.getRoomHub(roomCode).broadcastMessage(serializeServerEvent(type, payload, roomCode)));
+  }
+
+  private handleDetachedSockets(sockets: Iterable<RoomSocket>): void {
+    for (const socket of sockets) {
+      this.handleSocketDisconnect(socket as unknown as WebSocket);
+    }
   }
 
   private scheduleMatchStart(room: RoomState): void {
@@ -648,8 +847,8 @@ export class RoomDurableObject {
     socket: WebSocket,
     request: Extract<CloudflareClientMessage, { type: TType }>,
     payload: CloudflareResponsePayload<TType>
-  ): void {
-    this.sendRawMessage(
+  ): boolean {
+    return this.sendRawMessage(
       socket,
       JSON.stringify({
         id: request.id,
@@ -668,8 +867,8 @@ export class RoomDurableObject {
     socket: WebSocket,
     request: Extract<CloudflareClientMessage, { type: TType }>,
     error: string
-  ): void {
-    this.sendRawMessage(
+  ): boolean {
+    return this.sendRawMessage(
       socket,
       JSON.stringify({
         id: request.id,
@@ -684,8 +883,8 @@ export class RoomDurableObject {
     );
   }
 
-  private sendServerError(socket: WebSocket, message: string): void {
-    this.sendRawMessage(
+  private sendServerError(socket: WebSocket, message: string): boolean {
+    return this.sendRawMessage(
       socket,
       JSON.stringify({
         id: `server:error:${Date.now()}`,
@@ -697,11 +896,13 @@ export class RoomDurableObject {
     );
   }
 
-  private sendRawMessage(socket: WebSocket, data: string): void {
+  private sendRawMessage(socket: WebSocket, data: string): boolean {
     try {
       socket.send(data);
+      return true;
     } catch {
-      this.detachSocketFromRoom(socket);
+      this.handleSocketDisconnect(socket);
+      return false;
     }
   }
 
@@ -745,7 +946,7 @@ function roomStateStorageKey(roomCode: string): string {
   return `${ROOM_STATE_STORAGE_PREFIX}${normalizeRoomCode(roomCode)}`;
 }
 
-function serializeServerEvent<TType extends CloudflareServerEventName>(
+function serializeServerEvent<TType extends CloudflareServerEventType>(
   type: TType,
   payload: CloudflareServerEventPayload<TType>,
   roomCode: string | null
@@ -757,7 +958,7 @@ function serializeServerEvent<TType extends CloudflareServerEventName>(
   });
 }
 
-function extractRoomCodeFromServerPayload(payload: CloudflareServerEventPayload<CloudflareServerEventName>): string | null {
+function extractRoomCodeFromServerPayload(payload: CloudflareServerEventPayload<CloudflareServerEventType>): string | null {
   if (isRoomState(payload)) {
     return payload.roomCode;
   }
@@ -784,7 +985,7 @@ function isRoomState(payload: unknown): payload is RoomState {
 }
 
 function isRoomStateContainer(
-  payload: CloudflareServerEventPayload<CloudflareServerEventName>
+  payload: CloudflareServerEventPayload<CloudflareServerEventType>
 ): payload is { room: RoomState; serverStartAt: number } {
   return typeof payload === "object" && payload !== null && "room" in payload && "serverStartAt" in payload;
 }
@@ -813,6 +1014,153 @@ function parseClientMessage(data: string): CloudflareClientMessage | null {
   }
 
   return message as CloudflareClientMessage;
+}
+
+function parseTypedClientMessage<TType extends CloudflareClientMessageType>(
+  message: CloudflareClientMessage,
+  type: TType
+): Extract<CloudflareClientMessage, { type: TType }> | null {
+  if (message.type !== type) {
+    return null;
+  }
+
+  const payload = parseClientPayload(type, message.payload);
+
+  if (!payload) {
+    return null;
+  }
+
+  return {
+    id: message.id,
+    type,
+    payload: payload as CloudflareRequestPayload<TType>
+  } as Extract<CloudflareClientMessage, { type: TType }>;
+}
+
+function parseClientPayload<TType extends CloudflareClientMessageType>(
+  type: TType,
+  payload: unknown
+): unknown | null {
+  switch (type) {
+    case "client:room:create":
+      return isCreateRoomPayload(payload) ? payload : null;
+    case "client:room:join":
+      return isJoinRoomPayload(payload) ? payload : null;
+    case "client:room:leave":
+      return isRoomCodePayload(payload) ? payload : null;
+    case "client:player:ready":
+      return isReadyPayload(payload) ? payload : null;
+    case "client:room:setPromptCategory":
+      return isRoomPromptCategoryPayload(payload) ? payload : null;
+    case "client:room:setBotDifficulty":
+      return isRoomBotDifficultyPayload(payload) ? payload : null;
+    case "client:room:setMatchRule":
+      return isRoomMatchRulePayload(payload) ? payload : null;
+    case "client:match:start":
+    case "client:match:rematch":
+      return isRoomCodePayload(payload) ? payload : null;
+    case "client:typing:progress":
+    case "client:typing:finish":
+      return isTypingPayload(payload) ? payload : null;
+    case "client:practice:start":
+      return isPracticeStartPayload(payload) ? payload : null;
+    case "client:practice:dailyStart":
+      return isPracticeDailyStartPayload(payload) ? payload : null;
+    default:
+      return null;
+  }
+}
+
+function isCreateRoomPayload(payload: unknown): payload is CreateRoomPayload {
+  return (
+    isUnknownRecord(payload) &&
+    isString(payload.nickname) &&
+    isString(payload.guestId) &&
+    isString(payload.sessionId) &&
+    (payload.deviceKind === undefined || isDeviceKind(payload.deviceKind))
+  );
+}
+
+function isJoinRoomPayload(payload: unknown): payload is JoinRoomPayload {
+  return (
+    isUnknownRecord(payload) &&
+    isString(payload.roomCode) &&
+    isString(payload.nickname) &&
+    isString(payload.guestId) &&
+    isString(payload.sessionId) &&
+    (payload.deviceKind === undefined || isDeviceKind(payload.deviceKind))
+  );
+}
+
+function isRoomCodePayload(payload: unknown): payload is RoomCodePayload {
+  return isUnknownRecord(payload) && isString(payload.roomCode);
+}
+
+function isReadyPayload(payload: unknown): payload is ReadyPayload {
+  return isUnknownRecord(payload) && isString(payload.roomCode) && typeof payload.ready === "boolean";
+}
+
+function isRoomPromptCategoryPayload(
+  payload: unknown
+): payload is RoomCodePayload & { category: PromptCategory } {
+  return isUnknownRecord(payload) && isString(payload.roomCode) && isPromptCategory(payload.category);
+}
+
+function isRoomBotDifficultyPayload(
+  payload: unknown
+): payload is RoomCodePayload & { difficulty: BotDifficulty } {
+  return isUnknownRecord(payload) && isString(payload.roomCode) && isBotDifficulty(payload.difficulty);
+}
+
+function isRoomMatchRulePayload(payload: unknown): payload is RoomCodePayload & { rule: MatchRule } {
+  return isUnknownRecord(payload) && isString(payload.roomCode) && isMatchRule(payload.rule);
+}
+
+function isTypingPayload(payload: unknown): payload is TypingProgress | TypingFinish {
+  return (
+    isUnknownRecord(payload) &&
+    isString(payload.roomCode) &&
+    isFiniteNumber(payload.progressIndex) &&
+    isFiniteNumber(payload.correctCharacters) &&
+    isFiniteNumber(payload.totalTypedCharacters) &&
+    isFiniteNumber(payload.mistakes)
+  );
+}
+
+function isPracticeStartPayload(payload: unknown): payload is { nickname: string; category: PromptCategory } {
+  return isUnknownRecord(payload) && isString(payload.nickname) && isPromptCategory(payload.category);
+}
+
+function isPracticeDailyStartPayload(payload: unknown): payload is { nickname: string } {
+  return isUnknownRecord(payload) && isString(payload.nickname);
+}
+
+function isPromptCategory(value: unknown): value is PromptCategory {
+  return value === "short" || value === "standard" || value === "long";
+}
+
+function isBotDifficulty(value: unknown): value is BotDifficulty {
+  return value === "easy" || value === "normal" || value === "hard";
+}
+
+function isMatchRule(value: unknown): value is MatchRule {
+  return value === "race" || value === "timeAttack" || value === "hpBattle";
+}
+
+function isDeviceKind(value: unknown): value is "mobile" | "desktop" {
+  return value === "mobile" || value === "desktop";
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 async function parseRoomState(request: Request, expectedRoomCode: string): Promise<RoomState | null> {

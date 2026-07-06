@@ -12,22 +12,29 @@ import {
   leaveBySocket
 } from "../src/room-engine.js";
 
-afterEach(() => {
+const defaultRoomEngineConfig = {
+  timeAttackMs: 30_000,
+  waitingRoomTtlMs: 30 * 60 * 1000,
+  finishedRoomTtlMs: 10 * 60 * 1000,
+  countdownDisconnectGraceMs: 10_000,
+  playingDisconnectGraceMs: 20_000
+};
+
+function resetRoomEngineState(): void {
   rooms.clear();
   metrics.matchesStarted = 0;
   metrics.matchesFinished = 0;
   metrics.disconnectCount = 0;
   metrics.serverErrors = 0;
-  setRoomEngineConfig({ timeAttackMs: 30_000 });
+  setRoomEngineConfig(defaultRoomEngineConfig);
+}
+
+afterEach(() => {
+  resetRoomEngineState();
 });
 
 beforeEach(() => {
-  rooms.clear();
-  metrics.matchesStarted = 0;
-  metrics.matchesFinished = 0;
-  metrics.disconnectCount = 0;
-  metrics.serverErrors = 0;
-  setRoomEngineConfig({ timeAttackMs: 30_000 });
+  resetRoomEngineState();
 });
 
 describe("room engine config", () => {
@@ -54,10 +61,6 @@ describe("room engine config", () => {
 
     const started = startMatch("socket_alice_time_attack_config", created.room.roomCode);
     expect("error" in started).toBe(false);
-
-    if ("error" in started) {
-      return;
-    }
 
     expect(started.room.matchEndsAt).toBe(started.room.serverStartAt! + 5_000);
   });
@@ -86,10 +89,12 @@ describe("room engine config", () => {
     const room = rooms.get(created.room.roomCode.toUpperCase());
     const player = room?.players.get("guest_alice_countdown_grace");
 
-    if (!room || !player) {
-      return;
-    }
+    expect(room).toBeDefined();
+    expect(player).toBeDefined();
 
+    if (!room || !player) {
+      throw new Error("expected room and player to exist");
+    }
     player.disconnectedAt = Date.now() - 11_000;
 
     const updatedRooms = checkForForfeits();
@@ -107,8 +112,9 @@ describe("room engine config", () => {
     });
 
     const waiting = rooms.get(waitingRoom.room.roomCode.toUpperCase());
+    expect(waiting).toBeDefined();
     if (!waiting) {
-      return;
+      throw new Error("expected waiting room to exist");
     }
 
     waiting.lastActivityAt = Date.now() - 30 * 60 * 1000 - 1;
@@ -122,8 +128,9 @@ describe("room engine config", () => {
     });
 
     const finished = rooms.get(finishedRoom.room.roomCode.toUpperCase());
+    expect(finished).toBeDefined();
     if (!finished) {
-      return;
+      throw new Error("expected finished room to exist");
     }
 
     finished.status = "finished";
