@@ -94,6 +94,22 @@ describe("room socket hub", () => {
     ).toThrow(/roomCode mismatch/);
   });
 
+  it("preserves an existing close handler when attaching", () => {
+    const hub = new RoomSocketHub("AB12CD");
+    const socket = new FakeRoomSocket();
+    let closeCount = 0;
+
+    socket.onclose = () => {
+      closeCount += 1;
+    };
+
+    hub.attach(socket);
+    socket.close();
+
+    expect(closeCount).toBe(1);
+    expect(hub.connectedCount).toBe(0);
+  });
+
   it("ignores incoming socket messages", () => {
     const hub = new RoomSocketHub("AB12CD");
     const sender = new FakeRoomSocket();

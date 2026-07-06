@@ -12,6 +12,7 @@ export interface RoomSocket {
 
 export class RoomSocketHub {
   private readonly sockets = new Set<RoomSocket>();
+  private readonly previousOnClose = new WeakMap<RoomSocket, RoomSocket["onclose"]>();
   private currentRoom: RoomState | null = null;
 
   constructor(public readonly roomCode: string) {}
@@ -26,8 +27,11 @@ export class RoomSocketHub {
 
   attach(socket: RoomSocket): void {
     this.sockets.add(socket);
-    socket.onclose = () => {
+    this.previousOnClose.set(socket, socket.onclose);
+    socket.onclose = (event) => {
+      const previous = this.previousOnClose.get(socket);
       this.detach(socket);
+      previous?.call(socket as WebSocket, event);
     };
 
     if (this.currentRoom) {
@@ -37,7 +41,8 @@ export class RoomSocketHub {
 
   detach(socket: RoomSocket): void {
     this.sockets.delete(socket);
-    socket.onclose = null;
+    socket.onclose = this.previousOnClose.get(socket) ?? null;
+    this.previousOnClose.delete(socket);
   }
 
   setRoomState(room: RoomState): void {
@@ -51,12 +56,10 @@ export class RoomSocketHub {
     }
 
     this.currentRoom = normalizedRoom;
-    this.broadcast(normalizedRoom);
+    this.broadcastMessage(serializeRoomStateBroadcast(normalizedRoom));
   }
 
-  private broadcast(room: RoomState): void {
-    const payload = serializeRoomStateBroadcast(room);
-
+  broadcastMessage(payload: string): void {
     for (const socket of this.sockets) {
       if (socket.readyState !== 1) {
         this.detach(socket);
