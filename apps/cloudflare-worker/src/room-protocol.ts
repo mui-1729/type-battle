@@ -9,7 +9,7 @@ export function serializeRoomStateBroadcast(room: RoomState): string {
   const roomCode = normalizeRoomCode(room.roomCode);
 
   return JSON.stringify({
-    id: `room-state:${roomCode}`,
+    id: createRoomStateBroadcastId(roomCode),
     type: "server:room:state",
     payload: {
       ...room,
@@ -55,4 +55,9 @@ export function parseRoomStateBroadcast(data: string): RoomStateBroadcastMessage
 
 function isUnknownRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
+}
+
+function createRoomStateBroadcastId(roomCode: string): string {
+  const randomId = globalThis.crypto?.randomUUID?.() ?? `fallback-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `room-state:${roomCode}:${randomId}`;
 }

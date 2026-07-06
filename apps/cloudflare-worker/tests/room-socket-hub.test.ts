@@ -54,8 +54,8 @@ describe("room socket hub", () => {
 
     expect(first.messages).toHaveLength(1);
     expect(second.messages).toHaveLength(1);
-    expect(JSON.parse(first.messages[0] as string)).toEqual({
-      id: "room-state:AB12CD",
+    expect(JSON.parse(first.messages[0] as string)).toMatchObject({
+      id: expect.stringMatching(/^room-state:AB12CD:/),
       type: "server:room:state",
       payload: baseRoom
     });
@@ -71,8 +71,8 @@ describe("room socket hub", () => {
     hub.attach(second);
 
     expect(second.messages).toHaveLength(1);
-    expect(JSON.parse(second.messages[0] as string)).toEqual({
-      id: "room-state:AB12CD",
+    expect(JSON.parse(second.messages[0] as string)).toMatchObject({
+      id: expect.stringMatching(/^room-state:AB12CD:/),
       type: "server:room:state",
       payload: baseRoom
     });
