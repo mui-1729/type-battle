@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -13,6 +16,7 @@
     "@type-battle/shared": "0.1.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260705.1"
+    "@cloudflare/workers-types": "^5.20260705.1",
+    "wrangler": "^4.107.0"
   }
 }

@@ -4,7 +4,7 @@
 
 `type-battle` の realtime を Cloudflare 前提の構成へ段階的に移行し、外部公開時に Node.js の realtime server を別途運用しなくてもよい状態を目指す。
 
-この文書は issue #7 の成果物であり、issue #21 の担当分けと merge 順を前提にした移行計画として使う。
+この文書は issue #7 の成果物であり、issue #21 の担当分けと merge 順を前提にした移行計画として使う。issue #21 の追跡表は [docs/cloudflare-issue-tracker.md](cloudflare-issue-tracker.md) にまとめる。
 
 ## 現状
 
@@ -138,6 +138,7 @@ Cloudflare の無料枠や beta 運用で特に意識する点は次の通り。
 
 - issue #7
 - issue #21
+- [cloudflare-issue-tracker.md](cloudflare-issue-tracker.md)
 - [docs/architecture.md](architecture.md)
 - [docs/current-implementation.md](current-implementation.md)
 - [docs/features/deployment-private-beta.md](features/deployment-private-beta.md)

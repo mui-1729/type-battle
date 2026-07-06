@@ -53,6 +53,7 @@
 - [docs/requirements.md](docs/requirements.md): 要件定義
 - [docs/game-design.md](docs/game-design.md): ゲーム設計
 - [docs/architecture.md](docs/architecture.md): システム設計
+- [docs/cloudflare-issue-tracker.md](docs/cloudflare-issue-tracker.md): Cloudflare realtime 移行 issue の担当・依存・merge 順
 - [docs/features/README.md](docs/features/README.md): 機能別仕様
 - [docs/features/feature-catalog.md](docs/features/feature-catalog.md): 今後作る機能の一覧と優先度
 - [docs/features/feature-backlog.md](docs/features/feature-backlog.md): 実装 Issue 候補
@@ -89,15 +90,24 @@ npm run test --workspace @type-battle/cloudflare-worker
 npm run typecheck --workspace @type-battle/cloudflare-worker
 ```
 
+Worker skeleton は `/health`、`/rooms/:roomCode/socket`、`/rooms/:roomCode/state` を持ちます。WebSocket broadcast は shared の Cloudflare message contract に合わせて `server:room:state` を送ります。
+
 `/rooms/:roomCode/state` は内部更新用の入口として `ROOM_STATE_WRITE_TOKEN` が必要です。
 現時点では room engine のイベント駆動化前の内部/暫定口として扱い、本番の永続 API にしない前提です。
 
 ```bash
-cd apps/cloudflare-worker
-wrangler secret put ROOM_STATE_WRITE_TOKEN
+npm run dev --workspace @type-battle/cloudflare-worker
+npm run deploy:dry-run --workspace @type-battle/cloudflare-worker
+npm run deploy --workspace @type-battle/cloudflare-worker
 ```
 
+`wrangler` は `@type-battle/cloudflare-worker` の workspace 依存として解決される前提です。
 ローカル開発では `apps/cloudflare-worker/.dev.vars` に `ROOM_STATE_WRITE_TOKEN` を置いても動かせます。
+
+```bash
+npm exec --workspace @type-battle/cloudflare-worker -- wrangler secret put ROOM_STATE_WRITE_TOKEN
+curl http://127.0.0.1:8787/health
+```
 
 ローカルでは次の URL を使います。
 
