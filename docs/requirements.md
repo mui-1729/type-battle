@@ -88,7 +88,6 @@
 
 ### まだ足りない要件
 
-- デプロイ先で Web UI と realtime server を常設運用する wiring。
 - branch protection を有効化する。
 
 ## Public Beta 要件

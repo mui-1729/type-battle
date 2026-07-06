@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { Clipboard, Play, Swords, Unplug, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createRealtimeSocket, getDefaultRealtimeUrl, type RealtimeSocket, type RealtimeTransport } from "./_lib/realtime-client";
+import {
+  createRealtimeSocket,
+  getDefaultRealtimeUrl,
+  resolveRealtimeTransport,
+  type RealtimeSocket
+} from "./_lib/realtime-client";
 import {
   calculateAccuracy,
   calculateProgress,
@@ -93,7 +98,10 @@ type PracticeSession = {
   challengeKey?: string;
 };
 
-const REALTIME_TRANSPORT = (process.env.NEXT_PUBLIC_REALTIME_TRANSPORT?.trim() === "cloudflare" ? "cloudflare" : "socketio") as RealtimeTransport;
+const REALTIME_TRANSPORT = resolveRealtimeTransport({
+  requestedTransport: process.env.NEXT_PUBLIC_REALTIME_TRANSPORT,
+  nodeEnv: process.env.NODE_ENV
+});
 const SOCKET_IO_REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL?.trim() ?? "";
 const CLOUDFLARE_REALTIME_URL = process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL?.trim() ?? "";
 const REALTIME_UNAVAILABLE_MESSAGE = "Realtime transport is not configured.";

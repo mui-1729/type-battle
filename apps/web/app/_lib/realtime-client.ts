@@ -66,6 +66,19 @@ export function createRealtimeSocket(config: { transport: RealtimeTransport; url
     : createSocketIoRealtimeSocket(config.url);
 }
 
+export function resolveRealtimeTransport(config: {
+  requestedTransport?: string | null | undefined;
+  nodeEnv?: string | null | undefined;
+}): RealtimeTransport {
+  const requestedTransport = config.requestedTransport?.trim();
+
+  if (requestedTransport === "cloudflare" || requestedTransport === "socketio") {
+    return requestedTransport;
+  }
+
+  return config.nodeEnv === "production" ? "cloudflare" : "socketio";
+}
+
 export function getDefaultRealtimeUrl(transport: RealtimeTransport, location: Location): string | null {
   if (!location.hostname || location.hostname === "vercel.app" || location.hostname.endsWith(".vercel.app")) {
     return null;

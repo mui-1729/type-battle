@@ -204,7 +204,7 @@ public beta を目指す段階で追加する。
 - `main` merge 後、Vercel の production deployment を基本にする。
 - web deploy 先は private beta 用 URL とする。
 - web deploy 後に smoke test を実行する。
-- realtime は当面 external deploy しないか、別途運用を決める。
+- realtime は Cloudflare Worker を active backend として運用する。
 
 ### Public Beta
 

@@ -12,7 +12,7 @@ export default defineConfig({
       timeout: 120_000
     },
     {
-      command: "NEXT_PUBLIC_REALTIME_URL=http://127.0.0.1:3001 npm run start -w @type-battle/web",
+      command: "NEXT_PUBLIC_REALTIME_TRANSPORT=socketio NEXT_PUBLIC_REALTIME_URL=http://127.0.0.1:3001 npm run start -w @type-battle/web",
       url: "http://127.0.0.1:3000",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000
