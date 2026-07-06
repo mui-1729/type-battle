@@ -1,19 +1,20 @@
-import type { RoomState } from "@type-battle/shared";
+import type { CloudflareServerEventEnvelope, RoomState } from "@type-battle/shared";
 import { normalizeRoomCode } from "./room-routing.js";
 
-export type RoomStateBroadcastMessage = {
-  type: "room:state";
-  roomCode: string;
-  room: RoomState;
-};
+export type RoomStateBroadcastMessage = CloudflareServerEventEnvelope<"server:room:state">;
 
 type UnknownRecord = Record<string, unknown>;
 
 export function serializeRoomStateBroadcast(room: RoomState): string {
+  const roomCode = normalizeRoomCode(room.roomCode);
+
   return JSON.stringify({
-    type: "room:state",
-    roomCode: normalizeRoomCode(room.roomCode),
-    room
+    id: `room-state:${roomCode}`,
+    type: "server:room:state",
+    payload: {
+      ...room,
+      roomCode
+    }
   } satisfies RoomStateBroadcastMessage);
 }
 
@@ -26,25 +27,29 @@ export function parseRoomStateBroadcast(data: string): RoomStateBroadcastMessage
     return null;
   }
 
-  if (!isUnknownRecord(parsed) || parsed.type !== "room:state") {
+  if (!isUnknownRecord(parsed) || parsed.type !== "server:room:state") {
     return null;
   }
 
-  if (typeof parsed.roomCode !== "string" || !isUnknownRecord(parsed.room)) {
+  if (typeof parsed.id !== "string" || !isUnknownRecord(parsed.payload)) {
     return null;
   }
 
-  const roomCode = normalizeRoomCode(parsed.roomCode);
-  const room = parsed.room as RoomState;
+  const room = parsed.payload as RoomState;
 
-  if (normalizeRoomCode(room.roomCode) !== roomCode) {
+  if (typeof room.roomCode !== "string") {
     return null;
   }
+
+  const roomCode = normalizeRoomCode(room.roomCode);
 
   return {
-    type: "room:state",
-    roomCode,
-    room
+    id: parsed.id,
+    type: "server:room:state",
+    payload: {
+      ...room,
+      roomCode
+    }
   };
 }
 

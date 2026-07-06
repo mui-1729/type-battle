@@ -55,9 +55,9 @@ describe("room socket hub", () => {
     expect(first.messages).toHaveLength(1);
     expect(second.messages).toHaveLength(1);
     expect(JSON.parse(first.messages[0] as string)).toEqual({
-      type: "room:state",
-      roomCode: "AB12CD",
-      room: baseRoom
+      id: "room-state:AB12CD",
+      type: "server:room:state",
+      payload: baseRoom
     });
   });
 
@@ -72,9 +72,9 @@ describe("room socket hub", () => {
 
     expect(second.messages).toHaveLength(1);
     expect(JSON.parse(second.messages[0] as string)).toEqual({
-      type: "room:state",
-      roomCode: "AB12CD",
-      room: baseRoom
+      id: "room-state:AB12CD",
+      type: "server:room:state",
+      payload: baseRoom
     });
   });
 
@@ -104,9 +104,9 @@ describe("room socket hub", () => {
     hub.setRoomState(baseRoom);
     sender.receive(
       JSON.stringify({
-        type: "room:state",
-        roomCode: "ab12cd",
-        room: {
+        id: "client-message",
+        type: "server:room:state",
+        payload: {
           ...baseRoom,
           status: "active"
         }
