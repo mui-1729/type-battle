@@ -135,6 +135,28 @@ export function getMetrics() {
   };
 }
 
+export function restoreRoomState(room: RoomState): void {
+  const roomCode = room.roomCode.toUpperCase();
+
+  rooms.set(roomCode, {
+    roomCode,
+    hostPlayerId: room.hostPlayerId,
+    status: room.status,
+    matchRule: room.matchRule,
+    botDifficulty: room.botDifficulty,
+    promptCategory: room.promptCategory,
+    promptHistory: room.prompt ? [room.prompt.id] : [],
+    players: new Map(room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId)])),
+    createdAt: Date.now(),
+    lastActivityAt: Date.now(),
+    round: 1,
+    ...(room.prompt ? { prompt: room.prompt } : {}),
+    ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
+    ...(room.matchEndsAt !== undefined ? { matchEndsAt: room.matchEndsAt } : {}),
+    ...(room.result ? { result: room.result } : {})
+  });
+}
+
 export function createRoom(input: {
   nickname: string;
   guestId: string;
@@ -838,6 +860,32 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
   }
 
   return publicPlayer;
+}
+
+function toInternalPlayer(player: PlayerState, hostPlayerId: string): InternalPlayer {
+  return {
+    id: player.id,
+    socketId: player.id,
+    nickname: normalizeNickname(player.nickname),
+    connected: player.connected,
+    ready: player.ready,
+    isHost: player.id === hostPlayerId,
+    isBot: player.isBot,
+    progressIndex: player.progressIndex,
+    correctCharacters: player.correctCharacters,
+    totalTypedCharacters: player.totalTypedCharacters,
+    mistakes: player.mistakes,
+    maxStreak: player.maxStreak,
+    currentStreak: player.currentStreak,
+    wpm: player.wpm,
+    accuracy: player.accuracy,
+    ...(player.deviceKind ? { deviceKind: player.deviceKind } : {}),
+    ...(player.hp !== undefined ? { hp: player.hp } : {}),
+    ...(player.maxHp !== undefined ? { maxHp: player.maxHp } : {}),
+    ...(player.finishedAt !== undefined ? { finishedAt: player.finishedAt } : {}),
+    ...(player.finishTimeMs !== undefined ? { finishTimeMs: player.finishTimeMs } : {}),
+    ...(player.forfeited !== undefined ? { forfeited: player.forfeited } : {})
+  };
 }
 
 function addBotPlayer(room: InternalRoom): void {
