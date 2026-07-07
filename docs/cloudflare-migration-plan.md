@@ -6,6 +6,8 @@
 
 この文書は issue #7 の成果物であり、issue #21 の担当分けと merge 順を前提にした移行計画として使う。
 
+free tier の request / message 見積もりは、詳細を [docs/cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md) に切り出して扱う。
+
 ## 現状
 
 現時点の repo は、Cloudflare 移行の「入口」はあるが、backend の本体はまだ Node/Socket.IO 側に残っている。
@@ -16,9 +18,9 @@
 | Realtime backend | `apps/realtime` の Node + Socket.IO server | Cloudflare 切替前の実動線 |
 | Shared contract | `packages/shared/src/cloudflare-events.ts` がある | Web 側の transport 切替は既に契約化済み |
 | Web adapter | `apps/web/app/_lib/realtime-client.ts` が `socketio` / `cloudflare` を切替 | UI 変更と transport 変更を分離しやすい |
-| Cloudflare worker runtime | まだ repo にない | `apps/cloudflare-worker/*` はこれから作る |
+| Cloudflare worker runtime | 最小 skeleton と room-state relay はある | wrangler 設定・deploy 導線・room authority の本格移植はこれから |
 
-つまり、現状は「Cloudflare にすぐ切り替えられる」ではなく、「契約とフロント側の受け口はできているので、backend 実装を別 issue で積める」状態。
+つまり、現状は「Cloudflare にすぐ切り替えられる」ではなく、「契約とフロント側の受け口はできていて、worker の最小 skeleton もあるので、backend 本体と deploy 導線を別 issue で積める」状態。
 
 ## 推奨目標構成
 
@@ -79,9 +81,9 @@ Cloudflare の無料枠や beta 運用で特に意識する点は次の通り。
 - issue #9 で event contract を固める
 - web 側の adapter が Socket.IO と Cloudflare の両方を扱えることを維持する
 
-### Phase 2: Cloudflare worker の骨格を作る
+### Phase 2: Cloudflare worker の骨格と deploy 導線を整える
 
-- issue #8 で worker workspace と wrangler 設定を作る
+- issue #8 で worker workspace と wrangler 設定・deploy 導線を固める
 - local dev と deploy の最小導線を作る
 - `Env` と binding を docs と実装の両方で同期する
 
