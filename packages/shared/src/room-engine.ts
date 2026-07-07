@@ -82,8 +82,6 @@ const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistake
   hard: { charsPerTick: 3, mistakeChance: 0.01 }
 };
 
-// Check import of PlayerState. It should have maxStreak and currentStreak.
-// If it doesn't, I must update the shared package.
 type InternalPlayer = PlayerState & {
   socketId: string;
   disconnectedAt?: number;
@@ -133,6 +131,28 @@ export function getMetrics() {
     activeRooms: rooms.size,
     activePlayers: socketIndex.size
   };
+}
+
+export function restoreRoomState(room: RoomState): void {
+  const roomCode = room.roomCode.toUpperCase();
+
+  rooms.set(roomCode, {
+    roomCode,
+    hostPlayerId: room.hostPlayerId,
+    status: room.status,
+    matchRule: room.matchRule,
+    botDifficulty: room.botDifficulty,
+    promptCategory: room.promptCategory,
+    promptHistory: room.prompt ? [room.prompt.id] : [],
+    players: new Map(room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId)])),
+    createdAt: Date.now(),
+    lastActivityAt: Date.now(),
+    round: 1,
+    ...(room.prompt ? { prompt: room.prompt } : {}),
+    ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
+    ...(room.matchEndsAt !== undefined ? { matchEndsAt: room.matchEndsAt } : {}),
+    ...(room.result ? { result: room.result } : {})
+  });
 }
 
 export function createRoom(input: {
@@ -892,6 +912,14 @@ function createPlayer(
     currentStreak: 0,
     wpm: 0,
     accuracy: 100
+  };
+}
+
+function toInternalPlayer(player: PlayerState, hostPlayerId: string): InternalPlayer {
+  return {
+    ...player,
+    socketId: player.id,
+    isHost: player.id === hostPlayerId
   };
 }
 
