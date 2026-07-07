@@ -69,6 +69,8 @@ Cloudflare の無料枠や beta 運用で特に意識する点は次の通り。
 
 設計上の原則は「room の局所状態は Cloudflare 内で完結、長期保存は別レイヤーに逃がす」。
 
+具体的な request / message 見積もりは [docs/cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md) にまとめる。
+
 ## 段階的な移行
 
 ### Phase 1: 仕様と契約を固定する
@@ -130,6 +132,7 @@ Cloudflare の無料枠や beta 運用で特に意識する点は次の通り。
 - issue ごとの依存関係と merge 順が追える
 - free tier / beta の制約を踏まえて、どこまでを Cloudflare で完結させるか決められている
 - 現在の web / realtime 実装と矛盾しない
+- request / message の概算と follow-up issue が整理されている
 
 ## 関連
 
