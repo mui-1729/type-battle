@@ -1,38 +1,43 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RoomState } from "@type-battle/shared";
+import { rooms } from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
 import worker, { RoomDurableObject } from "../src/worker.js";
 
 class FakeStorage {
   readonly values = new Map<string, unknown>();
-  putResolved = false;
-  putCalls = 0;
-  shouldFailPut = false;
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
     return this.values.get(key) as T | undefined;
   }
 
-  async put<T = unknown>(key: string, value: T): Promise<void> {
-    this.putCalls += 1;
+  async list<T = unknown>(options?: { prefix?: string }): Promise<Map<string, T>> {
+    const result = new Map<string, T>();
 
-    if (this.shouldFailPut) {
-      throw new Error("storage write failed");
+    for (const [key, value] of this.values) {
+      if (options?.prefix && !key.startsWith(options.prefix)) {
+        continue;
+      }
+
+      result.set(key, value as T);
     }
 
+    return result;
+  }
+
+  async put<T = unknown>(key: string, value: T): Promise<void> {
     this.values.set(key, value);
-
-    await new Promise<void>((resolve) => {
-      setTimeout(() => {
-        this.putResolved = true;
-        resolve();
-      }, 0);
-    });
   }
 
-  async delete(key: string): Promise<void> {
-    this.values.delete(key);
+  async delete(key: string): Promise<boolean> {
+    return this.values.delete(key);
   }
+
+  async deleteAll(): Promise<void> {
+    this.values.clear();
+  }
+
+  async sync(): Promise<void> {}
 }
 
 class FakeDurableObjectState {
@@ -43,14 +48,6 @@ class FakeDurableObjectState {
   }
 }
 
-class FakeDurableObjectId {
-  constructor(private readonly id: string) {}
-
-  toString(): string {
-    return this.id;
-  }
-}
-
 class FakeDurableObjectStub {
   fetchCalls = 0;
   lastRequest: Request | null = null;
@@ -58,23 +55,57 @@ class FakeDurableObjectStub {
   async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     this.fetchCalls += 1;
     this.lastRequest = input instanceof Request ? input : new Request(input, init);
-
     return new Response("ok", { status: 200 });
   }
 }
 
 class FakeDurableObjectNamespace {
-  readonly ids: string[] = [];
+  readonly getByNameCalls: string[] = [];
   readonly stub = new FakeDurableObjectStub();
 
-  idFromName(name: string): DurableObjectId {
-    this.ids.push(name);
-    return new FakeDurableObjectId(name) as unknown as DurableObjectId;
+  getByName(name: string): DurableObjectStub {
+    this.getByNameCalls.push(name);
+    return this.stub as unknown as DurableObjectStub;
+  }
+}
+
+class FakeSocket {
+  readyState = 1;
+  accepted = false;
+  readonly messages: string[] = [];
+  private readonly listeners = new Map<string, Set<(event: { data?: unknown }) => void>>();
+
+  accept(): void {
+    this.accepted = true;
   }
 
-  get(id: DurableObjectId): DurableObjectStub {
-    void id;
-    return this.stub as unknown as DurableObjectStub;
+  addEventListener(type: "message" | "close", handler: (event: { data?: unknown }) => void): void {
+    const handlers = this.listeners.get(type) ?? new Set<(event: { data?: unknown }) => void>();
+    handlers.add(handler);
+    this.listeners.set(type, handlers);
+  }
+
+  close(): void {
+    if (this.readyState === 3) {
+      return;
+    }
+
+    this.readyState = 3;
+    this.dispatch("close", {});
+  }
+
+  send(data: string): void {
+    this.messages.push(data);
+  }
+
+  receive(data: string): void {
+    this.dispatch("message", { data });
+  }
+
+  private dispatch(type: string, event: { data?: unknown }): void {
+    for (const handler of this.listeners.get(type) ?? []) {
+      handler(event);
+    }
   }
 }
 
@@ -89,178 +120,190 @@ const baseRoom: RoomState = {
   maxPlayers: 2
 };
 
-const fetchWorker = worker.fetch as unknown as (
-  request: Request,
-  env: Env
-) => Promise<Response>;
+function parseMessages(socket: FakeSocket): Array<Record<string, unknown>> {
+  return socket.messages.map((message) => JSON.parse(message) as Record<string, unknown>);
+}
 
-function createEnv(): {
-  ROOMS: FakeDurableObjectNamespace;
-  ROOM_STATE_WRITE_TOKEN: string;
-} {
+function createEnv(): { ROOMS: FakeDurableObjectNamespace; ROOM_STATE_WRITE_TOKEN: string } {
   return {
     ROOMS: new FakeDurableObjectNamespace(),
     ROOM_STATE_WRITE_TOKEN: "secret-token"
   };
 }
 
-describe("room durable object", () => {
-  it("rejects state updates for a mismatched room code", async () => {
+beforeEach(() => {
+  vi.useFakeTimers();
+  let uuidCounter = 0;
+  vi.stubGlobal("crypto", {
+    randomUUID: vi.fn(() => `uuid-${++uuidCounter}`),
+    getRandomValues: vi.fn((array: Uint8Array) => {
+      array.fill(0);
+      return array;
+    })
+  });
+  rooms.clear();
+});
+
+afterEach(() => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  rooms.clear();
+  vi.resetModules();
+});
+
+describe("cloudflare gateway", () => {
+  it("creates rooms, emits envelopes, and starts matches over one websocket", async () => {
     const storage = new FakeStorage();
-    const durableObject = new RoomDurableObject(
+    const gateway = new RoomDurableObject(
       new FakeDurableObjectState(storage) as unknown as DurableObjectState
     );
+    const socket = new FakeSocket();
 
-    const response = await durableObject.fetch(
-      new Request("https://example.com/rooms/ab12cd/state", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          ...baseRoom,
-          roomCode: "ZZ99ZZ"
-        })
+    await gateway.ready;
+    gateway.attachSocket(socket as unknown as WebSocket);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-create",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-alice",
+          sessionId: "session-alice"
+        }
       })
     );
 
-    expect(response.status).toBe(400);
-    expect(storage.putCalls).toBe(0);
+    const firstTwoMessages = parseMessages(socket).slice(0, 2);
+    expect(firstTwoMessages[0]).toMatchObject({
+      type: "server:ack",
+      command: "client:room:create",
+      payload: {
+        ok: true,
+        data: {
+          roomCode: expect.any(String),
+          playerId: expect.any(String),
+          room: expect.objectContaining({
+            roomCode: expect.any(String),
+            status: "waiting"
+          })
+        }
+      }
+    });
+    expect(firstTwoMessages[1]).toMatchObject({
+      type: "server:room:state",
+      payload: expect.objectContaining({
+        roomCode: expect.any(String),
+        status: "waiting"
+      })
+    });
+
+    const roomCode = String((firstTwoMessages[0]?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
+    expect(roomCode).toMatch(/^[A-Z0-9]{6}$/);
+    expect(storage.values.has(`room:${roomCode}`)).toBe(true);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-start",
+        type: "client:match:start",
+        payload: {
+          roomCode
+        }
+      })
+    );
+
+    const messagesAfterStart = parseMessages(socket).slice(2);
+    expect(messagesAfterStart[0]).toMatchObject({
+      type: "server:ack",
+      command: "client:match:start",
+      payload: {
+        ok: true,
+        data: expect.objectContaining({
+          roomCode,
+          status: "countdown"
+        })
+      }
+    });
+    expect(messagesAfterStart[1]).toMatchObject({
+      type: "server:match:countdown",
+      payload: {
+        room: expect.objectContaining({
+          roomCode,
+          status: "countdown"
+        }),
+        serverStartAt: expect.any(Number)
+      }
+    });
   });
 
-  it("waits for room state persistence before responding", async () => {
+  it("restores persisted room snapshots for state reads", async () => {
     const storage = new FakeStorage();
-    const durableObject = new RoomDurableObject(
+    storage.values.set("room:AB12CD", baseRoom);
+
+    const gateway = new RoomDurableObject(
       new FakeDurableObjectState(storage) as unknown as DurableObjectState
     );
 
-    const response = await durableObject.fetch(
-      new Request("https://example.com/rooms/ab12cd/state", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify(baseRoom)
-      })
-    );
+    await gateway.ready;
+
+    const response = await gateway.fetch(new Request("https://example.com/rooms/ab12cd/state"));
 
     expect(response.status).toBe(200);
-    expect(storage.putCalls).toBe(1);
-    expect(storage.putResolved).toBe(true);
-    expect(storage.values.get("room-state")).toEqual(baseRoom);
-  });
-
-  it("canonicalizes room codes before persistence", async () => {
-    const storage = new FakeStorage();
-    const durableObject = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-
-    const response = await durableObject.fetch(
-      new Request("https://example.com/rooms/ab12cd/state", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          ...baseRoom,
-          roomCode: " ab12cd "
-        })
+    const body = await response.json();
+    expect(body).toEqual({
+      ok: true,
+      room: expect.objectContaining({
+        roomCode: "AB12CD"
       })
-    );
-
-    expect(response.status).toBe(200);
-    expect(storage.values.get("room-state")).toEqual(baseRoom);
-  });
-
-  it("returns 500 when room state persistence fails", async () => {
-    const storage = new FakeStorage();
-    storage.shouldFailPut = true;
-    const durableObject = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-
-    const response = await durableObject.fetch(
-      new Request("https://example.com/rooms/ab12cd/state", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify(baseRoom)
-      })
-    );
-
-    expect(response.status).toBe(500);
-    expect(storage.putCalls).toBe(1);
-    expect(storage.values.has("room-state")).toBe(false);
-  });
-
-  it("rejects non-websocket upgrades on the socket route", async () => {
-    const storage = new FakeStorage();
-    const durableObject = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-
-    const response = await durableObject.fetch(
-      new Request("https://example.com/rooms/ab12cd/socket", {
-        method: "GET"
-      })
-    );
-
-    expect(response.status).toBe(400);
+    });
   });
 });
 
 describe("worker handler", () => {
-  it("rejects state writes without the internal token", async () => {
+  it("rejects unauthorized state writes and forwards gateway requests", async () => {
     const env = createEnv();
-    const response = await fetchWorker(
+
+    const forbidden = await worker.fetch(
       new Request("https://example.com/rooms/ab12cd/state", {
         method: "POST",
         headers: {
           "content-type": "application/json"
         },
         body: JSON.stringify(baseRoom)
-      }) as Request,
+      }),
       env as unknown as Env
     );
 
-    expect(response.status).toBe(403);
+    expect(forbidden.status).toBe(403);
     expect(env.ROOMS.stub.fetchCalls).toBe(0);
+
+    const forwarded = await worker.fetch(new Request("https://example.com/"), env as unknown as Env);
+
+    expect(forwarded.status).toBe(200);
+    expect(env.ROOMS.getByNameCalls).toEqual(["gateway"]);
+    expect(env.ROOMS.stub.fetchCalls).toBe(1);
+    expect(env.ROOMS.stub.lastRequest?.url).toBe("https://example.com/");
   });
 
-  it("forwards authorized state writes to the room DO", async () => {
+  it("allows authorized state writes through to the gateway", async () => {
     const env = createEnv();
-    const response = await fetchWorker(
+
+    const response = await worker.fetch(
       new Request("https://example.com/rooms/ab12cd/state", {
-        method: "POST",
+        method: "PUT",
         headers: {
-          "authorization": "Bearer secret-token",
+          authorization: "Bearer secret-token",
           "content-type": "application/json"
         },
         body: JSON.stringify(baseRoom)
-      }) as Request,
+      }),
       env as unknown as Env
     );
 
     expect(response.status).toBe(200);
-    expect(env.ROOMS.ids).toEqual(["AB12CD"]);
+    expect(env.ROOMS.getByNameCalls).toEqual(["gateway"]);
     expect(env.ROOMS.stub.fetchCalls).toBe(1);
-    expect(env.ROOMS.stub.lastRequest?.method).toBe("POST");
-  });
-
-  it("forwards socket requests to the room DO", async () => {
-    const env = createEnv();
-    const response = await fetchWorker(
-      new Request("https://example.com/rooms/ab12cd/socket", {
-        method: "GET"
-      }) as Request,
-      env as unknown as Env
-    );
-
-    expect(response.status).toBe(200);
-    expect(env.ROOMS.ids).toEqual(["AB12CD"]);
-    expect(env.ROOMS.stub.fetchCalls).toBe(1);
-    expect(env.ROOMS.stub.lastRequest?.url).toContain("/rooms/ab12cd/socket");
+    expect(env.ROOMS.stub.lastRequest?.method).toBe("PUT");
   });
 });
