@@ -149,6 +149,7 @@ export function getMetrics() {
 
 export function restoreRoomState(room: RoomState): void {
   const roomCode = room.roomCode.toUpperCase();
+  const restoredAt = Date.now();
 
   rooms.set(roomCode, {
     roomCode,
@@ -158,9 +159,9 @@ export function restoreRoomState(room: RoomState): void {
     botDifficulty: room.botDifficulty,
     promptCategory: room.promptCategory,
     promptHistory: room.prompt ? [room.prompt.id] : [],
-    players: new Map(room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId)])),
-    createdAt: Date.now(),
-    lastActivityAt: Date.now(),
+    players: new Map(room.players.map((player) => [player.id, toRestoredPlayer(player, room.hostPlayerId, restoredAt)])),
+    createdAt: restoredAt,
+    lastActivityAt: restoredAt,
     round: 1,
     ...(room.prompt ? { prompt: room.prompt } : {}),
     ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
@@ -935,6 +936,23 @@ function toInternalPlayer(player: PlayerState, hostPlayerId: string): InternalPl
     ...player,
     socketId: player.id,
     isHost: player.id === hostPlayerId
+  };
+}
+
+function toRestoredPlayer(player: PlayerState, hostPlayerId: string, restoredAt: number): InternalPlayer {
+  if (player.isBot) {
+    return {
+      ...toInternalPlayer(player, hostPlayerId),
+      connected: true,
+      ready: true
+    };
+  }
+
+  return {
+    ...toInternalPlayer(player, hostPlayerId),
+    connected: false,
+    ready: false,
+    disconnectedAt: restoredAt
   };
 }
 

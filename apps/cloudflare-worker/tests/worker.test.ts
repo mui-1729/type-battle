@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pickPrompt } from "@type-battle/shared";
 import type { PlayerState, RoomState } from "@type-battle/shared";
 import { rooms } from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
@@ -143,6 +144,20 @@ const hydratedRoom: RoomState = {
   players: [createPlayerState()]
 };
 
+const hydratedCountdownRoom: RoomState = {
+  ...baseRoom,
+  status: "countdown",
+  prompt: pickPrompt("standard", 0),
+  serverStartAt: Date.now() + 1_000,
+  players: [
+    createPlayerState({
+      connected: true,
+      ready: true
+    }),
+    createBotPlayerState()
+  ]
+};
+
 const fetchWorker = worker.fetch as unknown as (
   request: Request,
   env: Env
@@ -175,6 +190,26 @@ function createPlayerState(overrides: Partial<PlayerState> = {}): PlayerState {
     ready: false,
     isHost: true,
     isBot: false,
+    progressIndex: 0,
+    correctCharacters: 0,
+    totalTypedCharacters: 0,
+    mistakes: 0,
+    maxStreak: 0,
+    currentStreak: 0,
+    wpm: 0,
+    accuracy: 100,
+    ...overrides
+  };
+}
+
+function createBotPlayerState(overrides: Partial<PlayerState> = {}): PlayerState {
+  return {
+    id: "bot_com_1",
+    nickname: "COM",
+    connected: true,
+    ready: true,
+    isHost: false,
+    isBot: true,
     progressIndex: 0,
     correctCharacters: 0,
     totalTypedCharacters: 0,
@@ -362,6 +397,34 @@ describe("room durable object", () => {
 
     expect(ack?.command).toBe("client:room:join");
     expect(rooms.get("AB12CD")?.players.get("guest-alice")?.connected).toBe(true);
+  });
+
+  it("rehydrates active rooms as disconnected and resumes countdown timers", async () => {
+    vi.useFakeTimers();
+
+    const storage = new FakeStorage();
+    storage.values.set("room-state:AB12CD", hydratedCountdownRoom);
+
+    const durableObject = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+
+    await durableObject.fetch(new Request("https://example.com/rooms/ab12cd/state"));
+
+    const restoredRoom = rooms.get("AB12CD");
+    expect(restoredRoom?.players.get("guest-alice")?.connected).toBe(false);
+    expect(restoredRoom?.players.get("guest-alice")?.ready).toBe(false);
+    expect(restoredRoom?.players.get("bot_com_1")?.connected).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await flushAsync();
+
+    expect(rooms.get("AB12CD")?.status).toBe("playing");
+
+    await vi.advanceTimersByTimeAsync(500);
+    await flushAsync();
+
+    expect(rooms.get("AB12CD")?.players.get("bot_com_1")?.progressIndex).toBeGreaterThan(0);
   });
 
   it("acks ready, leave, and typing commands", async () => {

@@ -113,6 +113,7 @@ export class RoomDurableObject {
     for (const room of storedRooms.values()) {
       if (isRoomState(room)) {
         restoreRoomState(room);
+        this.restoreTimersForRoom(room);
       }
     }
   }
@@ -693,6 +694,21 @@ export class RoomDurableObject {
 
   private broadcastRoomState(room: RoomState): void {
     this.handleDetachedSockets(this.getRoomHub(room.roomCode).setRoomState(room));
+  }
+
+  private restoreTimersForRoom(room: RoomState): void {
+    const normalizedRoomCode = normalizeRoomCode(room.roomCode);
+
+    this.clearRoomTimers(normalizedRoomCode);
+
+    if (room.status === "countdown") {
+      this.scheduleMatchStart(room);
+      return;
+    }
+
+    if (room.status === "playing" && room.players.some((player) => player.isBot)) {
+      this.scheduleBotTicks(normalizedRoomCode);
+    }
   }
 
   private broadcastServerEvent<TType extends CloudflareServerEventType>(

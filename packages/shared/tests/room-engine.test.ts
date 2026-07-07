@@ -6,11 +6,13 @@ import {
   joinRoom,
   metrics,
   rooms,
+  restoreRoomState,
   setMatchRule,
   setRoomEngineConfig,
   startMatch,
   leaveBySocket
 } from "../src/room-engine.js";
+import type { RoomState } from "@type-battle/shared";
 
 const defaultRoomEngineConfig = {
   timeAttackMs: 30_000,
@@ -61,6 +63,9 @@ describe("room engine config", () => {
 
     const started = startMatch("socket_alice_time_attack_config", created.room.roomCode);
     expect("error" in started).toBe(false);
+    if ("error" in started) {
+      throw new Error(started.error);
+    }
 
     expect(started.room.matchEndsAt).toBe(started.room.serverStartAt! + 5_000);
   });
@@ -137,5 +142,69 @@ describe("room engine config", () => {
     finished.lastActivityAt = Date.now() - 10 * 60 * 1000 - 1;
     cleanupExpiredRooms();
     expect(rooms.has(finishedRoom.room.roomCode.toUpperCase())).toBe(false);
+  });
+});
+
+describe("room state restoration", () => {
+  it("resets human players to disconnected while keeping bots active", () => {
+    const room: RoomState = {
+      roomCode: "ab12cd",
+      hostPlayerId: "guest-alice",
+      status: "countdown",
+      matchRule: "race",
+      botDifficulty: "normal",
+      promptCategory: "standard",
+      serverStartAt: Date.now() + 3_000,
+      players: [
+        {
+          id: "guest-alice",
+          nickname: "Alice",
+          connected: true,
+          ready: true,
+          isHost: true,
+          isBot: false,
+          progressIndex: 5,
+          correctCharacters: 5,
+          totalTypedCharacters: 5,
+          mistakes: 0,
+          maxStreak: 1,
+          currentStreak: 1,
+          wpm: 120,
+          accuracy: 100
+        },
+        {
+          id: "bot_com_1",
+          nickname: "COM",
+          connected: true,
+          ready: true,
+          isHost: false,
+          isBot: true,
+          progressIndex: 2,
+          correctCharacters: 2,
+          totalTypedCharacters: 2,
+          mistakes: 0,
+          maxStreak: 1,
+          currentStreak: 1,
+          wpm: 80,
+          accuracy: 100
+        }
+      ],
+      maxPlayers: 2
+    };
+
+    restoreRoomState(room);
+
+    const restored = rooms.get("AB12CD");
+
+    expect(restored).toBeDefined();
+    if (!restored) {
+      throw new Error("expected restored room to exist");
+    }
+
+    expect(restored.players.get("guest-alice")?.connected).toBe(false);
+    expect(restored.players.get("guest-alice")?.ready).toBe(false);
+    expect(restored.players.get("guest-alice")?.disconnectedAt).toBeDefined();
+    expect(restored.players.get("bot_com_1")?.connected).toBe(true);
+    expect(restored.players.get("bot_com_1")?.ready).toBe(true);
   });
 });
