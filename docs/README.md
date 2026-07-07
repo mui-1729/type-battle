@@ -12,6 +12,7 @@
 - [architecture.md](architecture.md): 技術構成、データ、リアルタイム同期
 - [cloudflare-migration-plan.md](cloudflare-migration-plan.md): Cloudflare realtime 移行の段階計画と free tier リスク
 - [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md): Cloudflare free tier の request / message 監査
+- [cloudflare-deployment.md](cloudflare-deployment.md): Cloudflare Worker deploy 手順と Vercel 維持方針
 - [features/README.md](features/README.md): 機能別仕様
 - [features/feature-catalog.md](features/feature-catalog.md): 今後作る機能の一覧と優先度
 - [features/feature-backlog.md](features/feature-backlog.md): 実装 Issue 候補

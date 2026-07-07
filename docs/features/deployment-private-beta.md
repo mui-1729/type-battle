@@ -58,6 +58,7 @@ LOG_LEVEL=info
 5. realtime 接続先が整った段階で smoke test を実行する
 
 上の flow のうち、repo 内で明示しているのは web の Vercel 前提と smoke test の手順までで、realtime の公開 deploy は別途決める。
+Cloudflare Worker の deploy 手順は [docs/cloudflare-deployment.md](../cloudflare-deployment.md) にまとめる。
 
 ## Smoke Test
 
