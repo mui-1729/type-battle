@@ -36,7 +36,7 @@
 
 - [x] scoring unit tests
 - [x] room state unit tests
-- [x] Socket.IO integration tests
+- [x] Cloudflare Worker integration tests
 - [x] 2 player typing completion Playwright E2E
 - [x] COM match Playwright E2E
 - [x] reload rejoin tests
@@ -65,13 +65,13 @@
 - [x] structured logging
 - [x] basic monitoring
 - [x] deployment scaffolding
-- [x] CD smoke test
+- [x] Cloudflare E2E smoke test
 - [x] player settings sound wiring
 - [x] private beta feedback issue flow
 - [x] web hosting provider wiring
 - [x] realtime external deploy
 - [ ] branch protection
-- [x] PostgreSQL 保存
+- [x] Cloudflare storage persistence
 - [x] guest session
 
 ## Phase 5: Public Beta

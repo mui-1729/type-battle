@@ -17,12 +17,14 @@ import {
   setMatchRule,
   setPromptCategory,
   setReady,
+  setRoomEngineHooks,
   startDailyPractice,
   startMatch,
   startPractice,
   updateProgress,
   finishTyping
 } from "@type-battle/shared/room-engine";
+import type { RoomEngineHooks } from "@type-battle/shared/room-engine";
 import { normalizeNickname, validateNickname } from "@type-battle/shared";
 import type {
   BotDifficulty,
@@ -120,9 +122,18 @@ type PersistedRoomSnapshot = {
 };
 
 type InternalRoomRecord = (typeof rooms) extends Map<string, infer T> ? T : never;
+type GuestSessionStorageRecord = Parameters<NonNullable<RoomEngineHooks["recordGuestSession"]>>[0] & {
+  createdAt: string;
+  lastSeenAt: string;
+};
+type MatchResultStorageRecord = Parameters<NonNullable<RoomEngineHooks["recordMatchResult"]>>[0] & {
+  createdAt: string;
+};
 
 const OPEN_STATE = 1;
 const ROOM_STORAGE_PREFIX = "room:";
+const GUEST_SESSION_STORAGE_PREFIX = "guest-session:";
+const MATCH_RESULT_STORAGE_PREFIX = "match-result:";
 const BOT_TICK_MS = 500;
 const ROOM_TTL_MS = 60_000;
 const DISCONNECT_GRACE_MS = 30_000;
@@ -152,6 +163,14 @@ export class RealtimeGatewayDurableObject {
   readonly ready: Promise<void>;
 
   constructor(private readonly state: DurableObjectState) {
+    setRoomEngineHooks({
+      recordGuestSession: (input) => {
+        void this.persistGuestSessionRecord(input);
+      },
+      recordMatchResult: (input) => {
+        void this.persistMatchResultRecord(input);
+      }
+    });
     this.ready = this.state.blockConcurrencyWhile(async () => {
       await this.restoreRooms();
     });
@@ -864,6 +883,43 @@ export class RealtimeGatewayDurableObject {
       void this.persistRoom(normalizedRoomCode);
     }, ROOM_PERSIST_DEBOUNCE_MS);
     this.timers.set(normalizedRoomCode, timers);
+  }
+
+  private async persistGuestSessionRecord(
+    input: Parameters<NonNullable<RoomEngineHooks["recordGuestSession"]>>[0]
+  ): Promise<void> {
+    const roomCode = normalizeRoomCode(input.roomCode);
+    const storageKey = `${GUEST_SESSION_STORAGE_PREFIX}${roomCode}:${input.guestId}`;
+    const now = new Date().toISOString();
+
+    try {
+      const existing = await this.state.storage.get<GuestSessionStorageRecord>(storageKey);
+      await this.state.storage.put<GuestSessionStorageRecord>(storageKey, {
+        ...input,
+        roomCode,
+        createdAt: existing?.createdAt ?? now,
+        lastSeenAt: now
+      });
+    } catch {
+      // Low-frequency persistence is best-effort and must not interrupt active rooms.
+    }
+  }
+
+  private async persistMatchResultRecord(
+    input: Parameters<NonNullable<RoomEngineHooks["recordMatchResult"]>>[0]
+  ): Promise<void> {
+    const roomCode = normalizeRoomCode(input.roomCode);
+    const storageKey = `${MATCH_RESULT_STORAGE_PREFIX}${roomCode}:${input.round}`;
+
+    try {
+      await this.state.storage.put<MatchResultStorageRecord>(storageKey, {
+        ...input,
+        roomCode,
+        createdAt: new Date().toISOString()
+      });
+    } catch {
+      // Match results should be durable when possible, but gameplay must continue on storage failure.
+    }
   }
 
   private async restoreRooms(): Promise<void> {

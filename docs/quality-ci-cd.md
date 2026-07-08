@@ -9,7 +9,7 @@
 - `main` は常に build 可能な状態にする。
 - 実装 PR は lint、typecheck、test、build を通す。
 - 対戦ロジックの変更は unit test を必須にする。
-- Socket.IO event payload の変更は shared type と integration test を更新する。
+- Cloudflare realtime message payload の変更は shared type と integration test を更新する。
 - UI の主要フロー変更は Playwright E2E を更新する。
 - private beta への deploy は `main` への merge 後に行う。
 - public beta 以降は staging と production を分ける。
@@ -60,7 +60,7 @@ monorepo を使わない初期実装の場合でも、同じ script 名を維持
 
 対象:
 
-- Socket.IO event handler
+- Cloudflare Worker / Durable Object gateway
 - room create / join / leave
 - countdown / start
 - progress sync
@@ -105,7 +105,7 @@ private beta では軽い smoke test を行う。
 
 - health endpoint
 - Web UI 表示
-- Socket.IO 接続
+- Cloudflare WebSocket 接続
 - room create / join
 - COM match
 - reload rejoin
@@ -203,7 +203,7 @@ public beta を目指す段階で追加する。
 
 - `main` merge 後、Vercel の production deployment を基本にする。
 - web deploy 先は private beta 用 URL とする。
-- web deploy 後に smoke test を実行する。
+- web deploy 後に Cloudflare Worker health / WebSocket smoke test を実行する。
 - realtime は Cloudflare Worker を active backend として運用する。
 
 ### Public Beta

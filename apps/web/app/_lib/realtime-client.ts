@@ -1,5 +1,3 @@
-import { io } from "socket.io-client";
-import type { Socket } from "socket.io-client";
 import type { AckResponse, ClientToServerEvents, ServerToClientEvents } from "@type-battle/shared";
 import type {
   CloudflareClientEventName,
@@ -8,7 +6,7 @@ import type {
   CloudflareServerEventName
 } from "@type-battle/shared";
 
-export type RealtimeTransport = "socketio" | "cloudflare";
+export type RealtimeTransport = "cloudflare";
 
 type ConnectionEvents = {
   connect: () => void;
@@ -61,51 +59,28 @@ const CLOUDFLARE_SERVER_EVENT_TO_APP_EVENT: Record<CloudflareServerEventName, ke
 const RECONNECT_DELAY_MS = 1_000;
 
 export function createRealtimeSocket(config: { transport: RealtimeTransport; url: string }): RealtimeSocket {
-  return config.transport === "cloudflare"
-    ? createCloudflareRealtimeSocket(config.url)
-    : createSocketIoRealtimeSocket(config.url);
+  void config.transport;
+  return createCloudflareRealtimeSocket(config.url);
 }
 
 export function resolveRealtimeTransport(config: {
   requestedTransport?: string | null | undefined;
   nodeEnv?: string | null | undefined;
 }): RealtimeTransport {
-  const requestedTransport = config.requestedTransport?.trim();
-
-  if (requestedTransport === "cloudflare" || requestedTransport === "socketio") {
-    return requestedTransport;
-  }
-
-  return config.nodeEnv === "production" ? "cloudflare" : "socketio";
+  void config.requestedTransport;
+  void config.nodeEnv;
+  return "cloudflare";
 }
 
 export function getDefaultRealtimeUrl(transport: RealtimeTransport, location: Location): string | null {
+  void transport;
+
   if (!location.hostname || location.hostname === "vercel.app" || location.hostname.endsWith(".vercel.app")) {
     return null;
   }
 
-  if (transport === "cloudflare") {
-    const protocol = location.protocol === "https:" ? "wss" : "ws";
-    return `${protocol}://${location.hostname}:8787`;
-  }
-
-  const protocol = location.protocol === "https:" ? "https" : "http";
-  return `${protocol}://${location.hostname}:3001`;
-}
-
-function createSocketIoRealtimeSocket(url: string): RealtimeSocket {
-  const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(url, {
-    transports: ["websocket"]
-  });
-
-  return {
-    on: socket.on.bind(socket) as RealtimeSocket["on"],
-    off: socket.off.bind(socket) as RealtimeSocket["off"],
-    emit: socket.emit.bind(socket) as RealtimeSocket["emit"],
-    disconnect() {
-      socket.disconnect();
-    }
-  };
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${location.hostname}:8787`;
 }
 
 function createCloudflareRealtimeSocket(url: string): RealtimeSocket {

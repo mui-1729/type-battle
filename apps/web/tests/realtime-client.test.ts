@@ -2,12 +2,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const ioMock = vi.hoisted(() => vi.fn());
-
-vi.mock("socket.io-client", () => ({
-  io: ioMock
-}));
-
 class MockWebSocket {
   static OPEN = 1;
   static instances: MockWebSocket[] = [];
@@ -210,7 +204,6 @@ class BridgeClientSocket {
 
 describe("realtime client", () => {
   beforeEach(() => {
-    ioMock.mockReset();
     MockWebSocket.instances = [];
     let randomUuidCounter = 0;
     vi.useFakeTimers();
@@ -232,7 +225,7 @@ describe("realtime client", () => {
     BridgeClientSocket.gateway = null;
   });
 
-  it("keeps transport-specific default URLs separate", async () => {
+  it("resolves Cloudflare default URLs", async () => {
     const { getDefaultRealtimeUrl } = await import("../app/_lib/realtime-client");
 
     expect(
@@ -243,53 +236,27 @@ describe("realtime client", () => {
     ).toBe("ws://localhost:8787");
 
     expect(
-      getDefaultRealtimeUrl("socketio", {
+      getDefaultRealtimeUrl("cloudflare", {
         hostname: "example.com",
         protocol: "https:"
       } as Location)
-    ).toBe("https://example.com:3001");
+    ).toBe("wss://example.com:8787");
 
     expect(
-      getDefaultRealtimeUrl("socketio", {
+      getDefaultRealtimeUrl("cloudflare", {
         hostname: "preview.vercel.app",
         protocol: "https:"
       } as Location)
     ).toBeNull();
   });
 
-  it("defaults to cloudflare in production and socketio elsewhere", async () => {
+  it("always resolves to the Cloudflare transport", async () => {
     const { resolveRealtimeTransport } = await import("../app/_lib/realtime-client");
 
     expect(resolveRealtimeTransport({ nodeEnv: "production" })).toBe("cloudflare");
-    expect(resolveRealtimeTransport({ nodeEnv: "development" })).toBe("socketio");
+    expect(resolveRealtimeTransport({ nodeEnv: "development" })).toBe("cloudflare");
     expect(resolveRealtimeTransport({ requestedTransport: "cloudflare", nodeEnv: "development" })).toBe("cloudflare");
-    expect(resolveRealtimeTransport({ requestedTransport: "socketio", nodeEnv: "production" })).toBe("socketio");
-  });
-
-  it("wraps the Socket.IO client without changing its transport settings", async () => {
-    const socketIoClient = {
-      on: vi.fn(),
-      off: vi.fn(),
-      emit: vi.fn(),
-      disconnect: vi.fn()
-    };
-
-    ioMock.mockReturnValue(socketIoClient);
-
-    const { createRealtimeSocket } = await import("../app/_lib/realtime-client");
-    const socket = createRealtimeSocket({ transport: "socketio", url: "http://localhost:3001" });
-    const connectHandler = vi.fn();
-
-    socket.on("connect", connectHandler);
-    socket.emit("room:leave", { roomCode: "ROOM1" });
-    socket.disconnect();
-
-    expect(ioMock).toHaveBeenCalledWith("http://localhost:3001", {
-      transports: ["websocket"]
-    });
-    expect(socketIoClient.on).toHaveBeenCalledWith("connect", connectHandler);
-    expect(socketIoClient.emit).toHaveBeenCalledWith("room:leave", { roomCode: "ROOM1" });
-    expect(socketIoClient.disconnect).toHaveBeenCalledTimes(1);
+    expect(resolveRealtimeTransport({ requestedTransport: "legacy", nodeEnv: "production" })).toBe("cloudflare");
   });
 
   it("queues Cloudflare messages, routes acks and events, and reconnects after close", async () => {

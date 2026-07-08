@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createRealtimeSocket,
   getDefaultRealtimeUrl,
-  resolveRealtimeTransport,
+  type RealtimeTransport,
   type RealtimeSocket
 } from "./_lib/realtime-client";
 import {
@@ -98,11 +98,7 @@ type PracticeSession = {
   challengeKey?: string;
 };
 
-const REALTIME_TRANSPORT = resolveRealtimeTransport({
-  requestedTransport: process.env.NEXT_PUBLIC_REALTIME_TRANSPORT,
-  nodeEnv: process.env.NODE_ENV
-});
-const SOCKET_IO_REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL?.trim() ?? "";
+const REALTIME_TRANSPORT: RealtimeTransport = "cloudflare";
 const CLOUDFLARE_REALTIME_URL = process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL?.trim() ?? "";
 const REALTIME_UNAVAILABLE_MESSAGE = "Realtime transport is not configured.";
 const ROOM_CODE_KEY = "type-battle:room-code";
@@ -136,7 +132,7 @@ export default function HomePage() {
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
   const localProgressRef = useRef<ProgressState>(createEmptyProgress());
   const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
-  const realtimeUrl = (REALTIME_TRANSPORT === "cloudflare" ? CLOUDFLARE_REALTIME_URL : SOCKET_IO_REALTIME_URL) || localRealtimeUrl;
+  const realtimeUrl = CLOUDFLARE_REALTIME_URL || localRealtimeUrl;
   const realtimeConfigured = realtimeUrl.length > 0;
   const guestId = guestSession?.guestId ?? "";
   const sessionId = guestSession?.sessionId ?? "";

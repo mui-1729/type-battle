@@ -11,7 +11,7 @@
   - sound off の時は再生しない。
 - [x] `feat(release): wire web deployment on Vercel`
   - Vercel への自動 deploy と preview / production の切り替えを整える。
-  - repo 内の build 物と smoke test 手順をつなぐ。
+  - repo 内の build 物と Cloudflare E2E 手順をつなぐ。
   - production では Cloudflare realtime を既定接続先にする。
 - [x] `feat(beta): add private beta feedback issue flow`
   - 不具合報告を GitHub Issue にすぐ切り出せるようにする。
@@ -22,7 +22,7 @@
 
 ### persistence / session
 
-- [x] `feat(db): add PostgreSQL persistence`
+- [x] `feat(cloudflare): persist sessions and match results`
   - match result と基本的な session を永続化する。
   - private beta の再起動に備える。
 - [x] `feat(identity): add guest session`

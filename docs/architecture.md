@@ -9,28 +9,18 @@ Browser
   v
 Next.js Web App
   |
-  | REST API / session
+  | WebSocket
   v
-API Server / Database
-
-Browser
+Cloudflare Worker
   |
-  | Socket.IO
+  | Durable Object gateway
   v
-Realtime Game Server
-  |
-  | room state / pubsub
-  v
-Redis
-  |
-  | persisted match data
-  v
-PostgreSQL
+Durable Object SQLite storage
 ```
 
-MVP では Next.js と Socket.IO server を同じ Node.js プロジェクト内で管理してもよい。ただし内輪向け private beta から public beta へ広げる可能性があるため、Web UI と realtime server は分離可能な構成にする。
+Web UI は Vercel / Next.js、realtime backend は Cloudflare Worker / Durable Object を active 構成にする。room authority、countdown、COM、forfeit、room snapshot、guest session、match result は Cloudflare 側で扱う。
 
-Cloudflare 移行の目標構成と free tier リスクの整理は [docs/cloudflare-migration-plan.md](cloudflare-migration-plan.md) にまとめる。
+Cloudflare 構成と free tier リスクの整理は [docs/cloudflare-migration-plan.md](cloudflare-migration-plan.md) と [docs/cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md) にまとめる。
 
 ## 推奨ディレクトリ構成
 
@@ -40,11 +30,10 @@ apps/
     app/
     components/
     lib/
-  realtime/
+  cloudflare-worker/
     src/
-      events/
-      game/
-      rooms/
+      realtime-gateway.ts
+      worker.ts
 packages/
   shared/
     src/
@@ -54,7 +43,7 @@ packages/
 docs/
 ```
 
-## Socket.IO イベント案
+## Cloudflare realtime message
 
 ### Client to Server
 
@@ -124,12 +113,12 @@ type RoomState = {
 
 ## 現在の実装メモ
 
-- room state は realtime server の in-memory Map で管理する。
+- room state は Cloudflare Durable Object 内の room engine と storage snapshot で管理する。
 - waiting room は TTL cleanup される。
 - reload rejoin は localStorage の guest id / room code を使う。
 - playing 中の long disconnect は server state で forfeit 判定できる。
-- practice は server event だけ先に実装してあり、UI は未実装。
-- Web 側には Cloudflare realtime の transport contract と adapter があるが、backend 本体はまだ `apps/realtime` の Node/Socket.IO server のまま。
+- practice は Cloudflare command で prompt を発行し、UI も実装済み。
+- Web 側は Cloudflare WebSocket adapter を使う。
 
 ## サーバー authoritative 方針
 
@@ -146,15 +135,15 @@ type RoomState = {
 
 ### MVP
 
-- 単一 realtime server
-- in-memory room state
+- Cloudflare Worker
+- Durable Object room state
 - guest id を発行
 - room code 参加
 - 基本ログ
 
 ### Private Beta
 
-- PostgreSQL に試合結果保存
+- Durable Object storage に guest session / match result 保存
 - 軽い rate limit
 - デプロイ環境
 - エラー、切断、試合 lifecycle のログ
@@ -162,15 +151,14 @@ type RoomState = {
 
 ### Public Beta
 
-- Redis に room state の一部を保存
-- Socket.IO Redis Adapter を導入
-- 複数 realtime server
+- room 単位 Durable Object または gateway sharding
+- D1 / Analytics 用 storage の導入検討
 - 公開ロビーまたはランダムマッチ
 - 荒らし対策、禁止語、通報導線
 
 ### Production
 
-- matchmaking queue を Redis で管理
+- matchmaking queue を Durable Object / Queue / Redis などで管理
 - replay / audit 用に match events を保存
 - observability: logs, metrics, tracing
 - バックアップ、障害対応、コスト監視
@@ -179,19 +167,19 @@ type RoomState = {
 
 - room code は推測しにくい 6-8 文字にする。
 - nickname は長さ制限、禁止文字、HTML escape を行う。
-- Socket.IO handshake で session または guest token を確認する。
+- Cloudflare WebSocket command で session id と guest id を確認する。
 - rate limit を room creation、join、progress events に設定する。
 - paste、tab switch、異常 WPM を検知する。
 
 ## テスト戦略
 
 - Unit: scoring、progress validation、room state transition
-- Integration: Socket.IO event handler
+- Integration: Cloudflare Worker / Durable Object gateway
 - E2E: Playwright で 2 context を使った room 作成・参加・対戦・結果表示
 - Load: k6 または autocannon で同時 room と progress events を確認
 
 ## Cloudflare 移行メモ
 
-- 既に shared の Cloudflare event contract と web の transport adapter はあるため、次の実装は backend 側の room authority の移植に集中できる。
-- `apps/cloudflare-worker/*` は未作成なので、worker skeleton と wrangler 設定が最初の実装対象になる。
+- shared の Cloudflare event contract、web adapter、Cloudflare Worker backend は実装済み。
+- 旧 Node realtime server は削除済み。
 - Web は現時点では Vercel 維持を前提にし、Cloudflare Pages への web 移行は別判断にする。

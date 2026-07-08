@@ -4,7 +4,7 @@
 
 ## 現在の状態
 
-このリポジトリは MVP の基本対戦に加えて、Private Beta に向けた機能を一部実装している段階です。Next.js の Web UI、Socket.IO の realtime server、shared 型・スコア計算、CI、基本テストを追加しています。
+このリポジトリは MVP の基本対戦に加えて、Private Beta に向けた機能を一部実装している段階です。Next.js の Web UI、Cloudflare Worker / Durable Object realtime backend、shared 型・スコア計算、CI、基本テストを追加しています。
 
 当面の目標は、友人・知人など内輪で遊べるオンラインタイピング対戦ゲームを作ることです。将来的には Web に公開し、知らない人同士でも遊べるサービスに拡張できるようにします。
 
@@ -33,10 +33,9 @@
 - player settings modal / localStorage / theme / input guide / font size / reduced motion / sound wiring
 - private beta feedback issue flow
 - guest session
-- PostgreSQL persistence
+- Cloudflare Durable Object storage persistence
 - structured logging
 - room create / join / typing progress の軽い rate limit
-- smoke test script と realtime Dockerfile
 - shared event types / game state / scoring
 - Vitest unit / room flow tests
 - Playwright room join / complete match / COM match / reload rejoin / long disconnect forfeit / player settings E2E
@@ -63,13 +62,13 @@
 ## 推奨スタック
 
 - Frontend: Next.js App Router + React + TypeScript
-- Realtime server: Node.js + Socket.IO
-- Database: PostgreSQL
-- Cache / scaling: Redis
+- Realtime backend: Cloudflare Worker + Durable Objects
+- Persistence: Durable Object SQLite storage for room snapshots, guest sessions, and match results
+- Cache / scaling: room-scoped Durable Objects or gateway sharding before public beta
 - Testing: Vitest + Playwright
 - Hosting: Vercel for web frontend, realtime server is deferred / self-hosted later
 
-Next.js 単体で WebSocket 常時接続を完結させるより、Web UI とリアルタイムサーバーを分ける構成を基本方針にします。理由は、対戦ルーム、切断復帰、スケールアウト、低遅延イベント処理をサーバー側で明確に管理できるためです。
+Next.js 単体で WebSocket 常時接続を完結させるより、Web UI と Cloudflare realtime backend を分ける構成を基本方針にします。理由は、対戦ルーム、切断復帰、スケールアウト、低遅延イベント処理を Durable Object 側で明確に管理できるためです。
 
 ## 開発
 
@@ -82,7 +81,7 @@ npm run dev
 
 ### Cloudflare Worker
 
-Cloudflare の room transport を試すときは、`apps/cloudflare-worker` を使います。
+Realtime backend は `apps/cloudflare-worker` です。
 
 ```bash
 npm run test --workspace @type-battle/cloudflare-worker
@@ -90,7 +89,7 @@ npm run typecheck --workspace @type-battle/cloudflare-worker
 ```
 
 `/rooms/:roomCode/state` は内部更新用の入口として `ROOM_STATE_WRITE_TOKEN` が必要です。
-現時点では room engine のイベント駆動化前の内部/暫定口として扱い、本番の永続 API にしない前提です。
+通常の room create / join / match flow は WebSocket gateway で処理します。
 
 ```bash
 cd apps/cloudflare-worker
@@ -102,11 +101,10 @@ wrangler secret put ROOM_STATE_WRITE_TOKEN
 ローカルでは次の URL を使います。
 
 - Web: http://127.0.0.1:3000
-- Realtime health: http://127.0.0.1:3001/health
+- Realtime health: http://127.0.0.1:8787/health
 
 同じ Wi-Fi の端末から試すときは、Web を開いた PC の LAN IP で `http://<PC の IP>:3000` にアクセスします。
-realtime は同じ PC 上の `:3001` を使うので、PC 側のファイアウォールで 3000 / 3001 番ポートを許可する必要があります。
-開発時は `CLIENT_ORIGIN` を手で合わせなくても、LAN からの接続を受けられます。
+realtime は同じ PC 上の `:8787` を使うので、PC 側のファイアウォールで 3000 / 8787 番ポートを許可する必要があります。
 
 品質チェック:
 

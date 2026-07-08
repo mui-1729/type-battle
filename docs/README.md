@@ -58,10 +58,10 @@ MVP では次を優先します。
 - player settings modal / localStorage / theme / input guide / font size / reduced motion / sound wiring
 - private beta feedback issue flow
 - guest session
-- PostgreSQL persistence
+- Cloudflare Durable Object storage persistence
 - structured logging
 - room create / join / typing progress の軽量 rate limit
-- smoke test script と realtime Dockerfile
+- Cloudflare Worker E2E
 
 部分実装:
 

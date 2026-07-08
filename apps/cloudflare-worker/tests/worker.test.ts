@@ -13,6 +13,7 @@ import worker, { RoomDurableObject } from "../src/worker.js";
 
 class FakeStorage {
   readonly values = new Map<string, unknown>();
+  readonly failPutPrefixes = new Set<string>();
   alarmAt: number | null = null;
   failAlarmWrites = false;
 
@@ -35,6 +36,10 @@ class FakeStorage {
   }
 
   async put<T = unknown>(key: string, value: T): Promise<void> {
+    if ([...this.failPutPrefixes].some((prefix) => key.startsWith(prefix))) {
+      throw new Error(`put failed for ${key}`);
+    }
+
     this.values.set(key, value);
   }
 
@@ -162,6 +167,12 @@ function findLastAck(
     .find((message) => message.type === "server:ack" && message.command === command);
 }
 
+async function flushAsyncWork(): Promise<void> {
+  for (let index = 0; index < 5; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 function createEnv(): { ROOMS: FakeDurableObjectNamespace; ROOM_STATE_WRITE_TOKEN: string } {
   return {
     ROOMS: new FakeDurableObjectNamespace(),
@@ -245,7 +256,16 @@ describe("cloudflare gateway", () => {
 
     const roomCode = String((firstTwoMessages[0]?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
     expect(roomCode).toMatch(/^[A-Z0-9]{6}$/);
+    await flushAsyncWork();
     expect(storage.values.has(`room:${roomCode}`)).toBe(true);
+    expect(storage.values.get(`guest-session:${roomCode}:guest-alice`)).toMatchObject({
+      sessionId: "session-alice",
+      guestId: "guest-alice",
+      nickname: "Alice",
+      roomCode,
+      createdAt: expect.any(String),
+      lastSeenAt: expect.any(String)
+    });
 
     socket.receive(
       JSON.stringify({
@@ -279,6 +299,125 @@ describe("cloudflare gateway", () => {
         serverStartAt: expect.any(Number)
       }
     });
+  });
+
+  it("persists match results and keeps gameplay alive when result persistence fails", async () => {
+    const storage = new FakeStorage();
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await gateway.ready;
+    gateway.attachSocket(socket as unknown as WebSocket);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-create-result",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-alice-result",
+          sessionId: "session-alice-result"
+        }
+      })
+    );
+
+    const createAck = findLastAck(socket, "client:room:create");
+    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-start-result",
+        type: "client:match:start",
+        payload: {
+          roomCode
+        }
+      })
+    );
+    markPlaying(roomCode);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-finish-result",
+        type: "client:typing:finish",
+        payload: {
+          roomCode,
+          progressIndex: 10_000,
+          correctCharacters: 10_000,
+          totalTypedCharacters: 10_000,
+          mistakes: 0
+        }
+      })
+    );
+
+    await flushAsyncWork();
+
+    expect(storage.values.get(`match-result:${roomCode}:1`)).toMatchObject({
+      roomCode,
+      round: 1,
+      prompt: expect.objectContaining({
+        id: expect.any(String)
+      }),
+      result: expect.objectContaining({
+        roomCode
+      }),
+      createdAt: expect.any(String)
+    });
+
+    const failingStorage = new FakeStorage();
+    failingStorage.failPutPrefixes.add("match-result:");
+    const failingGateway = new RoomDurableObject(
+      new FakeDurableObjectState(failingStorage) as unknown as DurableObjectState
+    );
+    const failingSocket = new FakeSocket();
+
+    resetRoomEngineState();
+    await failingGateway.ready;
+    failingGateway.attachSocket(failingSocket as unknown as WebSocket);
+
+    failingSocket.receive(
+      JSON.stringify({
+        id: "msg-create-failing-result",
+        type: "client:room:create",
+        payload: {
+          nickname: "Bob",
+          guestId: "guest-bob-result",
+          sessionId: "session-bob-result"
+        }
+      })
+    );
+
+    const failingCreateAck = findLastAck(failingSocket, "client:room:create");
+    const failingRoomCode = String((failingCreateAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
+    failingSocket.receive(
+      JSON.stringify({
+        id: "msg-start-failing-result",
+        type: "client:match:start",
+        payload: {
+          roomCode: failingRoomCode
+        }
+      })
+    );
+    markPlaying(failingRoomCode);
+    failingSocket.receive(
+      JSON.stringify({
+        id: "msg-finish-failing-result",
+        type: "client:typing:finish",
+        payload: {
+          roomCode: failingRoomCode,
+          progressIndex: 10_000,
+          correctCharacters: 10_000,
+          totalTypedCharacters: 10_000,
+          mistakes: 0
+        }
+      })
+    );
+
+    await flushAsyncWork();
+
+    expect(getRoom(failingRoomCode)?.status).toBe("finished");
+    expect(parseMessages(failingSocket).some((message) => message.type === "server:match:result")).toBe(true);
   });
 
   it("rejects malformed payloads and applies room rate limits", async () => {
@@ -887,6 +1026,7 @@ describe("cloudflare gateway", () => {
     );
 
     vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
     try {
       await gateway.ready;
       expect(getRoom(created.room.roomCode)?.status).toBe("countdown");

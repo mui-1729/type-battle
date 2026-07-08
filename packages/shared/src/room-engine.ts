@@ -76,6 +76,24 @@ export function setRoomEngineConfig(config: RoomEngineConfig): void {
   };
 }
 
+function runRoomEngineHook(callback: () => void | Promise<void>, scope: string): void {
+  try {
+    void Promise.resolve(callback()).catch((error: unknown) => {
+      engineHooks.logger?.warn?.({
+        event: "room_engine_hook_error",
+        scope,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+  } catch (error) {
+    engineHooks.logger?.warn?.({
+      event: "room_engine_hook_error",
+      scope,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
 const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistakeChance: number }> = {
   easy: { charsPerTick: 1, mistakeChance: 0.05 },
   normal: { charsPerTick: 2, mistakeChance: 0.02 },
@@ -205,12 +223,15 @@ export function createRoom(input: {
 
   rooms.set(roomCode, room);
   socketIndex.set(input.socketId, { roomCode, playerId: player.id });
-  void engineHooks.recordGuestSession?.({
-    sessionId: input.sessionId ?? input.guestId,
-    guestId: input.guestId,
-    nickname: player.nickname,
-    roomCode
-  });
+  runRoomEngineHook(
+    () => engineHooks.recordGuestSession?.({
+      sessionId: input.sessionId ?? input.guestId,
+      guestId: input.guestId,
+      nickname: player.nickname,
+      roomCode
+    }),
+    "guest_session"
+  );
 
   return { room: toPublicRoom(room), playerId: player.id };
 }
@@ -248,12 +269,16 @@ export function joinRoom(input: {
     existing.nickname = normalizeNickname(input.nickname);
     existing.deviceKind = input.deviceKind ?? existing.deviceKind ?? "desktop";
     socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: existing.id });
-    void engineHooks.recordGuestSession?.({
-      sessionId: input.sessionId ?? input.guestId,
-      guestId: input.guestId,
-      nickname: existing.nickname,
-      roomCode: room.roomCode
-    });
+    ensureConnectedHost(room);
+    runRoomEngineHook(
+      () => engineHooks.recordGuestSession?.({
+        sessionId: input.sessionId ?? input.guestId,
+        guestId: input.guestId,
+        nickname: existing.nickname,
+        roomCode: room.roomCode
+      }),
+      "guest_session"
+    );
     return { room: toPublicRoom(room), playerId: existing.id };
   }
 
@@ -275,12 +300,16 @@ export function joinRoom(input: {
   );
   room.players.set(player.id, player);
   socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: player.id });
-  void engineHooks.recordGuestSession?.({
-    sessionId: input.sessionId ?? input.guestId,
-    guestId: input.guestId,
-    nickname: player.nickname,
-    roomCode: room.roomCode
-  });
+  ensureConnectedHost(room);
+  runRoomEngineHook(
+    () => engineHooks.recordGuestSession?.({
+      sessionId: input.sessionId ?? input.guestId,
+      guestId: input.guestId,
+      nickname: player.nickname,
+      roomCode: room.roomCode
+    }),
+    "guest_session"
+  );
 
   return { room: toPublicRoom(room), playerId: player.id };
 }
@@ -511,7 +540,7 @@ function areHumansFinished(room: InternalRoom): boolean {
   return [...room.players.values()]
     .filter((p) => !p.isBot)
     .every((p) => {
-      if (!p.connected) {
+      if (p.forfeited) {
         return true;
       }
 
@@ -521,6 +550,21 @@ function areHumansFinished(room: InternalRoom): boolean {
 
       return p.progressIndex >= getTypingLength(room, p);
     });
+}
+
+function ensureConnectedHost(room: InternalRoom): void {
+  const currentHost = room.players.get(room.hostPlayerId);
+
+  if (currentHost?.connected || currentHost?.isBot) {
+    return;
+  }
+
+  const nextHost = [...room.players.values()].find((player) => player.connected && !player.isBot)
+    ?? [...room.players.values()].find((player) => player.connected || player.isBot);
+
+  if (nextHost) {
+    room.hostPlayerId = nextHost.id;
+  }
 }
 
 function finalizeUnfinishedBots(room: InternalRoom): void {
@@ -812,21 +856,25 @@ function toMatchResult(room: InternalRoom): MatchResult {
 
 function finalizeRoom(room: InternalRoom): MatchResult {
   room.status = "finished";
-  room.result = toMatchResult(room);
+  const result = toMatchResult(room);
+  room.result = result;
   metrics.matchesFinished += 1;
 
-  void engineHooks.recordMatchResult?.({
-    roomCode: room.roomCode,
-    round: room.round,
-    prompt: room.prompt ?? pickPrompt(),
-    promptCategory: room.promptCategory,
-    botDifficulty: room.botDifficulty,
-    playerCount: room.players.size,
-    hasBot: [...room.players.values()].some((player) => player.isBot),
-    result: room.result
-  });
+  runRoomEngineHook(
+    () => engineHooks.recordMatchResult?.({
+      roomCode: room.roomCode,
+      round: room.round,
+      prompt: room.prompt ?? pickPrompt(),
+      promptCategory: room.promptCategory,
+      botDifficulty: room.botDifficulty,
+      playerCount: room.players.size,
+      hasBot: [...room.players.values()].some((player) => player.isBot),
+      result
+    }),
+    "match_result"
+  );
 
-  return room.result;
+  return result;
 }
 
 function toPublicRoom(room: InternalRoom): RoomState {

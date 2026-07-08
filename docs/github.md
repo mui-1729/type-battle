@@ -67,7 +67,7 @@ git checkout -b feat/mvp-room-match
 - 1 PR は 1 つの目的に絞る。
 - 実装 PR には最低限のテストを含める。
 - 実装 PR は lint、typecheck、test、build を通す。
-- Socket.IO event payload を変更する場合は `packages/shared` の型も更新する。
+- Cloudflare realtime message payload を変更する場合は `packages/shared` の型も更新する。
 - ゲームルール変更は `docs/game-design.md` も更新する。
 - Test / Build / CI / CD の詳細は [quality-ci-cd.md](quality-ci-cd.md) に従う。
 
