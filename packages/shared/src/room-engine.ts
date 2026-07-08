@@ -82,6 +82,8 @@ const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistake
   hard: { charsPerTick: 3, mistakeChance: 0.01 }
 };
 
+// Check import of PlayerState. It should have maxStreak and currentStreak.
+// If it doesn't, I must update the shared package.
 type InternalPlayer = PlayerState & {
   socketId: string;
   disconnectedAt?: number;
@@ -135,7 +137,6 @@ export function getMetrics() {
 
 export function restoreRoomState(room: RoomState): void {
   const roomCode = room.roomCode.toUpperCase();
-  const now = Date.now();
 
   rooms.set(roomCode, {
     roomCode,
@@ -145,9 +146,31 @@ export function restoreRoomState(room: RoomState): void {
     botDifficulty: room.botDifficulty,
     promptCategory: room.promptCategory,
     promptHistory: room.prompt ? [room.prompt.id] : [],
-    players: new Map(room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId, now)])),
+    players: new Map(room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId)])),
     createdAt: Date.now(),
-    lastActivityAt: now,
+    lastActivityAt: Date.now(),
+    round: 1,
+    ...(room.prompt ? { prompt: room.prompt } : {}),
+    ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
+    ...(room.matchEndsAt !== undefined ? { matchEndsAt: room.matchEndsAt } : {}),
+    ...(room.result ? { result: room.result } : {})
+  });
+}
+
+export function restoreRoomState(room: RoomState): void {
+  const roomCode = room.roomCode.toUpperCase();
+
+  rooms.set(roomCode, {
+    roomCode,
+    hostPlayerId: room.hostPlayerId,
+    status: room.status,
+    matchRule: room.matchRule,
+    botDifficulty: room.botDifficulty,
+    promptCategory: room.promptCategory,
+    promptHistory: room.prompt ? [room.prompt.id] : [],
+    players: new Map(room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId)])),
+    createdAt: Date.now(),
+    lastActivityAt: Date.now(),
     round: 1,
     ...(room.prompt ? { prompt: room.prompt } : {}),
     ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
@@ -858,10 +881,6 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     publicPlayer.finishTimeMs = player.finishTimeMs;
   }
 
-  if (player.disconnectedAt !== undefined) {
-    publicPlayer.disconnectedAt = player.disconnectedAt;
-  }
-
   return publicPlayer;
 }
 
@@ -920,17 +939,11 @@ function createPlayer(
   };
 }
 
-function toInternalPlayer(player: PlayerState, hostPlayerId: string, disconnectedAt: number): InternalPlayer {
-  const isBot = player.isBot;
-  const nextDisconnectedAt = isBot ? undefined : player.disconnectedAt ?? disconnectedAt;
-
+function toInternalPlayer(player: PlayerState, hostPlayerId: string): InternalPlayer {
   return {
     ...player,
-    connected: isBot ? player.connected : false,
-    ready: isBot ? player.ready : false,
     socketId: player.id,
-    isHost: player.id === hostPlayerId,
-    ...(nextDisconnectedAt !== undefined ? { disconnectedAt: nextDisconnectedAt } : {})
+    isHost: player.id === hostPlayerId
   };
 }
 

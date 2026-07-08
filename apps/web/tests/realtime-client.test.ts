@@ -95,10 +95,10 @@ describe("realtime client", () => {
     ).toBeNull();
   });
 
-  it("defaults to socketio unless a transport is requested explicitly", async () => {
+  it("defaults to cloudflare in production and socketio elsewhere", async () => {
     const { resolveRealtimeTransport } = await import("../app/_lib/realtime-client");
 
-    expect(resolveRealtimeTransport({ nodeEnv: "production" })).toBe("socketio");
+    expect(resolveRealtimeTransport({ nodeEnv: "production" })).toBe("cloudflare");
     expect(resolveRealtimeTransport({ nodeEnv: "development" })).toBe("socketio");
     expect(resolveRealtimeTransport({ requestedTransport: "cloudflare", nodeEnv: "development" })).toBe("cloudflare");
     expect(resolveRealtimeTransport({ requestedTransport: "socketio", nodeEnv: "production" })).toBe("socketio");

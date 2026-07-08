@@ -26,7 +26,6 @@ export type PlayerState = {
   accuracy: number;
   finishedAt?: number;
   finishTimeMs?: number;
-  disconnectedAt?: number;
   forfeited?: boolean | undefined;
 };
 

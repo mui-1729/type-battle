@@ -76,7 +76,7 @@ export function resolveRealtimeTransport(config: {
     return requestedTransport;
   }
 
-  return "socketio";
+  return config.nodeEnv === "production" ? "cloudflare" : "socketio";
 }
 
 export function getDefaultRealtimeUrl(transport: RealtimeTransport, location: Location): string | null {

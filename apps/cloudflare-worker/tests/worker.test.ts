@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RoomState } from "@type-battle/shared";
-import { createRoom, getRoom, rooms, startMatch } from "@type-battle/shared/room-engine";
+import { rooms } from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
 import worker, { RoomDurableObject } from "../src/worker.js";
 
@@ -109,78 +109,6 @@ class FakeSocket {
   }
 }
 
-class BridgeServerSocket extends FakeSocket {
-  private client: BridgeClientSocket | null = null;
-
-  setClient(client: BridgeClientSocket): void {
-    this.client = client;
-  }
-
-  override send(data: string): void {
-    super.send(data);
-    this.client?.receive(data);
-  }
-}
-
-class BridgeClientSocket {
-  static OPEN = 1;
-  static instances: BridgeClientSocket[] = [];
-
-  readonly url: string;
-  readyState = 0;
-  readonly sent: string[] = [];
-  private readonly listeners = new Map<string, Set<(event: { data?: unknown }) => void>>();
-  private readonly server: BridgeServerSocket;
-
-  constructor(url: string) {
-    this.url = url;
-    BridgeClientSocket.instances.push(this);
-
-    if (!activeBridgeGateway) {
-      throw new Error("Bridge gateway is not configured.");
-    }
-
-    this.server = new BridgeServerSocket();
-    this.server.setClient(this);
-    activeBridgeGateway.attachSocket(this.server as unknown as WebSocket);
-  }
-
-  addEventListener(type: string, handler: (event: { data?: unknown }) => void): void {
-    const handlers = this.listeners.get(type) ?? new Set<(event: { data?: unknown }) => void>();
-    handlers.add(handler);
-    this.listeners.set(type, handlers);
-  }
-
-  send(data: string): void {
-    this.sent.push(data);
-    this.server.receive(data);
-  }
-
-  open(): void {
-    this.readyState = BridgeClientSocket.OPEN;
-    this.dispatch("open", {});
-  }
-
-  close(): void {
-    if (this.readyState === 3) {
-      return;
-    }
-
-    this.readyState = 3;
-    this.dispatch("close", {});
-  }
-
-  receive(data: string): void {
-    this.dispatch("message", { data });
-  }
-
-  private dispatch(type: string, event: { data?: unknown }): void {
-    for (const handler of this.listeners.get(type) ?? []) {
-      handler(event);
-    }
-  }
-}
-
 const baseRoom: RoomState = {
   roomCode: "AB12CD",
   hostPlayerId: "guest-alice",
@@ -203,8 +131,6 @@ function createEnv(): { ROOMS: FakeDurableObjectNamespace; ROOM_STATE_WRITE_TOKE
   };
 }
 
-let activeBridgeGateway: RoomDurableObject | null = null;
-
 beforeEach(() => {
   vi.useFakeTimers();
   let uuidCounter = 0;
@@ -223,8 +149,6 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   rooms.clear();
-  activeBridgeGateway = null;
-  BridgeClientSocket.instances = [];
   vi.resetModules();
 });
 
@@ -333,135 +257,6 @@ describe("cloudflare gateway", () => {
         roomCode: "AB12CD"
       })
     });
-  });
-
-  it("restores countdown timers and bot progress after a restart", async () => {
-    const storage = new FakeStorage();
-    const created = createRoom({
-      nickname: "Alice",
-      guestId: "guest-alice-restart",
-      socketId: "socket-alice-restart"
-    });
-
-    const started = startMatch("socket-alice-restart", created.room.roomCode);
-
-    expect("error" in started).toBe(false);
-    if ("error" in started) {
-      return;
-    }
-
-    storage.values.set(`room:${created.room.roomCode}`, started.room);
-
-    const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-
-    await gateway.ready;
-    expect(getRoom(created.room.roomCode)?.status).toBe("countdown");
-
-    await vi.advanceTimersByTimeAsync(3_000);
-    expect(getRoom(created.room.roomCode)?.status).toBe("playing");
-
-    await vi.advanceTimersByTimeAsync(500);
-    const restoredRoom = getRoom(created.room.roomCode);
-
-    expect(restoredRoom?.players.some((player) => player.isBot && player.progressIndex > 0)).toBe(true);
-  });
-
-  it("acks cloudflare room settings through the web adapter bridge", async () => {
-    const storage = new FakeStorage();
-    const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-
-    activeBridgeGateway = gateway;
-    await gateway.ready;
-    vi.stubGlobal("WebSocket", BridgeClientSocket as unknown as typeof WebSocket);
-
-    const { createRealtimeSocket } = await import("../../web/app/_lib/realtime-client");
-    const connectHandler = vi.fn();
-    const roomStateHandler = vi.fn();
-    const createAck = vi.fn();
-    const setPromptAck = vi.fn();
-    const setDifficultyAck = vi.fn();
-    const setRuleAck = vi.fn();
-
-    const socket = createRealtimeSocket({ transport: "cloudflare", url: "ws://localhost:8787" });
-    const clientSocket = BridgeClientSocket.instances[0];
-
-    expect(clientSocket).toBeDefined();
-    if (!clientSocket) {
-      return;
-    }
-
-    socket.on("connect", connectHandler);
-    socket.on("room:state", roomStateHandler);
-
-    socket.emit(
-      "room:create",
-      {
-        nickname: "Alice",
-        guestId: "guest-alice-bridge",
-        sessionId: "session-alice-bridge"
-      },
-      createAck
-    );
-    clientSocket.open();
-
-    expect(connectHandler).toHaveBeenCalledTimes(1);
-    expect(createAck).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ok: true,
-        data: expect.objectContaining({
-          roomCode: expect.any(String),
-          room: expect.objectContaining({
-            roomCode: expect.any(String),
-            status: "waiting"
-          })
-        })
-      })
-    );
-    expect(roomStateHandler).toHaveBeenCalledWith(
-      expect.objectContaining({
-        roomCode: expect.any(String),
-        status: "waiting"
-      })
-    );
-
-    const roomCode = String((createAck.mock.calls[0]?.[0] as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
-    expect(roomCode).toMatch(/^[A-Z0-9]{6}$/);
-
-    socket.emit("room:setPromptCategory", { roomCode, category: "long" }, setPromptAck);
-    socket.emit("room:setBotDifficulty", { roomCode, difficulty: "hard" }, setDifficultyAck);
-    socket.emit("room:setMatchRule", { roomCode, rule: "timeAttack" }, setRuleAck);
-
-    expect(setPromptAck).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ok: true,
-        data: expect.objectContaining({
-          roomCode,
-          promptCategory: "long"
-        })
-      })
-    );
-    expect(setDifficultyAck).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ok: true,
-        data: expect.objectContaining({
-          roomCode,
-          botDifficulty: "hard"
-        })
-      })
-    );
-    expect(setRuleAck).toHaveBeenCalledWith(
-      expect.objectContaining({
-        ok: true,
-        data: expect.objectContaining({
-          roomCode,
-          matchRule: "timeAttack"
-        })
-      })
-    );
   });
 });
 

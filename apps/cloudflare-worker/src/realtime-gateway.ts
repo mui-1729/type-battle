@@ -329,7 +329,6 @@ export class RealtimeGatewayDurableObject {
     }
 
     this.setSocketRoom(socketId, result.room.roomCode);
-    this.sendAck(socketId, message.id, message.type, { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
     await this.persistRoom(result.room.roomCode);
   }
@@ -346,7 +345,6 @@ export class RealtimeGatewayDurableObject {
     }
 
     this.setSocketRoom(socketId, result.room.roomCode);
-    this.sendAck(socketId, message.id, message.type, { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
     await this.persistRoom(result.room.roomCode);
   }
@@ -363,7 +361,6 @@ export class RealtimeGatewayDurableObject {
     }
 
     this.setSocketRoom(socketId, result.room.roomCode);
-    this.sendAck(socketId, message.id, message.type, { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
     await this.persistRoom(result.room.roomCode);
   }
@@ -607,29 +604,7 @@ export class RealtimeGatewayDurableObject {
 
       restoreRoomStateIfValid(room);
       this.persistedRoomCodes.add(key.slice(ROOM_STORAGE_PREFIX.length));
-      this.syncRestoredRoom(room.roomCode);
-      await this.persistRoom(room.roomCode);
     }
-  }
-
-  private syncRestoredRoom(roomCode: string): void {
-    const room = getRoom(roomCode);
-
-    if (!room) {
-      return;
-    }
-
-    if (room.status === "countdown" && room.serverStartAt) {
-      this.scheduleMatchStart(room.roomCode);
-      return;
-    }
-
-    if (room.status === "playing" && room.players.some((player) => player.isBot)) {
-      this.scheduleBotProgress(room.roomCode);
-      return;
-    }
-
-    this.clearRoomTimers(room.roomCode);
   }
 
   private scheduleMatchStart(roomCode: string): void {
@@ -794,7 +769,6 @@ export class RealtimeGatewayDurableObject {
     }
 
     restoreRoomStateIfValid(room);
-    this.syncRestoredRoom(room.roomCode);
     this.broadcastRoomState(room);
     await this.persistRoom(room.roomCode);
 
