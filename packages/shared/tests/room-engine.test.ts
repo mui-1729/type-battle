@@ -2,28 +2,21 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createRoom,
   joinRoom,
-  metrics,
   rooms,
+  resetRoomEngineState,
+  setReady,
   setMatchRule,
   setRoomEngineConfig,
   startMatch
 } from "../src/room-engine.js";
 
 afterEach(() => {
-  rooms.clear();
-  metrics.matchesStarted = 0;
-  metrics.matchesFinished = 0;
-  metrics.disconnectCount = 0;
-  metrics.serverErrors = 0;
+  resetRoomEngineState();
   setRoomEngineConfig({ timeAttackMs: 30_000 });
 });
 
 beforeEach(() => {
-  rooms.clear();
-  metrics.matchesStarted = 0;
-  metrics.matchesFinished = 0;
-  metrics.disconnectCount = 0;
-  metrics.serverErrors = 0;
+  resetRoomEngineState();
   setRoomEngineConfig({ timeAttackMs: 30_000 });
 });
 
@@ -57,5 +50,25 @@ describe("room engine config", () => {
     }
 
     expect(started.room.matchEndsAt).toBe(started.room.serverStartAt! + 5_000);
+  });
+
+  it("invalidates the previous socket when an existing player rejoins", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_rebind",
+      socketId: "socket_alice_rebind_1"
+    });
+
+    const rejoined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Alice",
+      guestId: "guest_alice_rebind",
+      socketId: "socket_alice_rebind_2"
+    });
+
+    expect("error" in rejoined).toBe(false);
+
+    expect(setReady("socket_alice_rebind_1", created.room.roomCode, true)).toBeNull();
+    expect(setReady("socket_alice_rebind_2", created.room.roomCode, true)).not.toBeNull();
   });
 });

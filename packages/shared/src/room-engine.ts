@@ -135,26 +135,13 @@ export function getMetrics() {
   };
 }
 
-export function restoreRoomState(room: RoomState): void {
-  const roomCode = room.roomCode.toUpperCase();
-
-  rooms.set(roomCode, {
-    roomCode,
-    hostPlayerId: room.hostPlayerId,
-    status: room.status,
-    matchRule: room.matchRule,
-    botDifficulty: room.botDifficulty,
-    promptCategory: room.promptCategory,
-    promptHistory: room.prompt ? [room.prompt.id] : [],
-    players: new Map(room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId)])),
-    createdAt: Date.now(),
-    lastActivityAt: Date.now(),
-    round: 1,
-    ...(room.prompt ? { prompt: room.prompt } : {}),
-    ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
-    ...(room.matchEndsAt !== undefined ? { matchEndsAt: room.matchEndsAt } : {}),
-    ...(room.result ? { result: room.result } : {})
-  });
+export function resetRoomEngineState(): void {
+  rooms.clear();
+  socketIndex.clear();
+  metrics.matchesStarted = 0;
+  metrics.matchesFinished = 0;
+  metrics.disconnectCount = 0;
+  metrics.serverErrors = 0;
 }
 
 export function restoreRoomState(room: RoomState): void {
@@ -235,6 +222,11 @@ export function joinRoom(input: {
   const existing = room.players.get(input.guestId);
 
   if (existing) {
+    const previousSocketId = existing.socketId;
+    if (previousSocketId && previousSocketId !== input.socketId) {
+      socketIndex.delete(previousSocketId);
+    }
+
     existing.socketId = input.socketId;
     existing.connected = true;
     delete existing.disconnectedAt;
@@ -571,6 +563,10 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
 }
 
 export function updateProgress(socketId: string, payload: TypingProgress): RoomState | MatchResult | null {
+  if (!isValidTypingProgressPayload(payload)) {
+    return null;
+  }
+
   const context = getContext(socketId, payload.roomCode);
 
   if (!context || context.room.status !== "playing" || !context.room.prompt) {
@@ -588,6 +584,10 @@ export function updateProgress(socketId: string, payload: TypingProgress): RoomS
 }
 
 export function finishTyping(socketId: string, payload: TypingFinish): MatchResult | RoomState | null {
+  if (!isValidTypingProgressPayload(payload)) {
+    return null;
+  }
+
   const context = getContext(socketId, payload.roomCode);
 
   if (!context || context.room.status !== "playing" || !context.room.prompt) {
@@ -976,8 +976,8 @@ function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
   return selected;
 }
 
-const ROOM_TTL_MS = 60 * 1000; // 1 minute
-const DISCONNECT_GRACE_MS = 30_000;
+export const ROOM_TTL_MS = 60 * 1000; // 1 minute
+export const DISCONNECT_GRACE_MS = 30_000;
 
 export function cleanupExpiredRooms(): void {
   const now = Date.now();
@@ -1083,6 +1083,22 @@ export function startDailyPractice(nickname: string): { practiceId: string; prom
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(Math.floor(value), min), max);
+}
+
+function isValidTypingProgressPayload(payload: TypingProgress): boolean {
+  return (
+    Number.isInteger(payload.progressIndex) &&
+    payload.progressIndex >= 0 &&
+    Number.isInteger(payload.correctCharacters) &&
+    payload.correctCharacters >= 0 &&
+    Number.isInteger(payload.totalTypedCharacters) &&
+    payload.totalTypedCharacters >= 0 &&
+    Number.isInteger(payload.mistakes) &&
+    payload.mistakes >= 0 &&
+    payload.correctCharacters <= payload.totalTypedCharacters &&
+    payload.mistakes <= payload.totalTypedCharacters &&
+    payload.progressIndex <= payload.totalTypedCharacters
+  );
 }
 
 function maybeFinalizeRoom(room: InternalRoom): MatchResult | null {
