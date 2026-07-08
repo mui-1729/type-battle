@@ -25,13 +25,20 @@ import {
 } from "@type-battle/shared/room-engine";
 import { normalizeNickname, validateNickname } from "@type-battle/shared";
 import type {
-  CloudflareClientMessage,
+  BotDifficulty,
+  DeviceKind,
+  MatchRule,
+  PromptCategory
+} from "@type-battle/shared";
+import type {
   CloudflareClientMessageType,
   CloudflareServerEventEnvelope,
   CloudflareServerEventType,
   CloudflareServerMessage
 } from "@type-battle/shared/cloudflare-events";
+import { CLOUDFLARE_CLIENT_MESSAGE_TYPES } from "@type-battle/shared/cloudflare-events";
 import { normalizeRoomCode, resolveRoomRoute } from "./room-routing.js";
+import { RateLimiter } from "./rate-limiter.js";
 
 type CloudflareSocketLike = {
   readyState: number;
@@ -44,26 +51,104 @@ type CloudflareSocketLike = {
 
 type SocketState = {
   socketId: string;
+  clientIp: string;
+  playerId?: string;
   roomCode?: string;
 };
+
+type AttachSocketOptions = {
+  clientIp?: string;
+};
+
+type ParsedClientMessage = {
+  id: string;
+  type: string;
+  payload: unknown;
+};
+
+type CreateRoomPayload = {
+  nickname: string;
+  guestId: string;
+  sessionId: string;
+  deviceKind?: DeviceKind;
+};
+
+type JoinRoomPayload = CreateRoomPayload & {
+  roomCode: string;
+};
+
+type RoomCodePayload = {
+  roomCode: string;
+};
+
+type ReadyPayload = RoomCodePayload & {
+  ready: boolean;
+};
+
+type PromptCategoryPayload = RoomCodePayload & {
+  category: PromptCategory;
+};
+
+type BotDifficultyPayload = RoomCodePayload & {
+  difficulty: BotDifficulty;
+};
+
+type MatchRulePayload = RoomCodePayload & {
+  rule: MatchRule;
+};
+
+type TypingPayload = RoomCodePayload & {
+  progressIndex: number;
+  correctCharacters: number;
+  totalTypedCharacters: number;
+  mistakes: number;
+};
+
+type PracticePayload = {
+  nickname: string;
+  category: PromptCategory;
+};
+
+type DailyPracticePayload = {
+  nickname: string;
+};
+
+type PersistedRoomSnapshot = {
+  room: RoomState;
+  playerSessions: Record<string, string>;
+  disconnectedAt: Record<string, number>;
+};
+
+type InternalRoomRecord = (typeof rooms) extends Map<string, infer T> ? T : never;
 
 const OPEN_STATE = 1;
 const ROOM_STORAGE_PREFIX = "room:";
 const BOT_TICK_MS = 500;
 const ROOM_CLEANUP_INTERVAL_MS = 10_000;
 const TIME_ATTACK_POLL_INTERVAL_MS = 1_000;
+const ROOM_TTL_MS = 60_000;
+const DISCONNECT_GRACE_MS = 30_000;
+const ROOM_PERSIST_DEBOUNCE_MS = 1_000;
+const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
 
 type GatewayTimers = {
   countdown?: ReturnType<typeof setTimeout>;
   bot?: ReturnType<typeof setInterval>;
+  persist?: ReturnType<typeof setTimeout>;
 };
 
 export class RealtimeGatewayDurableObject {
   private readonly sockets = new Map<string, CloudflareSocketLike>();
   private readonly socketStates = new Map<string, SocketState>();
   private readonly roomSockets = new Map<string, Set<string>>();
+  private readonly playerSessionsByRoom = new Map<string, Map<string, string>>();
   private readonly timers = new Map<string, GatewayTimers>();
   private readonly persistedRoomCodes = new Set<string>();
+  private readonly roomCreateIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
+  private readonly roomCreateGuestLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 10 });
+  private readonly roomJoinIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 100 });
+  private readonly roomJoinGuestLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
+  private readonly progressLimiter = new RateLimiter({ windowMs: 1000, max: 30 });
   readonly ready: Promise<void>;
 
   constructor(private readonly state: DurableObjectState) {
@@ -113,10 +198,19 @@ export class RealtimeGatewayDurableObject {
     return new Response("Not found", { status: 404 });
   }
 
-  attachSocket(socket: CloudflareSocketLike): string {
+  async alarm(): Promise<void> {
+    await this.ready;
+    await this.runMaintenance();
+    await this.scheduleMaintenanceAlarm();
+  }
+
+  attachSocket(socket: CloudflareSocketLike, options: AttachSocketOptions = {}): string {
     const socketId = crypto.randomUUID();
     this.sockets.set(socketId, socket);
-    this.socketStates.set(socketId, { socketId });
+    this.socketStates.set(socketId, {
+      socketId,
+      clientIp: normalizeClientIp(options.clientIp)
+    });
     socket.accept();
 
     socket.addEventListener("message", (event) => {
@@ -141,7 +235,9 @@ export class RealtimeGatewayDurableObject {
     const client = pair[0];
     const server = pair[1];
 
-    this.attachSocket(server as unknown as CloudflareSocketLike);
+    this.attachSocket(server as unknown as CloudflareSocketLike, {
+      clientIp: readClientIp(request.headers)
+    });
 
     return new Response(null, {
       status: 101,
@@ -154,57 +250,57 @@ export class RealtimeGatewayDurableObject {
       return;
     }
 
-    let message: CloudflareClientMessage;
+    const message = parseClientMessage(rawMessage);
 
-    try {
-      message = JSON.parse(rawMessage) as CloudflareClientMessage;
-    } catch {
+    if (!message) {
+      this.sendError(socketId, INVALID_MESSAGE_ERROR);
       return;
     }
 
-    if (!message || typeof message !== "object" || !("type" in message) || !("id" in message)) {
+    if (!isCloudflareClientMessageType(message.type)) {
+      this.sendError(socketId, INVALID_MESSAGE_ERROR);
       return;
     }
 
     switch (message.type) {
       case "client:room:create":
-        await this.handleCreateRoom(socketId, message);
+        await this.handleCreateRoom(socketId, message.id, message.payload);
         return;
       case "client:room:join":
-        await this.handleJoinRoom(socketId, message);
+        await this.handleJoinRoom(socketId, message.id, message.payload);
         return;
       case "client:room:leave":
-        await this.handleLeaveRoom(socketId, message);
+        await this.handleLeaveRoom(socketId, message.payload);
         return;
       case "client:player:ready":
-        await this.handleSetReady(socketId, message);
+        await this.handleSetReady(socketId, message.payload);
         return;
       case "client:room:setPromptCategory":
-        await this.handleSetPromptCategory(socketId, message);
+        await this.handleSetPromptCategory(socketId, message.id, message.payload);
         return;
       case "client:room:setBotDifficulty":
-        await this.handleSetBotDifficulty(socketId, message);
+        await this.handleSetBotDifficulty(socketId, message.id, message.payload);
         return;
       case "client:room:setMatchRule":
-        await this.handleSetMatchRule(socketId, message);
+        await this.handleSetMatchRule(socketId, message.id, message.payload);
         return;
       case "client:match:start":
-        await this.handleStartMatch(socketId, message);
+        await this.handleStartMatch(socketId, message.id, message.payload);
         return;
       case "client:typing:progress":
-        await this.handleTypingProgress(socketId, message);
+        await this.handleTypingProgress(socketId, message.payload);
         return;
       case "client:typing:finish":
-        await this.handleTypingFinish(socketId, message);
+        await this.handleTypingFinish(socketId, message.payload);
         return;
       case "client:match:rematch":
-        await this.handleRematch(socketId, message);
+        await this.handleRematch(socketId, message.id, message.payload);
         return;
       case "client:practice:start":
-        await this.handlePracticeStart(socketId, message);
+        await this.handlePracticeStart(socketId, message.id, message.payload);
         return;
       case "client:practice:dailyStart":
-        await this.handleDailyPracticeStart(socketId, message);
+        await this.handleDailyPracticeStart(socketId, message.id, message.payload);
         return;
       default:
         return;
@@ -228,24 +324,49 @@ export class RealtimeGatewayDurableObject {
     }
   }
 
-  private async handleCreateRoom(socketId: string, message: CloudflareClientMessage & { type: "client:room:create" }): Promise<void> {
-    const error = validateNickname(message.payload.nickname);
+  private async handleCreateRoom(socketId: string, messageId: string, payload: unknown): Promise<void> {
+    const parsedPayload = parseCreateRoomPayload(payload);
+
+    if (!parsedPayload) {
+      this.sendAck(socketId, messageId, "client:room:create", { ok: false, error: INVALID_MESSAGE_ERROR });
+      return;
+    }
+
+    const clientIp = this.socketStates.get(socketId)?.clientIp ?? "unknown";
+    if (!this.roomCreateIpLimiter.isAllowed(clientIp)) {
+      this.sendAck(socketId, messageId, "client:room:create", {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
+      });
+      return;
+    }
+
+    if (!this.roomCreateGuestLimiter.isAllowed(parsedPayload.guestId)) {
+      this.sendAck(socketId, messageId, "client:room:create", {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
+      });
+      return;
+    }
+
+    const error = validateNickname(parsedPayload.nickname);
 
     if (error) {
-      this.sendAck(socketId, message.id, message.type, { ok: false, error });
+      this.sendAck(socketId, messageId, "client:room:create", { ok: false, error });
       return;
     }
 
     const result = createRoom({
-      nickname: normalizeNickname(message.payload.nickname),
-      guestId: message.payload.guestId,
+      nickname: normalizeNickname(parsedPayload.nickname),
+      guestId: parsedPayload.guestId,
       socketId,
-      sessionId: message.payload.sessionId,
-      ...(message.payload.deviceKind ? { deviceKind: message.payload.deviceKind } : {})
+      ...(parsedPayload.sessionId ? { sessionId: parsedPayload.sessionId } : {}),
+      ...(parsedPayload.deviceKind ? { deviceKind: parsedPayload.deviceKind } : {})
     });
 
-    this.setSocketRoom(socketId, result.room.roomCode);
-    this.sendAck(socketId, message.id, message.type, {
+    this.setSocketRoom(socketId, result.room.roomCode, result.playerId);
+    this.recordPlayerSession(result.room.roomCode, result.playerId, parsedPayload.sessionId);
+    this.sendAck(socketId, messageId, "client:room:create", {
       ok: true,
       data: {
         roomCode: result.room.roomCode,
@@ -257,30 +378,62 @@ export class RealtimeGatewayDurableObject {
     await this.persistRoom(result.room.roomCode);
   }
 
-  private async handleJoinRoom(socketId: string, message: CloudflareClientMessage & { type: "client:room:join" }): Promise<void> {
-    const error = validateNickname(message.payload.nickname);
+  private async handleJoinRoom(socketId: string, messageId: string, payload: unknown): Promise<void> {
+    const parsedPayload = parseJoinRoomPayload(payload);
+
+    if (!parsedPayload) {
+      this.sendAck(socketId, messageId, "client:room:join", { ok: false, error: INVALID_MESSAGE_ERROR });
+      return;
+    }
+
+    const clientIp = this.socketStates.get(socketId)?.clientIp ?? "unknown";
+    if (!this.roomJoinIpLimiter.isAllowed(clientIp)) {
+      this.sendAck(socketId, messageId, "client:room:join", {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
+      });
+      return;
+    }
+
+    if (!this.roomJoinGuestLimiter.isAllowed(parsedPayload.guestId)) {
+      this.sendAck(socketId, messageId, "client:room:join", {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
+      });
+      return;
+    }
+
+    const error = validateNickname(parsedPayload.nickname);
 
     if (error) {
-      this.sendAck(socketId, message.id, message.type, { ok: false, error });
+      this.sendAck(socketId, messageId, "client:room:join", { ok: false, error });
+      return;
+    }
+
+    const sessionError = this.validateExistingPlayerSession(parsedPayload.roomCode, parsedPayload.guestId, parsedPayload.sessionId);
+
+    if (sessionError) {
+      this.sendAck(socketId, messageId, "client:room:join", { ok: false, error: sessionError });
       return;
     }
 
     const result = joinRoom({
-      roomCode: message.payload.roomCode,
-      nickname: normalizeNickname(message.payload.nickname),
-      guestId: message.payload.guestId,
+      roomCode: parsedPayload.roomCode,
+      nickname: normalizeNickname(parsedPayload.nickname),
+      guestId: parsedPayload.guestId,
       socketId,
-      sessionId: message.payload.sessionId,
-      ...(message.payload.deviceKind ? { deviceKind: message.payload.deviceKind } : {})
+      ...(parsedPayload.sessionId ? { sessionId: parsedPayload.sessionId } : {}),
+      ...(parsedPayload.deviceKind ? { deviceKind: parsedPayload.deviceKind } : {})
     });
 
     if ("error" in result) {
-      this.sendAck(socketId, message.id, message.type, { ok: false, error: result.error });
+      this.sendAck(socketId, messageId, "client:room:join", { ok: false, error: result.error });
       return;
     }
 
-    this.setSocketRoom(socketId, result.room.roomCode);
-    this.sendAck(socketId, message.id, message.type, {
+    this.setSocketRoom(socketId, result.room.roomCode, result.playerId);
+    this.recordPlayerSession(result.room.roomCode, result.playerId, parsedPayload.sessionId);
+    this.sendAck(socketId, messageId, "client:room:join", {
       ok: true,
       data: {
         playerId: result.playerId,
@@ -291,8 +444,15 @@ export class RealtimeGatewayDurableObject {
     await this.persistRoom(result.room.roomCode);
   }
 
-  private async handleLeaveRoom(socketId: string, message: CloudflareClientMessage & { type: "client:room:leave" }): Promise<void> {
-    const roomCode = this.socketStates.get(socketId)?.roomCode ?? normalizeRoomCode(message.payload.roomCode);
+  private async handleLeaveRoom(socketId: string, payload: unknown): Promise<void> {
+    const parsedPayload = parseRoomCodePayload(payload);
+
+    if (!parsedPayload) {
+      this.sendError(socketId, INVALID_MESSAGE_ERROR);
+      return;
+    }
+
+    const roomCode = this.socketStates.get(socketId)?.roomCode ?? normalizeRoomCode(parsedPayload.roomCode);
     const room = explicitLeaveBySocket(socketId);
     this.detachSocketFromRoom(socketId);
 
@@ -305,8 +465,15 @@ export class RealtimeGatewayDurableObject {
     await this.persistRoom(roomCode);
   }
 
-  private async handleSetReady(socketId: string, message: CloudflareClientMessage & { type: "client:player:ready" }): Promise<void> {
-    const room = setReady(socketId, message.payload.roomCode, message.payload.ready);
+  private async handleSetReady(socketId: string, payload: unknown): Promise<void> {
+    const parsedPayload = parseReadyPayload(payload);
+
+    if (!parsedPayload) {
+      this.sendError(socketId, INVALID_MESSAGE_ERROR);
+      return;
+    }
+
+    const room = setReady(socketId, parsedPayload.roomCode, parsedPayload.ready);
 
     if (!room) {
       return;
@@ -319,65 +486,96 @@ export class RealtimeGatewayDurableObject {
 
   private async handleSetPromptCategory(
     socketId: string,
-    message: CloudflareClientMessage & { type: "client:room:setPromptCategory" }
+    messageId: string,
+    payload: unknown
   ): Promise<void> {
-    const result = setPromptCategory(socketId, message.payload.roomCode, message.payload.category);
+    const parsedPayload = parsePromptCategoryPayload(payload);
+
+    if (!parsedPayload) {
+      this.sendAck(socketId, messageId, "client:room:setPromptCategory", { ok: false, error: INVALID_MESSAGE_ERROR });
+      return;
+    }
+
+    const result = setPromptCategory(socketId, parsedPayload.roomCode, parsedPayload.category);
 
     if ("error" in result) {
-      this.sendAck(socketId, message.id, message.type, { ok: false, error: result.error });
+      this.sendAck(socketId, messageId, "client:room:setPromptCategory", { ok: false, error: result.error });
       return;
     }
 
     this.setSocketRoom(socketId, result.room.roomCode);
-    this.sendAck(socketId, message.id, message.type, { ok: true, data: result.room });
+    this.sendAck(socketId, messageId, "client:room:setPromptCategory", { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
     await this.persistRoom(result.room.roomCode);
   }
 
   private async handleSetBotDifficulty(
     socketId: string,
-    message: CloudflareClientMessage & { type: "client:room:setBotDifficulty" }
+    messageId: string,
+    payload: unknown
   ): Promise<void> {
-    const result = setBotDifficulty(socketId, message.payload.roomCode, message.payload.difficulty);
+    const parsedPayload = parseBotDifficultyPayload(payload);
+
+    if (!parsedPayload) {
+      this.sendAck(socketId, messageId, "client:room:setBotDifficulty", { ok: false, error: INVALID_MESSAGE_ERROR });
+      return;
+    }
+
+    const result = setBotDifficulty(socketId, parsedPayload.roomCode, parsedPayload.difficulty);
 
     if ("error" in result) {
-      this.sendAck(socketId, message.id, message.type, { ok: false, error: result.error });
+      this.sendAck(socketId, messageId, "client:room:setBotDifficulty", { ok: false, error: result.error });
       return;
     }
 
     this.setSocketRoom(socketId, result.room.roomCode);
-    this.sendAck(socketId, message.id, message.type, { ok: true, data: result.room });
+    this.sendAck(socketId, messageId, "client:room:setBotDifficulty", { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
     await this.persistRoom(result.room.roomCode);
   }
 
   private async handleSetMatchRule(
     socketId: string,
-    message: CloudflareClientMessage & { type: "client:room:setMatchRule" }
+    messageId: string,
+    payload: unknown
   ): Promise<void> {
-    const result = setMatchRule(socketId, message.payload.roomCode, message.payload.rule);
+    const parsedPayload = parseMatchRulePayload(payload);
+
+    if (!parsedPayload) {
+      this.sendAck(socketId, messageId, "client:room:setMatchRule", { ok: false, error: INVALID_MESSAGE_ERROR });
+      return;
+    }
+
+    const result = setMatchRule(socketId, parsedPayload.roomCode, parsedPayload.rule);
 
     if ("error" in result) {
-      this.sendAck(socketId, message.id, message.type, { ok: false, error: result.error });
+      this.sendAck(socketId, messageId, "client:room:setMatchRule", { ok: false, error: result.error });
       return;
     }
 
     this.setSocketRoom(socketId, result.room.roomCode);
-    this.sendAck(socketId, message.id, message.type, { ok: true, data: result.room });
+    this.sendAck(socketId, messageId, "client:room:setMatchRule", { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
     await this.persistRoom(result.room.roomCode);
   }
 
-  private async handleStartMatch(socketId: string, message: CloudflareClientMessage & { type: "client:match:start" }): Promise<void> {
-    const result = startMatch(socketId, message.payload.roomCode);
+  private async handleStartMatch(socketId: string, messageId: string, payload: unknown): Promise<void> {
+    const parsedPayload = parseRoomCodePayload(payload);
+
+    if (!parsedPayload) {
+      this.sendAck(socketId, messageId, "client:match:start", { ok: false, error: INVALID_MESSAGE_ERROR });
+      return;
+    }
+
+    const result = startMatch(socketId, parsedPayload.roomCode);
 
     if ("error" in result) {
-      this.sendAck(socketId, message.id, message.type, { ok: false, error: result.error });
+      this.sendAck(socketId, messageId, "client:match:start", { ok: false, error: result.error });
       return;
     }
 
     this.setSocketRoom(socketId, result.room.roomCode);
-    this.sendAck(socketId, message.id, message.type, { ok: true, data: result.room });
+    this.sendAck(socketId, messageId, "client:match:start", { ok: true, data: result.room });
     this.broadcastToRoom(result.room.roomCode, {
       id: crypto.randomUUID(),
       type: "server:match:countdown",
@@ -392,9 +590,20 @@ export class RealtimeGatewayDurableObject {
 
   private async handleTypingProgress(
     socketId: string,
-    message: CloudflareClientMessage & { type: "client:typing:progress" }
+    payload: unknown
   ): Promise<void> {
-    const result = updateProgress(socketId, message.payload);
+    const parsedPayload = parseTypingPayload(payload);
+
+    if (!parsedPayload) {
+      this.sendError(socketId, INVALID_MESSAGE_ERROR);
+      return;
+    }
+
+    if (!this.progressLimiter.isAllowed(socketId)) {
+      return;
+    }
+
+    const result = updateProgress(socketId, parsedPayload);
 
     if (!result) {
       return;
@@ -403,7 +612,7 @@ export class RealtimeGatewayDurableObject {
     if ("status" in result) {
       this.setSocketRoom(socketId, result.roomCode);
       this.broadcastRoomState(result);
-      await this.persistRoom(result.roomCode);
+      this.schedulePersistRoom(result.roomCode);
       return;
     }
 
@@ -412,14 +621,21 @@ export class RealtimeGatewayDurableObject {
       type: "server:match:result",
       payload: result
     });
-    await this.persistRoom(result.roomCode);
+    this.schedulePersistRoom(result.roomCode);
   }
 
   private async handleTypingFinish(
     socketId: string,
-    message: CloudflareClientMessage & { type: "client:typing:finish" }
+    payload: unknown
   ): Promise<void> {
-    const result = finishTyping(socketId, message.payload);
+    const parsedPayload = parseTypingPayload(payload);
+
+    if (!parsedPayload) {
+      this.sendError(socketId, INVALID_MESSAGE_ERROR);
+      return;
+    }
+
+    const result = finishTyping(socketId, parsedPayload);
 
     if (!result) {
       return;
@@ -428,7 +644,7 @@ export class RealtimeGatewayDurableObject {
     if ("status" in result) {
       this.setSocketRoom(socketId, result.roomCode);
       this.broadcastRoomState(result);
-      await this.persistRoom(result.roomCode);
+      this.schedulePersistRoom(result.roomCode);
       return;
     }
 
@@ -437,37 +653,60 @@ export class RealtimeGatewayDurableObject {
       type: "server:match:result",
       payload: result
     });
-    await this.persistRoom(result.roomCode);
+    this.schedulePersistRoom(result.roomCode);
   }
 
-  private async handleRematch(socketId: string, message: CloudflareClientMessage & { type: "client:match:rematch" }): Promise<void> {
-    const result = rematch(socketId, message.payload.roomCode);
+  private async handleRematch(socketId: string, messageId: string, payload: unknown): Promise<void> {
+    const parsedPayload = parseRoomCodePayload(payload);
+
+    if (!parsedPayload) {
+      this.sendAck(socketId, messageId, "client:match:rematch", { ok: false, error: INVALID_MESSAGE_ERROR });
+      return;
+    }
+
+    const result = rematch(socketId, parsedPayload.roomCode);
 
     if ("error" in result) {
-      this.sendAck(socketId, message.id, message.type, { ok: false, error: result.error });
+      this.sendAck(socketId, messageId, "client:match:rematch", { ok: false, error: result.error });
       return;
     }
 
     this.setSocketRoom(socketId, result.room.roomCode);
-    this.sendAck(socketId, message.id, message.type, { ok: true, data: result.room });
+    this.sendAck(socketId, messageId, "client:match:rematch", { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
     await this.persistRoom(result.room.roomCode);
   }
 
   private async handlePracticeStart(
     socketId: string,
-    message: CloudflareClientMessage & { type: "client:practice:start" }
+    messageId: string,
+    payload: unknown
   ): Promise<void> {
-    const practice = startPractice(message.payload.nickname, message.payload.category);
-    this.sendAck(socketId, message.id, message.type, { ok: true, data: practice });
+    const parsedPayload = parsePracticePayload(payload);
+
+    if (!parsedPayload) {
+      this.sendAck(socketId, messageId, "client:practice:start", { ok: false, error: INVALID_MESSAGE_ERROR });
+      return;
+    }
+
+    const practice = startPractice(parsedPayload.nickname, parsedPayload.category);
+    this.sendAck(socketId, messageId, "client:practice:start", { ok: true, data: practice });
   }
 
   private async handleDailyPracticeStart(
     socketId: string,
-    message: CloudflareClientMessage & { type: "client:practice:dailyStart" }
+    messageId: string,
+    payload: unknown
   ): Promise<void> {
-    const practice = startDailyPractice(message.payload.nickname);
-    this.sendAck(socketId, message.id, message.type, { ok: true, data: practice });
+    const parsedPayload = parseDailyPracticePayload(payload);
+
+    if (!parsedPayload) {
+      this.sendAck(socketId, messageId, "client:practice:dailyStart", { ok: false, error: INVALID_MESSAGE_ERROR });
+      return;
+    }
+
+    const practice = startDailyPractice(parsedPayload.nickname);
+    this.sendAck(socketId, messageId, "client:practice:dailyStart", { ok: true, data: practice });
   }
 
   private broadcastRoomState(room: RoomState): void {
@@ -531,7 +770,7 @@ export class RealtimeGatewayDurableObject {
     }
   }
 
-  private setSocketRoom(socketId: string, roomCode: string): void {
+  private setSocketRoom(socketId: string, roomCode: string, playerId?: string): void {
     const normalizedRoomCode = normalizeRoomCode(roomCode);
     const currentRoomCode = this.socketStates.get(socketId)?.roomCode;
 
@@ -539,8 +778,11 @@ export class RealtimeGatewayDurableObject {
       this.detachSocketFromRoom(socketId);
     }
 
-    const socketState = this.socketStates.get(socketId) ?? { socketId };
+    const socketState = this.socketStates.get(socketId) ?? { socketId, clientIp: "unknown" };
     socketState.roomCode = normalizedRoomCode;
+    if (playerId) {
+      socketState.playerId = playerId;
+    }
     this.socketStates.set(socketId, socketState);
 
     const sockets = this.roomSockets.get(normalizedRoomCode) ?? new Set<string>();
@@ -578,37 +820,122 @@ export class RealtimeGatewayDurableObject {
 
   private async persistRoom(roomCode: string): Promise<void> {
     const normalizedRoomCode = normalizeRoomCode(roomCode);
-    const room = getRoom(normalizedRoomCode);
+    this.clearPersistTimer(normalizedRoomCode);
     const storageKey = `${ROOM_STORAGE_PREFIX}${normalizedRoomCode}`;
+    const snapshot = this.createPersistedRoomSnapshot(normalizedRoomCode);
 
     try {
-      if (!room) {
+      if (!snapshot) {
         await this.state.storage.delete(storageKey);
         this.persistedRoomCodes.delete(normalizedRoomCode);
-        return;
+        this.playerSessionsByRoom.delete(normalizedRoomCode);
+      } else {
+        await this.state.storage.put(storageKey, snapshot);
+        this.persistedRoomCodes.add(normalizedRoomCode);
       }
-
-      await this.state.storage.put(storageKey, room);
-      this.persistedRoomCodes.add(normalizedRoomCode);
     } catch {
       // Persistence failures should not break live room handling.
     }
+
+    await this.scheduleMaintenanceAlarm();
+  }
+
+  private createPersistedRoomSnapshot(roomCode: string): PersistedRoomSnapshot | null {
+    const normalizedRoomCode = normalizeRoomCode(roomCode);
+    const room = getRoom(normalizedRoomCode);
+    const internalRoom = rooms.get(normalizedRoomCode);
+
+    if (!room || !internalRoom) {
+      return null;
+    }
+
+    const disconnectedAt: Record<string, number> = {};
+
+    for (const [playerId, player] of internalRoom.players.entries()) {
+      if (player.disconnectedAt !== undefined) {
+        disconnectedAt[playerId] = player.disconnectedAt;
+      }
+    }
+
+    return {
+      room,
+      playerSessions: Object.fromEntries(this.playerSessionsByRoom.get(normalizedRoomCode) ?? []),
+      disconnectedAt
+    };
+  }
+
+  private schedulePersistRoom(roomCode: string): void {
+    const normalizedRoomCode = normalizeRoomCode(roomCode);
+    const timers = this.timers.get(normalizedRoomCode) ?? {};
+
+    if (timers.persist) {
+      clearTimeout(timers.persist);
+    }
+
+    timers.persist = setTimeout(() => {
+      void this.persistRoom(normalizedRoomCode);
+    }, ROOM_PERSIST_DEBOUNCE_MS);
+    this.timers.set(normalizedRoomCode, timers);
   }
 
   private async restoreRooms(): Promise<void> {
     rooms.clear();
     this.persistedRoomCodes.clear();
-    const storedRooms = await this.state.storage.list<RoomState>({ prefix: ROOM_STORAGE_PREFIX });
+    this.playerSessionsByRoom.clear();
+    const storedRooms = await this.state.storage.list<unknown>({ prefix: ROOM_STORAGE_PREFIX });
 
-    for (const [key, room] of storedRooms) {
-      if (!room || typeof room !== "object") {
+    for (const [key, storedRoom] of storedRooms) {
+      const roomCode = normalizeRoomCode(key.slice(ROOM_STORAGE_PREFIX.length));
+      const snapshot = await parsePersistedRoomSnapshot(storedRoom, roomCode);
+
+      if (!snapshot) {
         continue;
       }
 
-      restoreRoomStateIfValid(room);
-      this.persistedRoomCodes.add(key.slice(ROOM_STORAGE_PREFIX.length));
-      this.syncRestoredRoom(room.roomCode);
-      await this.persistRoom(room.roomCode);
+      this.restorePersistedRoom(snapshot);
+      this.persistedRoomCodes.add(roomCode);
+      this.syncRestoredRoom(snapshot.room.roomCode);
+    }
+
+    await this.scheduleMaintenanceAlarm();
+  }
+
+  private restorePersistedRoom(snapshot: PersistedRoomSnapshot): void {
+    restoreRoomStateIfValid(snapshot.room);
+
+    const normalizedRoomCode = normalizeRoomCode(snapshot.room.roomCode);
+    const internalRoom = rooms.get(normalizedRoomCode);
+
+    if (internalRoom) {
+      for (const [playerId, player] of internalRoom.players.entries()) {
+        const disconnectedAt = snapshot.disconnectedAt[playerId];
+
+        if (disconnectedAt !== undefined) {
+          player.disconnectedAt = disconnectedAt;
+        } else if (!player.connected) {
+          player.disconnectedAt = Date.now();
+        }
+      }
+    }
+
+    this.playerSessionsByRoom.set(
+      normalizedRoomCode,
+      new Map(Object.entries(snapshot.playerSessions))
+    );
+  }
+
+  private async scheduleMaintenanceAlarm(): Promise<void> {
+    const nextAlarmAt = this.getNextMaintenanceAlarmAt();
+
+    try {
+      if (nextAlarmAt === null) {
+        await this.state.storage.deleteAlarm();
+        return;
+      }
+
+      await this.state.storage.setAlarm(Math.max(nextAlarmAt, Date.now()));
+    } catch {
+      // Alarm persistence should not break live room handling.
     }
   }
 
@@ -705,7 +1032,7 @@ export class RealtimeGatewayDurableObject {
       }
 
       this.broadcastRoomState(outcome.room);
-      void this.persistRoom(normalizedRoomCode);
+      this.schedulePersistRoom(normalizedRoomCode);
     }, BOT_TICK_MS);
 
     this.timers.set(normalizedRoomCode, timers);
@@ -727,7 +1054,24 @@ export class RealtimeGatewayDurableObject {
       clearInterval(timers.bot);
     }
 
+    if (timers.persist) {
+      clearTimeout(timers.persist);
+    }
+
     this.timers.delete(normalizedRoomCode);
+  }
+
+  private clearPersistTimer(roomCode: string): void {
+    const normalizedRoomCode = normalizeRoomCode(roomCode);
+    const timers = this.timers.get(normalizedRoomCode);
+
+    if (!timers?.persist) {
+      return;
+    }
+
+    clearTimeout(timers.persist);
+    delete timers.persist;
+    this.timers.set(normalizedRoomCode, timers);
   }
 
   private async cleanupStaleRooms(): Promise<void> {
@@ -742,6 +1086,8 @@ export class RealtimeGatewayDurableObject {
       this.clearRoomTimers(roomCode);
       await this.persistRoom(roomCode);
     }
+
+    await this.scheduleMaintenanceAlarm();
   }
 
   private async handleForfeits(): Promise<void> {
@@ -749,6 +1095,8 @@ export class RealtimeGatewayDurableObject {
       this.broadcastRoomState(room);
       await this.persistRoom(room.roomCode);
     }
+
+    await this.scheduleMaintenanceAlarm();
   }
 
   private async handleTimeAttackExpirations(): Promise<void> {
@@ -765,6 +1113,8 @@ export class RealtimeGatewayDurableObject {
       this.clearRoomTimers(result.roomCode);
       await this.persistRoom(result.roomCode);
     }
+
+    await this.scheduleMaintenanceAlarm();
   }
 
   private async handleStateRequest(request: Request, roomCode: string): Promise<Response> {
@@ -787,22 +1137,81 @@ export class RealtimeGatewayDurableObject {
       return new Response("Method not allowed", { status: 405 });
     }
 
-    const room = await parseRoomState(request, normalizedRoomCode);
+    const snapshot = await parsePersistedRoomSnapshot(request, normalizedRoomCode);
 
-    if (!room) {
+    if (!snapshot) {
       return new Response("Invalid room state", { status: 400 });
     }
 
-    restoreRoomStateIfValid(room);
-    this.syncRestoredRoom(room.roomCode);
-    this.broadcastRoomState(room);
-    await this.persistRoom(room.roomCode);
+    this.restorePersistedRoom(snapshot);
+    this.syncRestoredRoom(snapshot.room.roomCode);
+    this.broadcastRoomState(snapshot.room);
+    await this.persistRoom(snapshot.room.roomCode);
+    await this.scheduleMaintenanceAlarm();
 
     return Response.json({
       ok: true,
-      roomCode: room.roomCode,
-      connectedSockets: this.roomSockets.get(room.roomCode)?.size ?? 0
+      roomCode: snapshot.room.roomCode,
+      connectedSockets: this.roomSockets.get(snapshot.room.roomCode)?.size ?? 0
     });
+  }
+
+  private async runMaintenance(): Promise<void> {
+    await this.cleanupStaleRooms();
+    await this.handleForfeits();
+    await this.handleTimeAttackExpirations();
+  }
+
+  private getNextMaintenanceAlarmAt(): number | null {
+    let nextAlarmAt: number | null = null;
+
+    for (const room of rooms.values()) {
+      const deadline = getRoomMaintenanceDeadline(room);
+
+      if (deadline === null) {
+        continue;
+      }
+
+      if (nextAlarmAt === null || deadline < nextAlarmAt) {
+        nextAlarmAt = deadline;
+      }
+    }
+
+    return nextAlarmAt;
+  }
+
+  private recordPlayerSession(roomCode: string, playerId: string, sessionId: string): void {
+    const normalizedRoomCode = normalizeRoomCode(roomCode);
+    const sessions = this.playerSessionsByRoom.get(normalizedRoomCode) ?? new Map<string, string>();
+    sessions.set(playerId, sessionId);
+    this.playerSessionsByRoom.set(normalizedRoomCode, sessions);
+  }
+
+  private validateExistingPlayerSession(roomCode: string, guestId: string, sessionId: string): string | null {
+    const normalizedRoomCode = normalizeRoomCode(roomCode);
+    const room = rooms.get(normalizedRoomCode);
+
+    if (!room) {
+      return null;
+    }
+
+    const existingPlayer = room.players.get(guestId);
+
+    if (!existingPlayer) {
+      return null;
+    }
+
+    const storedSession = this.playerSessionsByRoom.get(normalizedRoomCode)?.get(guestId);
+
+    if (!storedSession) {
+      return "このプレイヤーの認証情報がありません。";
+    }
+
+    if (storedSession !== sessionId) {
+      return "このプレイヤーは別のセッションで使用されています。";
+    }
+
+    return null;
   }
 }
 
@@ -826,33 +1235,397 @@ function restoreRoomStateIfValid(room: RoomState): void {
   });
 }
 
-async function parseRoomState(request: Request, expectedRoomCode: string): Promise<RoomState | null> {
-  let payload: unknown;
+async function parsePersistedRoomSnapshot(
+  payloadOrRequest: unknown,
+  expectedRoomCode: string
+): Promise<PersistedRoomSnapshot | null> {
+  if (payloadOrRequest instanceof Request) {
+    let payload: unknown;
 
-  try {
-    payload = await request.json();
-  } catch {
+    try {
+      payload = await payloadOrRequest.json();
+    } catch {
+      return null;
+    }
+
+    return parsePersistedRoomSnapshotValue(payload, expectedRoomCode);
+  }
+
+  return parsePersistedRoomSnapshotValue(payloadOrRequest, expectedRoomCode);
+}
+
+function parsePersistedRoomSnapshotValue(
+  payload: unknown,
+  expectedRoomCode: string
+): PersistedRoomSnapshot | null {
+  if (!isRecord(payload)) {
     return null;
   }
 
-  if (typeof payload !== "object" || payload === null) {
+  const rawRoom = "room" in payload ? payload.room : payload;
+  const room = parseRoomStateValue(rawRoom, expectedRoomCode);
+
+  if (!room) {
     return null;
   }
 
-  const room = payload as RoomState;
+  return {
+    room,
+    playerSessions: parseStringRecord("playerSessions" in payload ? payload.playerSessions : undefined),
+    disconnectedAt: parseNumberRecord("disconnectedAt" in payload ? payload.disconnectedAt : undefined)
+  };
+}
 
-  if (typeof room.roomCode !== "string") {
+function parseRoomStateValue(payload: unknown, expectedRoomCode: string): RoomState | null {
+  if (!isRecord(payload) || typeof payload.roomCode !== "string") {
     return null;
   }
 
-  const roomCode = normalizeRoomCode(room.roomCode);
+  const roomCode = normalizeRoomCode(payload.roomCode);
 
   if (roomCode !== expectedRoomCode) {
     return null;
   }
 
   return {
-    ...room,
+    ...(payload as RoomState),
     roomCode: expectedRoomCode
   };
+}
+
+function parseClientMessage(rawMessage: string): ParsedClientMessage | null {
+  let message: unknown;
+
+  try {
+    message = JSON.parse(rawMessage) as unknown;
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(message)) {
+    return null;
+  }
+
+  if (typeof message.id !== "string" || typeof message.type !== "string") {
+    return null;
+  }
+
+  return {
+    id: message.id,
+    type: message.type,
+    payload: message.payload
+  };
+}
+
+function isCloudflareClientMessageType(type: string): type is CloudflareClientMessageType {
+  return CLOUDFLARE_CLIENT_MESSAGE_TYPES.includes(type as CloudflareClientMessageType);
+}
+
+function parseCreateRoomPayload(payload: unknown): CreateRoomPayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const nickname = readString(payload.nickname);
+  const guestId = readString(payload.guestId);
+  const sessionId = readString(payload.sessionId);
+  const deviceKind = readOptionalDeviceKind(payload.deviceKind);
+
+  if (!nickname || !guestId || !sessionId) {
+    return null;
+  }
+
+  return {
+    nickname,
+    guestId,
+    sessionId,
+    ...(deviceKind ? { deviceKind } : {})
+  };
+}
+
+function parseJoinRoomPayload(payload: unknown): JoinRoomPayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const basePayload = parseCreateRoomPayload(payload);
+  const roomCode = readRoomCode(payload.roomCode);
+
+  if (!basePayload || !roomCode) {
+    return null;
+  }
+
+  return {
+    ...basePayload,
+    roomCode
+  };
+}
+
+function parseRoomCodePayload(payload: unknown): RoomCodePayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const roomCode = readRoomCode(payload.roomCode);
+  if (!roomCode) {
+    return null;
+  }
+
+  return { roomCode };
+}
+
+function parseReadyPayload(payload: unknown): ReadyPayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const roomCode = readRoomCode(payload.roomCode);
+  const ready = readBoolean(payload.ready);
+
+  if (!roomCode || ready === null) {
+    return null;
+  }
+
+  return { roomCode, ready };
+}
+
+function parsePromptCategoryPayload(payload: unknown): PromptCategoryPayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const roomCode = readRoomCode(payload.roomCode);
+  const category = readPromptCategory(payload.category);
+
+  if (!roomCode || !category) {
+    return null;
+  }
+
+  return { roomCode, category };
+}
+
+function parseBotDifficultyPayload(payload: unknown): BotDifficultyPayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const roomCode = readRoomCode(payload.roomCode);
+  const difficulty = readBotDifficulty(payload.difficulty);
+
+  if (!roomCode || !difficulty) {
+    return null;
+  }
+
+  return { roomCode, difficulty };
+}
+
+function parseMatchRulePayload(payload: unknown): MatchRulePayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const roomCode = readRoomCode(payload.roomCode);
+  const rule = readMatchRule(payload.rule);
+
+  if (!roomCode || !rule) {
+    return null;
+  }
+
+  return { roomCode, rule };
+}
+
+function parseTypingPayload(payload: unknown): TypingPayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const roomCode = readRoomCode(payload.roomCode);
+  const progressIndex = readInteger(payload.progressIndex);
+  const correctCharacters = readInteger(payload.correctCharacters);
+  const totalTypedCharacters = readInteger(payload.totalTypedCharacters);
+  const mistakes = readInteger(payload.mistakes);
+
+  if (
+    !roomCode ||
+    progressIndex === null ||
+    correctCharacters === null ||
+    totalTypedCharacters === null ||
+    mistakes === null ||
+    correctCharacters > totalTypedCharacters ||
+    mistakes > totalTypedCharacters ||
+    progressIndex > totalTypedCharacters
+  ) {
+    return null;
+  }
+
+  return {
+    roomCode,
+    progressIndex,
+    correctCharacters,
+    totalTypedCharacters,
+    mistakes
+  };
+}
+
+function parsePracticePayload(payload: unknown): PracticePayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const nickname = readString(payload.nickname);
+  const category = readPromptCategory(payload.category);
+
+  if (!nickname || !category) {
+    return null;
+  }
+
+  return {
+    nickname,
+    category
+  };
+}
+
+function parseDailyPracticePayload(payload: unknown): DailyPracticePayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const nickname = readString(payload.nickname);
+
+  if (!nickname) {
+    return null;
+  }
+
+  return { nickname };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function readInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function readRoomCode(value: unknown): string | null {
+  const roomCode = readString(value);
+  return roomCode ? normalizeRoomCode(roomCode) : null;
+}
+
+function readOptionalDeviceKind(value: unknown): DeviceKind | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value === "mobile" || value === "desktop" ? value : undefined;
+}
+
+function readPromptCategory(value: unknown): PromptCategory | null {
+  return value === "short" || value === "standard" || value === "long" ? value : null;
+}
+
+function readBotDifficulty(value: unknown): BotDifficulty | null {
+  return value === "easy" || value === "normal" || value === "hard" ? value : null;
+}
+
+function readMatchRule(value: unknown): MatchRule | null {
+  return value === "race" || value === "timeAttack" || value === "hpBattle" ? value : null;
+}
+
+function parseStringRecord(value: unknown): Record<string, string> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const result: Record<string, string> = {};
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string" && entry.length > 0) {
+      result[key] = entry;
+    }
+  }
+
+  return result;
+}
+
+function parseNumberRecord(value: unknown): Record<string, number> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const result: Record<string, number> = {};
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "number" && Number.isFinite(entry)) {
+      result[key] = entry;
+    }
+  }
+
+  return result;
+}
+
+function getRoomMaintenanceDeadline(room: InternalRoomRecord): number | null {
+  const deadlines: number[] = [];
+
+  if (room.status === "countdown" && room.serverStartAt !== undefined) {
+    deadlines.push(room.serverStartAt);
+  }
+
+  if (room.status === "playing" && room.matchRule === "timeAttack" && room.matchEndsAt !== undefined) {
+    deadlines.push(room.matchEndsAt);
+  }
+
+  if (room.status === "playing") {
+    const disconnectedPlayers = [...room.players.values()].filter(
+      (player) => !player.connected && player.disconnectedAt !== undefined
+    );
+
+    for (const player of disconnectedPlayers) {
+      deadlines.push((player.disconnectedAt ?? Date.now()) + DISCONNECT_GRACE_MS);
+    }
+  }
+
+  const isExpiredByTtl =
+    room.status === "waiting" ||
+    room.status === "finished" ||
+    [...room.players.values()].every((player) => !player.connected);
+
+  if (isExpiredByTtl) {
+    deadlines.push(room.lastActivityAt + ROOM_TTL_MS);
+  }
+
+  if (deadlines.length === 0) {
+    return null;
+  }
+
+  return Math.min(...deadlines);
+}
+
+function normalizeClientIp(clientIp: string | undefined): string {
+  const trimmed = clientIp?.trim();
+  return trimmed ? trimmed : "unknown";
+}
+
+function readClientIp(headers: Headers): string {
+  const connectingIp = headers.get("cf-connecting-ip");
+
+  if (connectingIp) {
+    return connectingIp;
+  }
+
+  const forwardedFor = headers.get("x-forwarded-for");
+
+  if (forwardedFor) {
+    return forwardedFor.split(",")[0]?.trim() ?? "unknown";
+  }
+
+  return "unknown";
 }

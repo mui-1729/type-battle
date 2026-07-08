@@ -6,13 +6,13 @@ export default defineConfig({
   reporter: "list",
   webServer: [
     {
-      command: "NODE_ENV=test npm run start -w @type-battle/realtime",
-      url: "http://127.0.0.1:3001/health",
+      command: "PORT=8787 node apps/cloudflare-worker/scripts/e2e-server.mjs",
+      url: "http://127.0.0.1:8787/health",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000
     },
     {
-      command: "NEXT_PUBLIC_REALTIME_TRANSPORT=socketio NEXT_PUBLIC_REALTIME_URL=http://127.0.0.1:3001 npm run start -w @type-battle/web",
+      command: "NEXT_PUBLIC_REALTIME_TRANSPORT=cloudflare NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL=ws://127.0.0.1:8787 npm run start -w @type-battle/web",
       url: "http://127.0.0.1:3000",
       reuseExistingServer: !process.env.CI,
       timeout: 120_000

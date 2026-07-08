@@ -1,11 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RoomState } from "@type-battle/shared";
-import { createRoom, getRoom, rooms, startMatch } from "@type-battle/shared/room-engine";
+import {
+  createRoom,
+  getRoom,
+  resetRoomEngineState,
+  rooms,
+  startMatch
+} from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
 import worker, { RoomDurableObject } from "../src/worker.js";
 
 class FakeStorage {
   readonly values = new Map<string, unknown>();
+  alarmAt: number | null = null;
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
     return this.values.get(key) as T | undefined;
@@ -35,6 +42,18 @@ class FakeStorage {
 
   async deleteAll(): Promise<void> {
     this.values.clear();
+  }
+
+  async setAlarm(timestamp: number): Promise<void> {
+    this.alarmAt = timestamp;
+  }
+
+  async getAlarm(): Promise<number | null> {
+    return this.alarmAt;
+  }
+
+  async deleteAlarm(): Promise<void> {
+    this.alarmAt = null;
   }
 
   async sync(): Promise<void> {}
@@ -124,6 +143,15 @@ function parseMessages(socket: FakeSocket): Array<Record<string, unknown>> {
   return socket.messages.map((message) => JSON.parse(message) as Record<string, unknown>);
 }
 
+function findLastAck(
+  socket: FakeSocket,
+  command: string
+): Record<string, unknown> | undefined {
+  return [...parseMessages(socket)]
+    .reverse()
+    .find((message) => message.type === "server:ack" && message.command === command);
+}
+
 function createEnv(): { ROOMS: FakeDurableObjectNamespace; ROOM_STATE_WRITE_TOKEN: string } {
   return {
     ROOMS: new FakeDurableObjectNamespace(),
@@ -141,14 +169,14 @@ beforeEach(() => {
       return array;
     })
   });
-  rooms.clear();
+  resetRoomEngineState();
 });
 
 afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  rooms.clear();
+  resetRoomEngineState();
   vi.resetModules();
 });
 
@@ -233,6 +261,440 @@ describe("cloudflare gateway", () => {
           status: "countdown"
         }),
         serverStartAt: expect.any(Number)
+      }
+    });
+  });
+
+  it("rejects malformed payloads and applies room rate limits", async () => {
+    const storage = new FakeStorage();
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const creatorSocket = new FakeSocket();
+    const joinerSocket = new FakeSocket();
+
+    await gateway.ready;
+    gateway.attachSocket(creatorSocket as unknown as WebSocket, {
+      clientIp: "127.0.0.1"
+    });
+    gateway.attachSocket(joinerSocket as unknown as WebSocket, {
+      clientIp: "127.0.0.1"
+    });
+
+    creatorSocket.receive(
+      JSON.stringify({
+        id: "msg-invalid",
+        type: "client:room:create",
+        payload: {
+          nickname: 123,
+          guestId: "guest-invalid",
+          sessionId: "session-invalid"
+        }
+      })
+    );
+
+    expect(findLastAck(creatorSocket, "client:room:create")).toMatchObject({
+      type: "server:ack",
+      command: "client:room:create",
+      payload: {
+        ok: false,
+        error: "リクエストの形式が正しくありません。"
+      }
+    });
+
+    let roomCode = "";
+    for (let index = 0; index < 10; index += 1) {
+      creatorSocket.receive(
+        JSON.stringify({
+          id: `msg-create-${index}`,
+          type: "client:room:create",
+          payload: {
+            nickname: `Alice ${index}`,
+            guestId: "guest-create-limit",
+            sessionId: "session-create-limit"
+          }
+        })
+      );
+
+      const message = findLastAck(creatorSocket, "client:room:create");
+      expect(message).toMatchObject({
+        type: "server:ack",
+        command: "client:room:create",
+        payload: {
+          ok: true
+        }
+      });
+
+      if (!roomCode) {
+        roomCode = String((message?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
+      }
+    }
+
+    creatorSocket.receive(
+      JSON.stringify({
+        id: "msg-create-over-limit",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice over",
+          guestId: "guest-create-limit",
+          sessionId: "session-create-limit"
+        }
+      })
+    );
+
+    expect(findLastAck(creatorSocket, "client:room:create")).toMatchObject({
+      type: "server:ack",
+      command: "client:room:create",
+      payload: {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
+      }
+    });
+
+    expect(roomCode).toMatch(/^[A-Z0-9]{6}$/);
+
+    const initialMessageCount = joinerSocket.messages.length;
+    for (let index = 0; index < 30; index += 1) {
+      joinerSocket.receive(
+        JSON.stringify({
+          id: `msg-join-${index}`,
+          type: "client:room:join",
+          payload: {
+            roomCode,
+            nickname: `Bob ${index}`,
+            guestId: "guest-join-limit",
+            sessionId: "session-join-limit"
+          }
+        })
+      );
+    }
+
+    expect(findLastAck(joinerSocket, "client:room:join")).toMatchObject({
+      type: "server:ack",
+      command: "client:room:join",
+      payload: {
+        ok: true
+      }
+    });
+
+    joinerSocket.receive(
+      JSON.stringify({
+        id: "msg-join-over-limit",
+        type: "client:room:join",
+        payload: {
+          roomCode,
+          nickname: "Bob over",
+          guestId: "guest-join-limit",
+          sessionId: "session-join-limit"
+        }
+      })
+    );
+
+    expect(findLastAck(joinerSocket, "client:room:join")).toMatchObject({
+      type: "server:ack",
+      command: "client:room:join",
+      payload: {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
+      }
+    });
+    expect(joinerSocket.messages.length - initialMessageCount).toBeGreaterThanOrEqual(30);
+  });
+
+  it("drops over-limit typing progress updates without crashing", async () => {
+    const storage = new FakeStorage();
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await gateway.ready;
+    gateway.attachSocket(socket as unknown as WebSocket, {
+      clientIp: "127.0.0.1"
+    });
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-create-progress",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-progress",
+          sessionId: "session-progress"
+        }
+      })
+    );
+
+    const createAck = findLastAck(socket, "client:room:create");
+    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
+    expect(roomCode).toMatch(/^[A-Z0-9]{6}$/);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-start-progress",
+        type: "client:match:start",
+        payload: {
+          roomCode
+        }
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    const messageCountBeforeProgress = socket.messages.length;
+
+    for (let index = 0; index < 31; index += 1) {
+      socket.receive(
+        JSON.stringify({
+          id: `msg-progress-${index}`,
+          type: "client:typing:progress",
+          payload: {
+            roomCode,
+            progressIndex: 1,
+            correctCharacters: 1,
+            totalTypedCharacters: 1,
+            mistakes: 0
+          }
+        })
+      );
+    }
+
+    await Promise.resolve();
+
+    expect(socket.messages.length - messageCountBeforeProgress).toBe(30);
+  });
+
+  it("rejects wrong-session rejoins and invalidates the previous socket after a successful rejoin", async () => {
+    const storage = new FakeStorage();
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const originalSocket = new FakeSocket();
+    const wrongSessionSocket = new FakeSocket();
+    const rejoinSocket = new FakeSocket();
+
+    await gateway.ready;
+    gateway.attachSocket(originalSocket as unknown as WebSocket);
+    gateway.attachSocket(wrongSessionSocket as unknown as WebSocket);
+    gateway.attachSocket(rejoinSocket as unknown as WebSocket);
+
+    originalSocket.receive(
+      JSON.stringify({
+        id: "msg-create",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-alice-rejoin",
+          sessionId: "session-alice"
+        }
+      })
+    );
+
+    const createAck = findLastAck(originalSocket, "client:room:create");
+    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
+
+    wrongSessionSocket.receive(
+      JSON.stringify({
+        id: "msg-join-wrong",
+        type: "client:room:join",
+        payload: {
+          roomCode,
+          nickname: "Alice",
+          guestId: "guest-alice-rejoin",
+          sessionId: "session-intruder"
+        }
+      })
+    );
+
+    expect(findLastAck(wrongSessionSocket, "client:room:join")).toMatchObject({
+      type: "server:ack",
+      command: "client:room:join",
+      payload: {
+        ok: false,
+        error: expect.stringContaining("別のセッション")
+      }
+    });
+
+    rejoinSocket.receive(
+      JSON.stringify({
+        id: "msg-join-right",
+        type: "client:room:join",
+        payload: {
+          roomCode,
+          nickname: "Alice",
+          guestId: "guest-alice-rejoin",
+          sessionId: "session-alice"
+        }
+      })
+    );
+
+    expect(findLastAck(rejoinSocket, "client:room:join")).toMatchObject({
+      type: "server:ack",
+      command: "client:room:join",
+      payload: {
+        ok: true,
+        data: {
+          playerId: "guest-alice-rejoin"
+        }
+      }
+    });
+
+    rejoinSocket.receive(
+      JSON.stringify({
+        id: "msg-ready-new",
+        type: "client:player:ready",
+        payload: {
+          roomCode,
+          ready: true
+        }
+      })
+    );
+
+    await Promise.resolve();
+    expect(getRoom(roomCode)?.players.find((player) => player.id === "guest-alice-rejoin")?.ready).toBe(true);
+  });
+
+  it("schedules an alarm and forfeits a disconnected player after durable object eviction", async () => {
+    const storage = new FakeStorage();
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await gateway.ready;
+    gateway.attachSocket(socket as unknown as WebSocket);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-create",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-alice-forfeit",
+          sessionId: "session-alice"
+        }
+      })
+    );
+
+    const createAck = findLastAck(socket, "client:room:create");
+    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-start",
+        type: "client:match:start",
+        payload: {
+          roomCode
+        }
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    socket.close();
+    await Promise.resolve();
+
+    const storageKey = `room:${roomCode}`;
+    const snapshot = storage.values.get(storageKey) as
+      | { room?: RoomState; disconnectedAt?: Record<string, number> }
+      | undefined;
+
+    expect(snapshot?.room?.roomCode).toBe(roomCode);
+
+    if (snapshot?.room && snapshot.disconnectedAt) {
+      snapshot.disconnectedAt["guest-alice-forfeit"] = Date.now() - 40_000;
+      storage.values.set(storageKey, snapshot);
+    }
+
+    const restoredGateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+
+    await restoredGateway.ready;
+    expect(storage.alarmAt).not.toBeNull();
+    expect(rooms.get(roomCode)?.players.get("guest-alice-forfeit")?.disconnectedAt).toBeDefined();
+
+    await restoredGateway.alarm();
+
+    const updatedRoom = getRoom(roomCode);
+    expect(updatedRoom?.status).toBe("finished");
+    expect(updatedRoom?.players.find((player) => player.id === "guest-alice-forfeit")?.forfeited).toBe(true);
+  });
+
+  it("rejects invalid typing metric values", async () => {
+    const storage = new FakeStorage();
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await gateway.ready;
+    gateway.attachSocket(socket as unknown as WebSocket);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-create",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-alice-typing",
+          sessionId: "session-alice"
+        }
+      })
+    );
+
+    const createAck = findLastAck(socket, "client:room:create");
+    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-start",
+        type: "client:match:start",
+        payload: {
+          roomCode
+        }
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-progress-negative",
+        type: "client:typing:progress",
+        payload: {
+          roomCode,
+          progressIndex: -1,
+          correctCharacters: 0,
+          totalTypedCharacters: 0,
+          mistakes: 0
+        }
+      })
+    );
+
+    expect(parseMessages(socket).at(-1)).toMatchObject({
+      type: "server:error",
+      payload: {
+        message: "リクエストの形式が正しくありません。"
+      }
+    });
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-progress-invalid",
+        type: "client:typing:progress",
+        payload: {
+          roomCode,
+          progressIndex: 1,
+          correctCharacters: 3,
+          totalTypedCharacters: 2,
+          mistakes: 0
+        }
+      })
+    );
+
+    expect(parseMessages(socket).at(-1)).toMatchObject({
+      type: "server:error",
+      payload: {
+        message: "リクエストの形式が正しくありません。"
       }
     });
   });
