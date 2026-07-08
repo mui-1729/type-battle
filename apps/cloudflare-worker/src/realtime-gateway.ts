@@ -124,8 +124,6 @@ type InternalRoomRecord = (typeof rooms) extends Map<string, infer T> ? T : neve
 const OPEN_STATE = 1;
 const ROOM_STORAGE_PREFIX = "room:";
 const BOT_TICK_MS = 500;
-const ROOM_CLEANUP_INTERVAL_MS = 10_000;
-const TIME_ATTACK_POLL_INTERVAL_MS = 1_000;
 const ROOM_TTL_MS = 60_000;
 const DISCONNECT_GRACE_MS = 30_000;
 const ROOM_PERSIST_DEBOUNCE_MS = 1_000;
@@ -155,18 +153,6 @@ export class RealtimeGatewayDurableObject {
     this.ready = this.state.blockConcurrencyWhile(async () => {
       await this.restoreRooms();
     });
-
-    setInterval(() => {
-      void this.cleanupStaleRooms();
-    }, ROOM_CLEANUP_INTERVAL_MS);
-
-    setInterval(() => {
-      void this.handleForfeits();
-    }, ROOM_CLEANUP_INTERVAL_MS / 2);
-
-    setInterval(() => {
-      void this.handleTimeAttackExpirations();
-    }, TIME_ATTACK_POLL_INTERVAL_MS);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -315,12 +301,12 @@ export class RealtimeGatewayDurableObject {
 
     if (room) {
       this.broadcastRoomState(room);
-      await this.persistRoom(room.roomCode);
+      void this.persistRoom(room.roomCode);
       return;
     }
 
     if (roomCode) {
-      await this.persistRoom(roomCode);
+      void this.persistRoom(roomCode);
     }
   }
 
@@ -375,7 +361,7 @@ export class RealtimeGatewayDurableObject {
       }
     });
     this.broadcastRoomState(result.room);
-    await this.persistRoom(result.room.roomCode);
+    void this.persistRoom(result.room.roomCode);
   }
 
   private async handleJoinRoom(socketId: string, messageId: string, payload: unknown): Promise<void> {
@@ -441,7 +427,7 @@ export class RealtimeGatewayDurableObject {
       }
     });
     this.broadcastRoomState(result.room);
-    await this.persistRoom(result.room.roomCode);
+    void this.persistRoom(result.room.roomCode);
   }
 
   private async handleLeaveRoom(socketId: string, payload: unknown): Promise<void> {
@@ -458,11 +444,11 @@ export class RealtimeGatewayDurableObject {
 
     if (room) {
       this.broadcastRoomState(room);
-      await this.persistRoom(room.roomCode);
+      void this.persistRoom(room.roomCode);
       return;
     }
 
-    await this.persistRoom(roomCode);
+    void this.persistRoom(roomCode);
   }
 
   private async handleSetReady(socketId: string, payload: unknown): Promise<void> {
@@ -481,7 +467,7 @@ export class RealtimeGatewayDurableObject {
 
     this.setSocketRoom(socketId, room.roomCode);
     this.broadcastRoomState(room);
-    await this.persistRoom(room.roomCode);
+    void this.persistRoom(room.roomCode);
   }
 
   private async handleSetPromptCategory(
@@ -506,7 +492,7 @@ export class RealtimeGatewayDurableObject {
     this.setSocketRoom(socketId, result.room.roomCode);
     this.sendAck(socketId, messageId, "client:room:setPromptCategory", { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
-    await this.persistRoom(result.room.roomCode);
+    void this.persistRoom(result.room.roomCode);
   }
 
   private async handleSetBotDifficulty(
@@ -531,7 +517,7 @@ export class RealtimeGatewayDurableObject {
     this.setSocketRoom(socketId, result.room.roomCode);
     this.sendAck(socketId, messageId, "client:room:setBotDifficulty", { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
-    await this.persistRoom(result.room.roomCode);
+    void this.persistRoom(result.room.roomCode);
   }
 
   private async handleSetMatchRule(
@@ -556,7 +542,7 @@ export class RealtimeGatewayDurableObject {
     this.setSocketRoom(socketId, result.room.roomCode);
     this.sendAck(socketId, messageId, "client:room:setMatchRule", { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
-    await this.persistRoom(result.room.roomCode);
+    void this.persistRoom(result.room.roomCode);
   }
 
   private async handleStartMatch(socketId: string, messageId: string, payload: unknown): Promise<void> {
@@ -584,7 +570,7 @@ export class RealtimeGatewayDurableObject {
         serverStartAt: result.room.serverStartAt ?? Date.now()
       }
     });
-    await this.persistRoom(result.room.roomCode);
+    void this.persistRoom(result.room.roomCode);
     this.scheduleMatchStart(result.room.roomCode);
   }
 
@@ -674,7 +660,7 @@ export class RealtimeGatewayDurableObject {
     this.setSocketRoom(socketId, result.room.roomCode);
     this.sendAck(socketId, messageId, "client:match:rematch", { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
-    await this.persistRoom(result.room.roomCode);
+    void this.persistRoom(result.room.roomCode);
   }
 
   private async handlePracticeStart(

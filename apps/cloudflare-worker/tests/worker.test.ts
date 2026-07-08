@@ -3,6 +3,7 @@ import type { RoomState } from "@type-battle/shared";
 import {
   createRoom,
   getRoom,
+  markPlaying,
   resetRoomEngineState,
   rooms,
   startMatch
@@ -160,7 +161,6 @@ function createEnv(): { ROOMS: FakeDurableObjectNamespace; ROOM_STATE_WRITE_TOKE
 }
 
 beforeEach(() => {
-  vi.useFakeTimers();
   let uuidCounter = 0;
   vi.stubGlobal("crypto", {
     randomUUID: vi.fn(() => `uuid-${++uuidCounter}`),
@@ -172,7 +172,10 @@ beforeEach(() => {
   resetRoomEngineState();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  for (let index = 0; index < 10; index += 1) {
+    await Promise.resolve();
+  }
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -439,7 +442,7 @@ describe("cloudflare gateway", () => {
       })
     );
 
-    await vi.advanceTimersByTimeAsync(3_000);
+    markPlaying(roomCode);
     const messageCountBeforeProgress = socket.messages.length;
 
     for (let index = 0; index < 31; index += 1) {
@@ -588,7 +591,7 @@ describe("cloudflare gateway", () => {
       })
     );
 
-    await vi.advanceTimersByTimeAsync(3_000);
+    markPlaying(roomCode);
     socket.close();
     await Promise.resolve();
 
@@ -654,7 +657,7 @@ describe("cloudflare gateway", () => {
       })
     );
 
-    await vi.advanceTimersByTimeAsync(3_000);
+    markPlaying(roomCode);
 
     socket.receive(
       JSON.stringify({
@@ -742,16 +745,21 @@ describe("cloudflare gateway", () => {
       new FakeDurableObjectState(storage) as unknown as DurableObjectState
     );
 
-    await gateway.ready;
-    expect(getRoom(created.room.roomCode)?.status).toBe("countdown");
+    vi.useFakeTimers();
+    try {
+      await gateway.ready;
+      expect(getRoom(created.room.roomCode)?.status).toBe("countdown");
 
-    await vi.advanceTimersByTimeAsync(3_000);
-    expect(getRoom(created.room.roomCode)?.status).toBe("playing");
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(getRoom(created.room.roomCode)?.status).toBe("playing");
 
-    await vi.advanceTimersByTimeAsync(500);
-    const restoredRoom = getRoom(created.room.roomCode);
+      await vi.advanceTimersByTimeAsync(500);
+      const restoredRoom = getRoom(created.room.roomCode);
 
-    expect(restoredRoom?.players.some((player) => player.isBot && player.progressIndex > 0)).toBe(true);
+      expect(restoredRoom?.players.some((player) => player.isBot && player.progressIndex > 0)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
