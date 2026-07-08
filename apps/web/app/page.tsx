@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { Clipboard, Play, Swords, Unplug, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createRealtimeSocket, getDefaultRealtimeUrl, type RealtimeSocket, type RealtimeTransport } from "./_lib/realtime-client";
+import {
+  createRealtimeSocket,
+  getDefaultRealtimeUrl,
+  type RealtimeTransport,
+  type RealtimeSocket
+} from "./_lib/realtime-client";
 import {
   calculateAccuracy,
   calculateProgress,
@@ -93,8 +98,7 @@ type PracticeSession = {
   challengeKey?: string;
 };
 
-const REALTIME_TRANSPORT = (process.env.NEXT_PUBLIC_REALTIME_TRANSPORT?.trim() === "cloudflare" ? "cloudflare" : "socketio") as RealtimeTransport;
-const SOCKET_IO_REALTIME_URL = process.env.NEXT_PUBLIC_REALTIME_URL?.trim() ?? "";
+const REALTIME_TRANSPORT: RealtimeTransport = "cloudflare";
 const CLOUDFLARE_REALTIME_URL = process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL?.trim() ?? "";
 const REALTIME_UNAVAILABLE_MESSAGE = "Realtime transport is not configured.";
 const ROOM_CODE_KEY = "type-battle:room-code";
@@ -123,13 +127,12 @@ export default function HomePage() {
   const [error, setError] = useState("");
   const [countdownMs, setCountdownMs] = useState(0);
   const [matchTimerMs, setMatchTimerMs] = useState(0);
-  const [resumeAttempted, setResumeAttempted] = useState(false);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
   const localProgressRef = useRef<ProgressState>(createEmptyProgress());
   const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
-  const realtimeUrl = (REALTIME_TRANSPORT === "cloudflare" ? CLOUDFLARE_REALTIME_URL : SOCKET_IO_REALTIME_URL) || localRealtimeUrl;
+  const realtimeUrl = CLOUDFLARE_REALTIME_URL || localRealtimeUrl;
   const realtimeConfigured = realtimeUrl.length > 0;
   const guestId = guestSession?.guestId ?? "";
   const sessionId = guestSession?.sessionId ?? "";
@@ -518,15 +521,13 @@ export default function HomePage() {
   }, [mistakeTrendRecord, settingsHydrated]);
 
   useEffect(() => {
-    if (!connected || !guestId || !sessionId || !settingsHydrated || resumeAttempted) {
+    if (!connected || !guestId || !sessionId || !settingsHydrated) {
       return;
     }
 
     const storedRoomCode = window.localStorage.getItem(ROOM_CODE_KEY);
-    
-    // Resume only when there is a saved room and this tab is not already in one.
-    if (!storedRoomCode || room) {
-      setResumeAttempted(true);
+
+    if (!storedRoomCode) {
       return;
     }
 
@@ -536,7 +537,6 @@ export default function HomePage() {
       return;
     }
 
-    setResumeAttempted(true);
     socket.emit(
       "room:join",
       {
@@ -560,7 +560,7 @@ export default function HomePage() {
         clearPracticeState();
       }
     );
-  }, [clearPracticeState, connected, guestId, resumeAttempted, room, sessionId, settingsHydrated, updateGuestSession]);
+  }, [clearPracticeState, connected, guestId, sessionId, settingsHydrated, updateGuestSession]);
 
   useEffect(() => {
     if (!currentPlayer) {

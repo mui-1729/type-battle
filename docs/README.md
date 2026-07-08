@@ -12,7 +12,6 @@
 - [architecture.md](architecture.md): 技術構成、データ、リアルタイム同期
 - [cloudflare-migration-plan.md](cloudflare-migration-plan.md): Cloudflare realtime 移行の段階計画と free tier リスク
 - [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md): Cloudflare free tier の request / message 監査
-- [cloudflare-issue-tracker.md](cloudflare-issue-tracker.md): issue #21 の担当、依存関係、merge 順、conflict risk
 - [features/README.md](features/README.md): 機能別仕様
 - [features/feature-catalog.md](features/feature-catalog.md): 今後作る機能の一覧と優先度
 - [features/feature-backlog.md](features/feature-backlog.md): 実装 Issue 候補
@@ -59,10 +58,10 @@ MVP では次を優先します。
 - player settings modal / localStorage / theme / input guide / font size / reduced motion / sound wiring
 - private beta feedback issue flow
 - guest session
-- PostgreSQL persistence
+- Cloudflare Durable Object storage persistence
 - structured logging
 - room create / join / typing progress の軽量 rate limit
-- smoke test script と realtime Dockerfile
+- Cloudflare Worker E2E
 
 部分実装:
 

@@ -157,7 +157,7 @@ feat(web): Cloudflare realtime adapterを追加 (#16)
 ## Cloudflare 移行時の注意
 
 - `apps/web/app/page.tsx` は web integration 担当だけが触る。
-- `apps/realtime/src/rooms.ts` は room engine 担当だけが触る。
+- `packages/shared/src/room-engine.ts` は room engine 担当だけが触る。
 - `apps/cloudflare-worker/wrangler.toml` は Cloudflare 基盤担当と backend 担当で事前に同期する。
 - `package-lock.json` を触る PR は同時に複数出さない。
 - cleanup PR は最後に単独で出す。

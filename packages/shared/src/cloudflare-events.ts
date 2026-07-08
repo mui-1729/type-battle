@@ -29,7 +29,7 @@ type CloudflareClientCommandMap = {
   };
   "client:room:leave": {
     request: RoomCodePayload;
-    response: RoomState;
+    response: RoomState | null;
   };
   "client:player:ready": {
     request: ReadyPayload;

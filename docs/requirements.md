@@ -52,7 +52,7 @@
 - room code を知っている人だけが参加できる。
 - 人がいない場合は COM と遊べる。
 - 5-10 試合連続で大きな同期崩れなく遊べる。
-- デプロイ先で Web UI と realtime server が動く。
+- デプロイ先で Web UI と Cloudflare realtime backend が動く。
 - エラー、切断、試合開始、試合終了をログで追える。
 - room 作成、join、typing event に軽い rate limit がある。
 - room が無制限に残り続けない。
@@ -81,14 +81,13 @@
 - player settings の modal、localStorage 保存、theme、font size、reduced motion、input guide を実装する。
 - player settings の sound / countdown sound 再生を wiring する。
 - private beta feedback issue flow を用意する。
-- PostgreSQL 保存を導入する。
+- Cloudflare Durable Object storage に guest session と match result を保存する。
 - guest session を実装する。
 - structured logging、軽量 rate limit、health endpoint を実装する。
-- smoke test script と realtime Dockerfile を用意する。
+- Cloudflare Worker の health / WebSocket flow を E2E で確認する。
 
 ### まだ足りない要件
 
-- デプロイ先で Web UI と realtime server を常設運用する wiring。
 - branch protection を有効化する。
 
 ## Public Beta 要件

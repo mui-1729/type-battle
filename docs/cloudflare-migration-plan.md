@@ -4,21 +4,21 @@
 
 `type-battle` の realtime を Cloudflare 前提の構成へ段階的に移行し、外部公開時に Node.js の realtime server を別途運用しなくてもよい状態を目指す。
 
-この文書は issue #7 の成果物であり、issue #21 の担当分けと merge 順を前提にした移行計画として使う。issue #21 の追跡表は [docs/cloudflare-issue-tracker.md](cloudflare-issue-tracker.md) にまとめる。
+この文書は issue #7 の成果物であり、issue #21 の担当分けと merge 順を前提にした移行計画として使う。
 
 ## 現状
 
-現時点の repo は、Cloudflare 移行の「入口」はあるが、backend の本体はまだ Node/Socket.IO 側に残っている。
+現時点の repo は、realtime backend を Cloudflare Worker / Durable Object へ移行済み。
 
 | 領域 | 現状 | 含意 |
 | --- | --- | --- |
 | Web UI | Next.js を Vercel 前提で運用 | web は当面そのまま維持できる |
-| Realtime backend | `apps/realtime` の Node + Socket.IO server | Cloudflare 切替前の実動線 |
+| Realtime backend | `apps/cloudflare-worker` の Worker + Durable Object gateway | active backend |
 | Shared contract | `packages/shared/src/cloudflare-events.ts` がある | Web 側の transport 切替は既に契約化済み |
-| Web adapter | `apps/web/app/_lib/realtime-client.ts` が `socketio` / `cloudflare` を切替 | UI 変更と transport 変更を分離しやすい |
-| Cloudflare worker runtime | 最小 skeleton と room-state relay はある | wrangler 設定・deploy 導線・room authority の本格移植はこれから |
+| Web adapter | `apps/web/app/_lib/realtime-client.ts` が Cloudflare WebSocket を扱う | UI から transport 固有処理を分離 |
+| Cloudflare worker runtime | `apps/cloudflare-worker/*` | Durable Object gateway / tests / wrangler 設定 |
 
-つまり、現状は「Cloudflare にすぐ切り替えられる」ではなく、「契約とフロント側の受け口はできていて、worker の最小 skeleton もあるので、backend 本体と deploy 導線を別 issue で積める」状態。
+旧 Node realtime server は削除済みで、production / local E2E とも Cloudflare transport を使う。
 
 ## 推奨目標構成
 
@@ -54,7 +54,7 @@ Persistent storage
 
 - 既存の web は Vercel 前提で安定しているため、web の hosting まで同時に動かすとリスクが大きい
 - issue #21 の分担でも、web integration と Cloudflare backend を分けている
-- `apps/realtime/src/rooms.ts` の責務は大きく、そこへ Cloudflare 実装を重ねるより runtime を分けた方が衝突しにくい
+- 旧 Node realtime server へ Cloudflare 実装を重ねず、runtime を分けて移行した
 - 1 room 1 Durable Object なら、タイピング対戦のような強整合ゲーム状態と相性がよい
 
 ## Free tier / beta リスク
@@ -77,11 +77,11 @@ Cloudflare の無料枠や beta 運用で特に意識する点は次の通り。
 
 - issue #7 で現行構成と移行後構成を文書化する
 - issue #9 で event contract を固める
-- web 側の adapter が Socket.IO と Cloudflare の両方を扱えることを維持する
+- web 側の adapter が Cloudflare message contract を扱うことを維持する
 
-### Phase 2: Cloudflare worker の骨格と deploy 導線を整える
+### Phase 2: Cloudflare worker の骨格を作る
 
-- issue #8 で worker workspace と wrangler 設定・deploy 導線を固める
+- issue #8 で worker workspace と wrangler 設定を作る
 - local dev と deploy の最小導線を作る
 - `Env` と binding を docs と実装の両方で同期する
 
@@ -89,12 +89,12 @@ Cloudflare の無料枠や beta 運用で特に意識する点は次の通り。
 
 - issue #10 で runtime-neutral な room engine を切り出す
 - issue #11 〜 #15 で Durable Object room lifecycle、timer、disconnect、COM、永続化を積む
-- この段階では Node/Socket.IO 側の挙動を壊さない
+- この段階で Node realtime server から Cloudflare backend へ authority を移した
 
 ### Phase 4: web を Cloudflare に接続する
 
 - issue #16 〜 #19 で web adapter、E2E、cutover を進める
-- issue #20 で旧 Socket.IO realtime server を片付ける
+- issue #20 で旧 Node realtime server を片付ける
 
 ## 具体的な設計判断
 
@@ -111,7 +111,7 @@ Cloudflare の無料枠や beta 運用で特に意識する点は次の通り。
 
 ### Persistence
 
-- 既存の PostgreSQL 保存は、Cloudflare backend 移行時にそのまま hot path へ持ち込まない
+- 既存の外部 DB 保存は、Cloudflare backend 移行時にそのまま hot path へ持ち込まない
 - まずは realtime の authority を Cloudflare に移すことを優先し、長期保存の移植は別 issue に切る
 
 ### Observability
@@ -138,7 +138,6 @@ Cloudflare の無料枠や beta 運用で特に意識する点は次の通り。
 
 - issue #7
 - issue #21
-- [cloudflare-issue-tracker.md](cloudflare-issue-tracker.md)
 - [docs/architecture.md](architecture.md)
 - [docs/current-implementation.md](current-implementation.md)
 - [docs/features/deployment-private-beta.md](features/deployment-private-beta.md)
