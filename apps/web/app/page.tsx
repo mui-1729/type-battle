@@ -111,6 +111,7 @@ export default function HomePage() {
   const socketRef = useRef<ClientSocket | null>(null);
   const settingsRef = useRef(DEFAULT_PLAYER_SETTINGS);
   const nicknameRef = useRef(DEFAULT_PLAYER_SETTINGS.nickname);
+  const guestSessionRef = useRef<GuestSession | null>(null);
   const nicknameInputRef = useRef<HTMLInputElement | null>(null);
   const countdownSecondRef = useRef<number | null>(null);
   const typingInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -131,7 +132,6 @@ export default function HomePage() {
   const [error, setError] = useState("");
   const [countdownMs, setCountdownMs] = useState(0);
   const [matchTimerMs, setMatchTimerMs] = useState(0);
-  const [resumeAttempted, setResumeAttempted] = useState(false);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
@@ -403,7 +403,12 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    guestSessionRef.current = guestSession;
+  }, [guestSession]);
+
+  useEffect(() => {
     const session = loadGuestSession(window.localStorage);
+    guestSessionRef.current = session;
     setGuestSession(session);
     const loadedSettings = loadPlayerSettings(window.localStorage);
     nicknameRef.current = loadedSettings.nickname;
@@ -418,7 +423,40 @@ export default function HomePage() {
     const socket: ClientSocket = createRealtimeSocket({ transport: REALTIME_TRANSPORT, url: realtimeUrl });
     socketRef.current = socket;
 
-    socket.on("connect", () => setConnected(true));
+    socket.on("connect", () => {
+      setConnected(true);
+
+      const storedRoomCode = window.localStorage.getItem(ROOM_CODE_KEY);
+      const currentSession = guestSessionRef.current;
+
+      if (!storedRoomCode || !currentSession?.guestId || !currentSession.sessionId) {
+        return;
+      }
+
+      socket.emit(
+        "room:join",
+        {
+          roomCode: storedRoomCode,
+          nickname: normalizeNickname(nicknameRef.current),
+          guestId: currentSession.guestId,
+          sessionId: currentSession.sessionId,
+          deviceKind: detectDeviceKind()
+        },
+        (response) => {
+          if (!response.ok) {
+            window.localStorage.removeItem(ROOM_CODE_KEY);
+            return;
+          }
+
+          setError("");
+          setPlayerId(response.data.playerId);
+          setRoom(response.data.room);
+          setResult(response.data.room.result ?? null);
+          updateGuestSession();
+          clearPracticeState();
+        }
+      );
+    });
     socket.on("disconnect", () => setConnected(false));
     socket.on("room:state", (nextRoom) => {
       setRoom(nextRoom);
@@ -459,7 +497,7 @@ export default function HomePage() {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [realtimeConfigured, realtimeUrl, resetTyping]);
+  }, [clearPracticeState, realtimeConfigured, realtimeUrl, resetTyping, updateGuestSession]);
 
   useEffect(() => {
     if (!settingsHydrated) {
@@ -524,51 +562,6 @@ export default function HomePage() {
 
     persistMistakeTrendRecord(window.localStorage, mistakeTrendRecord);
   }, [mistakeTrendRecord, settingsHydrated]);
-
-  useEffect(() => {
-    if (!connected || !guestId || !sessionId || !settingsHydrated || resumeAttempted) {
-      return;
-    }
-
-    const storedRoomCode = window.localStorage.getItem(ROOM_CODE_KEY);
-    
-    // Resume only when there is a saved room and this tab is not already in one.
-    if (!storedRoomCode || room) {
-      setResumeAttempted(true);
-      return;
-    }
-
-    const socket = socketRef.current;
-
-    if (!socket) {
-      return;
-    }
-
-    setResumeAttempted(true);
-    socket.emit(
-      "room:join",
-      {
-        roomCode: storedRoomCode,
-        nickname: normalizeNickname(nicknameRef.current),
-        guestId,
-        sessionId,
-        deviceKind: detectDeviceKind()
-      },
-      (response) => {
-        if (!response.ok) {
-          window.localStorage.removeItem(ROOM_CODE_KEY);
-          return;
-        }
-
-        setError("");
-        setPlayerId(response.data.playerId);
-        setRoom(response.data.room);
-        setResult(response.data.room.result ?? null);
-        updateGuestSession();
-        clearPracticeState();
-      }
-    );
-  }, [clearPracticeState, connected, guestId, resumeAttempted, room, sessionId, settingsHydrated, updateGuestSession]);
 
   useEffect(() => {
     if (!currentPlayer) {
