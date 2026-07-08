@@ -699,6 +699,63 @@ describe("cloudflare gateway", () => {
     });
   });
 
+  it("ignores implausible typing jumps", async () => {
+    const storage = new FakeStorage();
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await gateway.ready;
+    gateway.attachSocket(socket as unknown as WebSocket);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-create-jump",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-alice-jump",
+          sessionId: "session-alice"
+        }
+      })
+    );
+
+    const createAck = findLastAck(socket, "client:room:create");
+    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-start-jump",
+        type: "client:match:start",
+        payload: {
+          roomCode
+        }
+      })
+    );
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    const progressBeforeJump = getRoom(roomCode)?.players.find((player) => player.id === "guest-alice-jump")?.progressIndex ?? -1;
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-progress-jump",
+        type: "client:typing:progress",
+        payload: {
+          roomCode,
+          progressIndex: 999,
+          correctCharacters: 999,
+          totalTypedCharacters: 999,
+          mistakes: 0
+        }
+      })
+    );
+
+    await Promise.resolve();
+
+    expect(getRoom(roomCode)?.players.find((player) => player.id === "guest-alice-jump")?.progressIndex).toBe(progressBeforeJump);
+  });
+
   it("restores persisted room snapshots for state reads", async () => {
     const storage = new FakeStorage();
     storage.values.set("room:AB12CD", baseRoom);

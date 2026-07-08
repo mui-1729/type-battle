@@ -21,6 +21,8 @@ const HP_BATTLE_HP_PER_PROMPT_CHAR = 5;
 const HP_BATTLE_MIN_HP = 50;
 const HP_BATTLE_ATTACK_DAMAGE = 5;
 const HP_BATTLE_MISTAKE_DAMAGE = 2;
+const MAX_TYPING_PROGRESS_DELTA = 50;
+const MAX_TYPED_CHARACTER_DELTA = 100;
 const BOT_PLAYER_ID = "bot_com_1";
 const BOT_NICKNAME = "COM";
 export const BOT_TICK_MS = 500;
@@ -704,17 +706,27 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
   const previousCorrectCharacters = player.correctCharacters;
   const previousMistakes = player.mistakes;
   const nextIndex = clamp(payload.progressIndex, player.progressIndex, promptLength);
+  const progressDelta = nextIndex - player.progressIndex;
+  const correctDelta = payload.correctCharacters - previousCorrectCharacters;
+  const typedDelta = payload.totalTypedCharacters - player.totalTypedCharacters;
+  const mistakeDelta = payload.mistakes - previousMistakes;
 
   // Basic suspicious detection: jumping too many characters
-  if (nextIndex - player.progressIndex > 10) {
+  if (
+    progressDelta > MAX_TYPING_PROGRESS_DELTA ||
+    correctDelta > MAX_TYPING_PROGRESS_DELTA ||
+    typedDelta > MAX_TYPED_CHARACTER_DELTA ||
+    mistakeDelta > MAX_TYPING_PROGRESS_DELTA
+  ) {
     engineHooks.logger?.warn?.({
       event: "suspicious_progress",
       roomCode: room.roomCode,
       playerId: player.id,
-      jumpSize: nextIndex - player.progressIndex,
+      jumpSize: progressDelta,
       from: player.progressIndex,
       to: nextIndex
     });
+    return;
   }
 
   const totalTypedCharacters = Math.max(payload.totalTypedCharacters, player.totalTypedCharacters);
@@ -743,10 +755,10 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
     return;
   }
 
-  const correctDelta = Math.max(correctCharacters - previousCorrectCharacters, 0);
-  const mistakeDelta = Math.max(mistakes - previousMistakes, 0);
+  const hpBattleCorrectDelta = Math.max(correctCharacters - previousCorrectCharacters, 0);
+  const hpBattleMistakeDelta = Math.max(mistakes - previousMistakes, 0);
 
-  if (correctDelta > 0) {
+  if (hpBattleCorrectDelta > 0) {
     for (const opponent of room.players.values()) {
       if (
         opponent.id === player.id ||
@@ -757,12 +769,12 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
         continue;
       }
 
-      applyHpDamage(opponent, correctDelta * HP_BATTLE_ATTACK_DAMAGE, room, now);
+      applyHpDamage(opponent, hpBattleCorrectDelta * HP_BATTLE_ATTACK_DAMAGE, room, now);
     }
   }
 
-  if (mistakeDelta > 0) {
-    applyHpDamage(player, mistakeDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
+  if (hpBattleMistakeDelta > 0) {
+    applyHpDamage(player, hpBattleMistakeDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
   }
 
   if (player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
