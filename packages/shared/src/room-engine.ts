@@ -21,6 +21,8 @@ const HP_BATTLE_HP_PER_PROMPT_CHAR = 5;
 const HP_BATTLE_MIN_HP = 50;
 const HP_BATTLE_ATTACK_DAMAGE = 5;
 const HP_BATTLE_MISTAKE_DAMAGE = 2;
+const MAX_TYPING_PROGRESS_DELTA = 50;
+const MAX_TYPED_CHARACTER_DELTA = 100;
 const BOT_PLAYER_ID = "bot_com_1";
 const BOT_NICKNAME = "COM";
 export const BOT_TICK_MS = 500;
@@ -86,6 +88,7 @@ const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistake
 // If it doesn't, I must update the shared package.
 type InternalPlayer = PlayerState & {
   socketId: string;
+  sessionId: string;
   disconnectedAt?: number;
 };
 
@@ -135,9 +138,17 @@ export function getMetrics() {
   };
 }
 
-export function restoreRoomState(room: RoomState): void {
+export function resetRoomEngineState(): void {
+  rooms.clear();
+  socketIndex.clear();
+  metrics.matchesStarted = 0;
+  metrics.matchesFinished = 0;
+  metrics.disconnectCount = 0;
+  metrics.serverErrors = 0;
+}
+
+export function restoreRoomState(room: RoomState, playerSessions: Record<string, string> = {}): void {
   const roomCode = room.roomCode.toUpperCase();
-  const now = Date.now();
 
   rooms.set(roomCode, {
     roomCode,
@@ -147,9 +158,11 @@ export function restoreRoomState(room: RoomState): void {
     botDifficulty: room.botDifficulty,
     promptCategory: room.promptCategory,
     promptHistory: room.prompt ? [room.prompt.id] : [],
-    players: new Map(room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId, now)])),
-    createdAt: now,
-    lastActivityAt: now,
+    players: new Map(
+      room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId, playerSessions[player.id] ?? "")])
+    ),
+    createdAt: Date.now(),
+    lastActivityAt: Date.now(),
     round: 1,
     ...(room.prompt ? { prompt: room.prompt } : {}),
     ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
@@ -162,14 +175,21 @@ export function createRoom(input: {
   nickname: string;
   guestId: string;
   socketId: string;
-  sessionId?: string;
+  sessionId: string;
   deviceKind?: DeviceKind;
 }): {
   room: RoomState;
   playerId: string;
 } {
   const roomCode = createUniqueRoomCode();
-  const player = createPlayer(input.guestId, input.nickname, input.socketId, true, input.deviceKind);
+  const player = createPlayer(
+    input.guestId,
+    input.nickname,
+    input.socketId,
+    true,
+    input.sessionId,
+    input.deviceKind
+  );
   const room: InternalRoom = {
     roomCode,
     hostPlayerId: player.id,
@@ -187,7 +207,7 @@ export function createRoom(input: {
   rooms.set(roomCode, room);
   socketIndex.set(input.socketId, { roomCode, playerId: player.id });
   void engineHooks.recordGuestSession?.({
-    sessionId: input.sessionId ?? input.guestId,
+    sessionId: input.sessionId,
     guestId: input.guestId,
     nickname: player.nickname,
     roomCode
@@ -201,7 +221,7 @@ export function joinRoom(input: {
   nickname: string;
   guestId: string;
   socketId: string;
-  sessionId?: string;
+  sessionId: string;
   deviceKind?: DeviceKind;
 }): { room: RoomState; playerId: string } | { error: string } {
   const room = rooms.get(input.roomCode.toUpperCase());
@@ -214,6 +234,15 @@ export function joinRoom(input: {
   const existing = room.players.get(input.guestId);
 
   if (existing) {
+    if (existing.sessionId !== input.sessionId) {
+      return { error: "このプレイヤーは別のセッションで使用されています。" };
+    }
+
+    const previousSocketId = existing.socketId;
+    if (previousSocketId && previousSocketId !== input.socketId) {
+      socketIndex.delete(previousSocketId);
+    }
+
     existing.socketId = input.socketId;
     existing.connected = true;
     delete existing.disconnectedAt;
@@ -221,7 +250,7 @@ export function joinRoom(input: {
     existing.deviceKind = input.deviceKind ?? existing.deviceKind ?? "desktop";
     socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: existing.id });
     void engineHooks.recordGuestSession?.({
-      sessionId: input.sessionId ?? input.guestId,
+      sessionId: input.sessionId,
       guestId: input.guestId,
       nickname: existing.nickname,
       roomCode: room.roomCode
@@ -237,11 +266,18 @@ export function joinRoom(input: {
     return { error: "このルームは満員です。" };
   }
 
-  const player = createPlayer(input.guestId, input.nickname, input.socketId, false, input.deviceKind);
+  const player = createPlayer(
+    input.guestId,
+    input.nickname,
+    input.socketId,
+    false,
+    input.sessionId,
+    input.deviceKind
+  );
   room.players.set(player.id, player);
   socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: player.id });
   void engineHooks.recordGuestSession?.({
-    sessionId: input.sessionId ?? input.guestId,
+    sessionId: input.sessionId,
     guestId: input.guestId,
     nickname: player.nickname,
     roomCode: room.roomCode
@@ -550,6 +586,10 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
 }
 
 export function updateProgress(socketId: string, payload: TypingProgress): RoomState | MatchResult | null {
+  if (!isValidTypingProgressPayload(payload)) {
+    return null;
+  }
+
   const context = getContext(socketId, payload.roomCode);
 
   if (!context || context.room.status !== "playing" || !context.room.prompt) {
@@ -567,6 +607,10 @@ export function updateProgress(socketId: string, payload: TypingProgress): RoomS
 }
 
 export function finishTyping(socketId: string, payload: TypingFinish): MatchResult | RoomState | null {
+  if (!isValidTypingProgressPayload(payload)) {
+    return null;
+  }
+
   const context = getContext(socketId, payload.roomCode);
 
   if (!context || context.room.status !== "playing" || !context.room.prompt) {
@@ -662,17 +706,27 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
   const previousCorrectCharacters = player.correctCharacters;
   const previousMistakes = player.mistakes;
   const nextIndex = clamp(payload.progressIndex, player.progressIndex, promptLength);
+  const progressDelta = nextIndex - player.progressIndex;
+  const correctDelta = payload.correctCharacters - previousCorrectCharacters;
+  const typedDelta = payload.totalTypedCharacters - player.totalTypedCharacters;
+  const mistakeDelta = payload.mistakes - previousMistakes;
 
   // Basic suspicious detection: jumping too many characters
-  if (nextIndex - player.progressIndex > 10) {
+  if (
+    progressDelta > MAX_TYPING_PROGRESS_DELTA ||
+    correctDelta > MAX_TYPING_PROGRESS_DELTA ||
+    typedDelta > MAX_TYPED_CHARACTER_DELTA ||
+    mistakeDelta > MAX_TYPING_PROGRESS_DELTA
+  ) {
     engineHooks.logger?.warn?.({
       event: "suspicious_progress",
       roomCode: room.roomCode,
       playerId: player.id,
-      jumpSize: nextIndex - player.progressIndex,
+      jumpSize: progressDelta,
       from: player.progressIndex,
       to: nextIndex
     });
+    return;
   }
 
   const totalTypedCharacters = Math.max(payload.totalTypedCharacters, player.totalTypedCharacters);
@@ -701,10 +755,10 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
     return;
   }
 
-  const correctDelta = Math.max(correctCharacters - previousCorrectCharacters, 0);
-  const mistakeDelta = Math.max(mistakes - previousMistakes, 0);
+  const hpBattleCorrectDelta = Math.max(correctCharacters - previousCorrectCharacters, 0);
+  const hpBattleMistakeDelta = Math.max(mistakes - previousMistakes, 0);
 
-  if (correctDelta > 0) {
+  if (hpBattleCorrectDelta > 0) {
     for (const opponent of room.players.values()) {
       if (
         opponent.id === player.id ||
@@ -715,12 +769,12 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
         continue;
       }
 
-      applyHpDamage(opponent, correctDelta * HP_BATTLE_ATTACK_DAMAGE, room, now);
+      applyHpDamage(opponent, hpBattleCorrectDelta * HP_BATTLE_ATTACK_DAMAGE, room, now);
     }
   }
 
-  if (mistakeDelta > 0) {
-    applyHpDamage(player, mistakeDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
+  if (hpBattleMistakeDelta > 0) {
+    applyHpDamage(player, hpBattleMistakeDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
   }
 
   if (player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
@@ -860,10 +914,6 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     publicPlayer.finishTimeMs = player.finishTimeMs;
   }
 
-  if (player.disconnectedAt !== undefined) {
-    publicPlayer.disconnectedAt = player.disconnectedAt;
-  }
-
   return publicPlayer;
 }
 
@@ -883,6 +933,7 @@ function addBotPlayer(room: InternalRoom): void {
     ready: true,
     isHost: false,
     isBot: true,
+    sessionId: BOT_PLAYER_ID,
     deviceKind: "desktop",
     progressIndex: 0,
     correctCharacters: 0,
@@ -900,11 +951,13 @@ function createPlayer(
   nickname: string,
   socketId: string,
   isHost: boolean,
+  sessionId: string,
   deviceKind: DeviceKind = "desktop"
 ): InternalPlayer {
   return {
     id,
     socketId,
+    sessionId,
     nickname: normalizeNickname(nickname),
     connected: true,
     ready: false,
@@ -922,17 +975,12 @@ function createPlayer(
   };
 }
 
-function toInternalPlayer(player: PlayerState, hostPlayerId: string, disconnectedAt: number): InternalPlayer {
-  const isBot = player.isBot;
-  const nextDisconnectedAt = isBot ? undefined : player.disconnectedAt ?? disconnectedAt;
-
+function toInternalPlayer(player: PlayerState, hostPlayerId: string, sessionId: string): InternalPlayer {
   return {
     ...player,
-    connected: isBot ? player.connected : false,
-    ready: isBot ? player.ready : false,
     socketId: player.id,
-    isHost: player.id === hostPlayerId,
-    ...(nextDisconnectedAt !== undefined ? { disconnectedAt: nextDisconnectedAt } : {})
+    sessionId,
+    isHost: player.id === hostPlayerId
   };
 }
 
@@ -965,8 +1013,8 @@ function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
   return selected;
 }
 
-const ROOM_TTL_MS = 60 * 1000; // 1 minute
-const DISCONNECT_GRACE_MS = 30_000;
+export const ROOM_TTL_MS = 60 * 1000; // 1 minute
+export const DISCONNECT_GRACE_MS = 30_000;
 
 export function cleanupExpiredRooms(): void {
   const now = Date.now();
@@ -1072,6 +1120,22 @@ export function startDailyPractice(nickname: string): { practiceId: string; prom
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(Math.floor(value), min), max);
+}
+
+function isValidTypingProgressPayload(payload: TypingProgress): boolean {
+  return (
+    Number.isInteger(payload.progressIndex) &&
+    payload.progressIndex >= 0 &&
+    Number.isInteger(payload.correctCharacters) &&
+    payload.correctCharacters >= 0 &&
+    Number.isInteger(payload.totalTypedCharacters) &&
+    payload.totalTypedCharacters >= 0 &&
+    Number.isInteger(payload.mistakes) &&
+    payload.mistakes >= 0 &&
+    payload.correctCharacters <= payload.totalTypedCharacters &&
+    payload.mistakes <= payload.totalTypedCharacters &&
+    payload.progressIndex <= payload.totalTypedCharacters
+  );
 }
 
 function maybeFinalizeRoom(room: InternalRoom): MatchResult | null {

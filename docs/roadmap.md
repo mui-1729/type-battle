@@ -69,7 +69,7 @@
 - [x] player settings sound wiring
 - [x] private beta feedback issue flow
 - [x] web hosting provider wiring
-- [x] realtime external deploy
+- [ ] realtime external deploy
 - [ ] branch protection
 - [x] PostgreSQL 保存
 - [x] guest session

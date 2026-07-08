@@ -1,31 +1,40 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  createRoom,
-  joinRoom,
-  getRoom,
-  metrics,
+  createRoom as createRoomImpl,
+  joinRoom as joinRoomImpl,
   rooms,
-  restoreRoomState,
+  resetRoomEngineState,
+  setReady,
   setMatchRule,
   setRoomEngineConfig,
   startMatch
 } from "../src/room-engine.js";
 
+function testSessionId(guestId: string): string {
+  return `session:${guestId}`;
+}
+
+function createRoom(input: Parameters<typeof createRoomImpl>[0]): ReturnType<typeof createRoomImpl> {
+  return createRoomImpl({
+    ...input,
+    sessionId: input.sessionId ?? testSessionId(input.guestId)
+  });
+}
+
+function joinRoom(input: Parameters<typeof joinRoomImpl>[0]): ReturnType<typeof joinRoomImpl> {
+  return joinRoomImpl({
+    ...input,
+    sessionId: input.sessionId ?? testSessionId(input.guestId)
+  });
+}
+
 afterEach(() => {
-  rooms.clear();
-  metrics.matchesStarted = 0;
-  metrics.matchesFinished = 0;
-  metrics.disconnectCount = 0;
-  metrics.serverErrors = 0;
+  resetRoomEngineState();
   setRoomEngineConfig({ timeAttackMs: 30_000 });
 });
 
 beforeEach(() => {
-  rooms.clear();
-  metrics.matchesStarted = 0;
-  metrics.matchesFinished = 0;
-  metrics.disconnectCount = 0;
-  metrics.serverErrors = 0;
+  resetRoomEngineState();
   setRoomEngineConfig({ timeAttackMs: 30_000 });
 });
 
@@ -61,23 +70,44 @@ describe("room engine config", () => {
     expect(started.room.matchEndsAt).toBe(started.room.serverStartAt! + 5_000);
   });
 
-  it("restores disconnected players with a timestamp", () => {
+  it("invalidates the previous socket when an existing player rejoins", () => {
     const created = createRoom({
       nickname: "Alice",
-      guestId: "guest_alice_restore",
-      socketId: "socket_alice_restore"
+      guestId: "guest_alice_rebind",
+      socketId: "socket_alice_rebind_1"
     });
 
-    restoreRoomState(created.room);
+    const rejoined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Alice",
+      guestId: "guest_alice_rebind",
+      socketId: "socket_alice_rebind_2"
+    });
 
-    const restored = getRoom(created.room.roomCode);
+    expect("error" in rejoined).toBe(false);
 
-    expect(restored).not.toBeNull();
-    expect(restored?.players[0]).toEqual(
-      expect.objectContaining({
-        connected: false,
-        disconnectedAt: expect.any(Number)
-      })
-    );
+    expect(setReady("socket_alice_rebind_1", created.room.roomCode, true)).toBeNull();
+    expect(setReady("socket_alice_rebind_2", created.room.roomCode, true)).not.toBeNull();
+  });
+
+  it("rejects a rejoin from another session", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_session_guard",
+      socketId: "socket_alice_session_guard_1",
+      sessionId: "session-alice"
+    });
+
+    const rejected = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Alice",
+      guestId: "guest_alice_session_guard",
+      socketId: "socket_alice_session_guard_2",
+      sessionId: "session-intruder"
+    });
+
+    expect(rejected).toEqual({
+      error: "このプレイヤーは別のセッションで使用されています。"
+    });
   });
 });

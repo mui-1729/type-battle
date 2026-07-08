@@ -114,14 +114,14 @@
 ### Deployment automation
 
 - web は Vercel 前提で進める。
-- production build の realtime 既定は Socket.IO のままにしている。
+- production build は Socket.IO transport を既定にしている。
 - Playwright E2E は Socket.IO を明示してローカル realtime server を使う。
 
 ### Cloudflare transport contract
 
 - `packages/shared/src/cloudflare-events.ts` に Cloudflare 向けの message contract がある。
 - `apps/web/app/_lib/realtime-client.ts` で Socket.IO / Cloudflare transport を切り替えられる。
-- `apps/cloudflare-worker` に Cloudflare 側の realtime backend があり、切替先として用意している。
+- `apps/cloudflare-worker` に Cloudflare 側の realtime backend があり、切替用 transport として残している。
 
 ## 未実装
 

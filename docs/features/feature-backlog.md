@@ -12,7 +12,7 @@
 - [x] `feat(release): wire web deployment on Vercel`
   - Vercel への自動 deploy と preview / production の切り替えを整える。
   - repo 内の build 物と smoke test 手順をつなぐ。
-  - production では Cloudflare realtime を既定接続先にする。
+  - production では Socket.IO realtime を既定接続先にする。
 - [x] `feat(beta): add private beta feedback issue flow`
   - 不具合報告を GitHub Issue にすぐ切り出せるようにする。
   - 再現条件のテンプレートを用意する。
