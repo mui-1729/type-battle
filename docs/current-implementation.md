@@ -109,17 +109,17 @@
 
 ## 部分実装
 
-### Deployment automation
-
-- web は Vercel 前提で進める。
-- production build は Cloudflare transport を既定にしている。
-- Playwright E2E は Cloudflare transport を明示し、local Worker bridge server を使う。
-
 ### Cloudflare transport contract
 
 - `packages/shared/src/cloudflare-events.ts` に Cloudflare 向けの message contract がある。
 - `apps/web/app/_lib/realtime-client.ts` で Cloudflare WebSocket transport を扱う。
 - `apps/cloudflare-worker` に Cloudflare 側の realtime backend があり、production ではそれを既定にしている。
+
+### Deployment automation
+
+- web は Vercel 前提で進める。
+- production build は Cloudflare transport を既定にしている。
+- Playwright E2E は Cloudflare transport を明示し、local Worker bridge server を使う。
 
 ## 未実装
 
