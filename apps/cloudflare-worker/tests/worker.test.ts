@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RoomState } from "@type-battle/shared";
-import { rooms } from "@type-battle/shared/room-engine";
+import { createRoom, getRoom, rooms, startMatch } from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
 import worker, { RoomDurableObject } from "../src/worker.js";
 
@@ -257,6 +257,39 @@ describe("cloudflare gateway", () => {
         roomCode: "AB12CD"
       })
     });
+  });
+
+  it("restores countdown timers and bot progress after a restart", async () => {
+    const storage = new FakeStorage();
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest-alice-restart",
+      socketId: "socket-alice-restart"
+    });
+
+    const started = startMatch("socket-alice-restart", created.room.roomCode);
+
+    expect("error" in started).toBe(false);
+    if ("error" in started) {
+      return;
+    }
+
+    storage.values.set(`room:${created.room.roomCode}`, started.room);
+
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+
+    await gateway.ready;
+    expect(getRoom(created.room.roomCode)?.status).toBe("countdown");
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(getRoom(created.room.roomCode)?.status).toBe("playing");
+
+    await vi.advanceTimersByTimeAsync(500);
+    const restoredRoom = getRoom(created.room.roomCode);
+
+    expect(restoredRoom?.players.some((player) => player.isBot && player.progressIndex > 0)).toBe(true);
   });
 });
 
