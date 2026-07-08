@@ -259,6 +259,31 @@ describe("cloudflare gateway", () => {
     });
   });
 
+  it("rejects malformed client payloads without throwing", async () => {
+    const storage = new FakeStorage();
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await gateway.ready;
+    gateway.attachSocket(socket as unknown as WebSocket);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-bad",
+        type: "client:room:create"
+      })
+    );
+
+    expect(parseMessages(socket)[0]).toMatchObject({
+      type: "server:error",
+      payload: {
+        message: "Invalid message payload."
+      }
+    });
+  });
+
   it("restores countdown timers and bot progress after a restart", async () => {
     const storage = new FakeStorage();
     const created = createRoom({

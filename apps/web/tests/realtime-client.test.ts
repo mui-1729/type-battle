@@ -245,4 +245,86 @@ describe("realtime client", () => {
       payload: { roomCode: "ROOM1" }
     });
   });
+
+  it("sends reconnect join before flushing queued gameplay messages", async () => {
+    const { createRealtimeSocket } = await import("../app/_lib/realtime-client");
+    const connectHandler = vi.fn();
+    let connectCount = 0;
+
+    const socket = createRealtimeSocket({ transport: "cloudflare", url: "ws://localhost:8787" });
+    const firstSocket = MockWebSocket.instances[0]!;
+
+    socket.on("connect", () => {
+      connectCount += 1;
+      connectHandler();
+
+      if (connectCount !== 2) {
+        return;
+      }
+
+      socket.emit(
+        "room:join",
+        {
+          roomCode: "ROOM1",
+          nickname: "Alice",
+          guestId: "guest-1",
+          sessionId: "session-1",
+          deviceKind: "desktop"
+        },
+        vi.fn()
+      );
+    });
+
+    socket.emit("typing:progress", {
+      roomCode: "ROOM1",
+      progressIndex: 1,
+      correctCharacters: 1,
+      totalTypedCharacters: 1,
+      mistakes: 0
+    });
+
+    firstSocket.open();
+    expect(firstSocket.sent).toHaveLength(1);
+    expect(JSON.parse(firstSocket.sent[0] ?? "{}")).toMatchObject({
+      type: "client:typing:progress",
+      payload: {
+        roomCode: "ROOM1",
+        progressIndex: 1
+      }
+    });
+
+    firstSocket.close();
+    socket.emit("typing:progress", {
+      roomCode: "ROOM1",
+      progressIndex: 2,
+      correctCharacters: 2,
+      totalTypedCharacters: 2,
+      mistakes: 0
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    const secondSocket = MockWebSocket.instances[1]!;
+    secondSocket.open();
+
+    expect(connectHandler).toHaveBeenCalledTimes(2);
+    expect(secondSocket.sent).toHaveLength(2);
+    expect(JSON.parse(secondSocket.sent[0] ?? "{}")).toMatchObject({
+      type: "client:room:join",
+      payload: {
+        roomCode: "ROOM1",
+        nickname: "Alice",
+        guestId: "guest-1",
+        sessionId: "session-1",
+        deviceKind: "desktop"
+      }
+    });
+    expect(JSON.parse(secondSocket.sent[1] ?? "{}")).toMatchObject({
+      type: "client:typing:progress",
+      payload: {
+        roomCode: "ROOM1",
+        progressIndex: 2
+      }
+    });
+  });
 });

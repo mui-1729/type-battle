@@ -31,6 +31,7 @@ import type {
   CloudflareServerEventType,
   CloudflareServerMessage
 } from "@type-battle/shared/cloudflare-events";
+import type { DeviceKind, MatchRule, PromptCategory } from "@type-battle/shared";
 import { normalizeRoomCode, resolveRoomRoute } from "./room-routing.js";
 
 type CloudflareSocketLike = {
@@ -166,48 +167,104 @@ export class RealtimeGatewayDurableObject {
       return;
     }
 
-    switch (message.type) {
-      case "client:room:create":
-        await this.handleCreateRoom(socketId, message);
-        return;
-      case "client:room:join":
-        await this.handleJoinRoom(socketId, message);
-        return;
-      case "client:room:leave":
-        await this.handleLeaveRoom(socketId, message);
-        return;
-      case "client:player:ready":
-        await this.handleSetReady(socketId, message);
-        return;
-      case "client:room:setPromptCategory":
-        await this.handleSetPromptCategory(socketId, message);
-        return;
-      case "client:room:setBotDifficulty":
-        await this.handleSetBotDifficulty(socketId, message);
-        return;
-      case "client:room:setMatchRule":
-        await this.handleSetMatchRule(socketId, message);
-        return;
-      case "client:match:start":
-        await this.handleStartMatch(socketId, message);
-        return;
-      case "client:typing:progress":
-        await this.handleTypingProgress(socketId, message);
-        return;
-      case "client:typing:finish":
-        await this.handleTypingFinish(socketId, message);
-        return;
-      case "client:match:rematch":
-        await this.handleRematch(socketId, message);
-        return;
-      case "client:practice:start":
-        await this.handlePracticeStart(socketId, message);
-        return;
-      case "client:practice:dailyStart":
-        await this.handleDailyPracticeStart(socketId, message);
-        return;
-      default:
-        return;
+    try {
+      switch (message.type) {
+        case "client:room:create":
+          if (!isCreateRoomPayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleCreateRoom(socketId, message);
+          return;
+        case "client:room:join":
+          if (!isJoinRoomPayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleJoinRoom(socketId, message);
+          return;
+        case "client:room:leave":
+          if (!isRoomCodePayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleLeaveRoom(socketId, message);
+          return;
+        case "client:player:ready":
+          if (!isReadyPayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleSetReady(socketId, message);
+          return;
+        case "client:room:setPromptCategory":
+          if (!isRoomCodeAndPromptCategoryPayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleSetPromptCategory(socketId, message);
+          return;
+        case "client:room:setBotDifficulty":
+          if (!isRoomCodeAndBotDifficultyPayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleSetBotDifficulty(socketId, message);
+          return;
+        case "client:room:setMatchRule":
+          if (!isRoomCodeAndMatchRulePayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleSetMatchRule(socketId, message);
+          return;
+        case "client:match:start":
+          if (!isRoomCodePayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleStartMatch(socketId, message);
+          return;
+        case "client:typing:progress":
+          if (!isTypingProgressPayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleTypingProgress(socketId, message);
+          return;
+        case "client:typing:finish":
+          if (!isTypingFinishPayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleTypingFinish(socketId, message);
+          return;
+        case "client:match:rematch":
+          if (!isRoomCodePayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleRematch(socketId, message);
+          return;
+        case "client:practice:start":
+          if (!isPracticeStartPayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handlePracticeStart(socketId, message);
+          return;
+        case "client:practice:dailyStart":
+          if (!isPracticeDailyStartPayload(message.payload)) {
+            this.sendError(socketId, "Invalid message payload.");
+            return;
+          }
+          await this.handleDailyPracticeStart(socketId, message);
+          return;
+        default:
+          return;
+      }
+    } catch {
+      this.sendError(socketId, "Failed to handle message.");
     }
   }
 
@@ -805,6 +862,110 @@ export class RealtimeGatewayDurableObject {
 
 function isWebSocketUpgrade(request: Request): boolean {
   return request.headers.get("Upgrade")?.toLowerCase() === "websocket";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === "boolean";
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isDeviceKind(value: unknown): value is DeviceKind | undefined {
+  return value === undefined || value === "mobile" || value === "desktop";
+}
+
+function isPromptCategory(value: unknown): value is PromptCategory {
+  return value === "short" || value === "standard" || value === "long";
+}
+
+function isMatchRule(value: unknown): value is MatchRule {
+  return value === "race" || value === "timeAttack" || value === "hpBattle";
+}
+
+function isRoomCodePayload(payload: unknown): payload is { roomCode: string } {
+  return isRecord(payload) && isString(payload.roomCode);
+}
+
+function isCreateRoomPayload(
+  payload: unknown
+): payload is { nickname: string; guestId: string; sessionId?: string; deviceKind?: DeviceKind } {
+  return (
+    isRecord(payload) &&
+    isString(payload.nickname) &&
+    isString(payload.guestId) &&
+    (!("sessionId" in payload) || isString(payload.sessionId)) &&
+    (!("deviceKind" in payload) || isDeviceKind(payload.deviceKind))
+  );
+}
+
+function isJoinRoomPayload(
+  payload: unknown
+): payload is { roomCode: string; nickname: string; guestId: string; sessionId?: string; deviceKind?: DeviceKind } {
+  return (
+    isRecord(payload) &&
+    isString(payload.roomCode) &&
+    isString(payload.nickname) &&
+    isString(payload.guestId) &&
+    (!("sessionId" in payload) || isString(payload.sessionId)) &&
+    (!("deviceKind" in payload) || isDeviceKind(payload.deviceKind))
+  );
+}
+
+function isReadyPayload(payload: unknown): payload is { roomCode: string; ready: boolean } {
+  return isRecord(payload) && isString(payload.roomCode) && isBoolean(payload.ready);
+}
+
+function isRoomCodeAndPromptCategoryPayload(payload: unknown): payload is { roomCode: string; category: PromptCategory } {
+  return isRecord(payload) && isString(payload.roomCode) && isPromptCategory(payload.category);
+}
+
+function isRoomCodeAndBotDifficultyPayload(payload: unknown): payload is { roomCode: string; difficulty: "easy" | "normal" | "hard" } {
+  return isRecord(payload) && isString(payload.roomCode) && (payload.difficulty === "easy" || payload.difficulty === "normal" || payload.difficulty === "hard");
+}
+
+function isRoomCodeAndMatchRulePayload(payload: unknown): payload is { roomCode: string; rule: MatchRule } {
+  return isRecord(payload) && isString(payload.roomCode) && isMatchRule(payload.rule);
+}
+
+function isTypingProgressPayload(
+  payload: unknown
+): payload is {
+  roomCode: string;
+  progressIndex: number;
+  correctCharacters: number;
+  totalTypedCharacters: number;
+  mistakes: number;
+} {
+  return (
+    isRecord(payload) &&
+    isString(payload.roomCode) &&
+    isFiniteNumber(payload.progressIndex) &&
+    isFiniteNumber(payload.correctCharacters) &&
+    isFiniteNumber(payload.totalTypedCharacters) &&
+    isFiniteNumber(payload.mistakes)
+  );
+}
+
+function isTypingFinishPayload(payload: unknown): payload is Parameters<typeof finishTyping>[1] {
+  return isTypingProgressPayload(payload);
+}
+
+function isPracticeStartPayload(payload: unknown): payload is { nickname: string; category: PromptCategory } {
+  return isRecord(payload) && isString(payload.nickname) && isPromptCategory(payload.category);
+}
+
+function isPracticeDailyStartPayload(payload: unknown): payload is { nickname: string } {
+  return isRecord(payload) && isString(payload.nickname);
 }
 
 function restoreRoomStateIfValid(room: RoomState): void {

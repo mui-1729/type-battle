@@ -218,8 +218,8 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
   const connect = () => {
     socket = new WebSocket(url);
     socket.addEventListener("open", () => {
-      flushOutboundMessages();
       notify("connect");
+      flushOutboundMessages();
     });
     socket.addEventListener("message", handleMessage);
     socket.addEventListener("close", () => {
