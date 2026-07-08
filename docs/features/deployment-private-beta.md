@@ -17,7 +17,7 @@ Database: PostgreSQL, optional at first
 Redis: optional until public matchmaking
 ```
 
-MVP の web は Vercel に置く。realtime の active backend は Cloudflare Worker とし、Socket.IO server は local / self-hosted の確認用に残す。
+MVP の web は Vercel に置く。realtime の active backend は Socket.IO server とし、Cloudflare Worker は切替用 transport として残す。
 この repo には realtime server の `Dockerfile` と `tests/smoke-test.ts` があり、ローカル / self-hosted 前提の確認はできる。
 
 ## 必須環境変数
@@ -31,7 +31,7 @@ NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL=wss://cloudflare-realtime.example.com
 NEXT_PUBLIC_FEEDBACK_ISSUE_URL=https://github.com/mui-1729/type-battle/issues/new?template=private-beta-feedback.yml
 ```
 
-`NEXT_PUBLIC_REALTIME_TRANSPORT` は `socketio` と `cloudflare` を切り替えるフラグです。`socketio` の場合は `NEXT_PUBLIC_REALTIME_URL` を使い、`cloudflare` の場合は `NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL` を使います。未指定時は production では `cloudflare`、development では `socketio` を既定値として扱います。
+`NEXT_PUBLIC_REALTIME_TRANSPORT` は `socketio` と `cloudflare` を切り替えるフラグです。`socketio` の場合は `NEXT_PUBLIC_REALTIME_URL` を使い、`cloudflare` の場合は `NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL` を使います。未指定時は `socketio` を既定値として扱います。
 
 ### Realtime
 
@@ -58,7 +58,7 @@ LOG_LEVEL=info
 5. realtime 接続先が整った段階で smoke test を実行する
 
 上の flow のうち、repo 内で明示しているのは web の Vercel 前提と smoke test の手順までで、realtime の公開 deploy は別途決める。
-Cloudflare Worker を active backend にする前提では、web の production build は Cloudflare realtime を既定接続先として使う。
+Cloudflare Worker を切替先にする場合は、web の production build で明示的に `NEXT_PUBLIC_REALTIME_TRANSPORT=cloudflare` を設定して使う。
 
 ## Smoke Test
 

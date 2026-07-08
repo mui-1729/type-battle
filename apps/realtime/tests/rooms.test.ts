@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  createRoom,
+  createRoom as createRoomImpl,
   setBotDifficulty,
   finishTyping,
   getRoom,
-  joinRoom,
+  joinRoom as joinRoomImpl,
   leaveBySocket,
   markPlaying,
   checkForForfeits,
@@ -17,6 +17,24 @@ import {
   updateProgress,
   rooms
 } from "../src/rooms";
+
+function testSessionId(guestId: string): string {
+  return `session:${guestId}`;
+}
+
+function createRoom(input: Parameters<typeof createRoomImpl>[0]): ReturnType<typeof createRoomImpl> {
+  return createRoomImpl({
+    ...input,
+    sessionId: input.sessionId ?? testSessionId(input.guestId)
+  });
+}
+
+function joinRoom(input: Parameters<typeof joinRoomImpl>[0]): ReturnType<typeof joinRoomImpl> {
+  return joinRoomImpl({
+    ...input,
+    sessionId: input.sessionId ?? testSessionId(input.guestId)
+  });
+}
 
 describe("rooms", () => {
   it("creates a room and lets a second player join", () => {

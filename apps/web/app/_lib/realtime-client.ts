@@ -76,7 +76,7 @@ export function resolveRealtimeTransport(config: {
     return requestedTransport;
   }
 
-  return config.nodeEnv === "production" ? "cloudflare" : "socketio";
+  return "socketio";
 }
 
 export function getDefaultRealtimeUrl(transport: RealtimeTransport, location: Location): string | null {
@@ -218,8 +218,8 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
   const connect = () => {
     socket = new WebSocket(url);
     socket.addEventListener("open", () => {
-      flushOutboundMessages();
       notify("connect");
+      flushOutboundMessages();
     });
     socket.addEventListener("message", handleMessage);
     socket.addEventListener("close", () => {

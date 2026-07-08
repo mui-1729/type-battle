@@ -86,6 +86,7 @@ const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistake
 // If it doesn't, I must update the shared package.
 type InternalPlayer = PlayerState & {
   socketId: string;
+  sessionId: string;
   disconnectedAt?: number;
 };
 
@@ -144,7 +145,7 @@ export function resetRoomEngineState(): void {
   metrics.serverErrors = 0;
 }
 
-export function restoreRoomState(room: RoomState): void {
+export function restoreRoomState(room: RoomState, playerSessions: Record<string, string> = {}): void {
   const roomCode = room.roomCode.toUpperCase();
 
   rooms.set(roomCode, {
@@ -155,7 +156,9 @@ export function restoreRoomState(room: RoomState): void {
     botDifficulty: room.botDifficulty,
     promptCategory: room.promptCategory,
     promptHistory: room.prompt ? [room.prompt.id] : [],
-    players: new Map(room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId)])),
+    players: new Map(
+      room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId, playerSessions[player.id] ?? "")])
+    ),
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
     round: 1,
@@ -170,14 +173,21 @@ export function createRoom(input: {
   nickname: string;
   guestId: string;
   socketId: string;
-  sessionId?: string;
+  sessionId: string;
   deviceKind?: DeviceKind;
 }): {
   room: RoomState;
   playerId: string;
 } {
   const roomCode = createUniqueRoomCode();
-  const player = createPlayer(input.guestId, input.nickname, input.socketId, true, input.deviceKind);
+  const player = createPlayer(
+    input.guestId,
+    input.nickname,
+    input.socketId,
+    true,
+    input.sessionId,
+    input.deviceKind
+  );
   const room: InternalRoom = {
     roomCode,
     hostPlayerId: player.id,
@@ -195,7 +205,7 @@ export function createRoom(input: {
   rooms.set(roomCode, room);
   socketIndex.set(input.socketId, { roomCode, playerId: player.id });
   void engineHooks.recordGuestSession?.({
-    sessionId: input.sessionId ?? input.guestId,
+    sessionId: input.sessionId,
     guestId: input.guestId,
     nickname: player.nickname,
     roomCode
@@ -209,7 +219,7 @@ export function joinRoom(input: {
   nickname: string;
   guestId: string;
   socketId: string;
-  sessionId?: string;
+  sessionId: string;
   deviceKind?: DeviceKind;
 }): { room: RoomState; playerId: string } | { error: string } {
   const room = rooms.get(input.roomCode.toUpperCase());
@@ -222,6 +232,10 @@ export function joinRoom(input: {
   const existing = room.players.get(input.guestId);
 
   if (existing) {
+    if (existing.sessionId !== input.sessionId) {
+      return { error: "このプレイヤーは別のセッションで使用されています。" };
+    }
+
     const previousSocketId = existing.socketId;
     if (previousSocketId && previousSocketId !== input.socketId) {
       socketIndex.delete(previousSocketId);
@@ -234,7 +248,7 @@ export function joinRoom(input: {
     existing.deviceKind = input.deviceKind ?? existing.deviceKind ?? "desktop";
     socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: existing.id });
     void engineHooks.recordGuestSession?.({
-      sessionId: input.sessionId ?? input.guestId,
+      sessionId: input.sessionId,
       guestId: input.guestId,
       nickname: existing.nickname,
       roomCode: room.roomCode
@@ -250,11 +264,18 @@ export function joinRoom(input: {
     return { error: "このルームは満員です。" };
   }
 
-  const player = createPlayer(input.guestId, input.nickname, input.socketId, false, input.deviceKind);
+  const player = createPlayer(
+    input.guestId,
+    input.nickname,
+    input.socketId,
+    false,
+    input.sessionId,
+    input.deviceKind
+  );
   room.players.set(player.id, player);
   socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: player.id });
   void engineHooks.recordGuestSession?.({
-    sessionId: input.sessionId ?? input.guestId,
+    sessionId: input.sessionId,
     guestId: input.guestId,
     nickname: player.nickname,
     roomCode: room.roomCode
@@ -900,6 +921,7 @@ function addBotPlayer(room: InternalRoom): void {
     ready: true,
     isHost: false,
     isBot: true,
+    sessionId: BOT_PLAYER_ID,
     deviceKind: "desktop",
     progressIndex: 0,
     correctCharacters: 0,
@@ -917,11 +939,13 @@ function createPlayer(
   nickname: string,
   socketId: string,
   isHost: boolean,
+  sessionId: string,
   deviceKind: DeviceKind = "desktop"
 ): InternalPlayer {
   return {
     id,
     socketId,
+    sessionId,
     nickname: normalizeNickname(nickname),
     connected: true,
     ready: false,
@@ -939,10 +963,11 @@ function createPlayer(
   };
 }
 
-function toInternalPlayer(player: PlayerState, hostPlayerId: string): InternalPlayer {
+function toInternalPlayer(player: PlayerState, hostPlayerId: string, sessionId: string): InternalPlayer {
   return {
     ...player,
     socketId: player.id,
+    sessionId,
     isHost: player.id === hostPlayerId
   };
 }

@@ -94,6 +94,12 @@ io.on("connection", (socket) => {
       return;
     }
 
+    const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+    if (!sessionId) {
+      ack({ ok: false, error: "セッション情報が見つかりません。" });
+      return;
+    }
+
     const error = validateNickname(payload.nickname);
 
     if (error) {
@@ -105,7 +111,7 @@ io.on("connection", (socket) => {
       nickname: payload.nickname,
       guestId: payload.guestId,
       socketId: socket.id,
-      sessionId: payload.sessionId,
+      sessionId,
       ...(payload.deviceKind ? { deviceKind: payload.deviceKind } : {})
     });
 
@@ -115,7 +121,7 @@ io.on("connection", (socket) => {
       roomCode: room.roomCode,
       hostPlayerId: playerId,
       guestId: payload.guestId,
-      sessionId: payload.sessionId
+      sessionId
     });
     ack({ ok: true, data: { roomCode: room.roomCode, playerId, room } });
     emitRoomState(room);
@@ -125,6 +131,12 @@ io.on("connection", (socket) => {
     const rateLimit = checkRoomJoinLimit(socket.handshake.address, payload.guestId);
     if (!rateLimit.allowed) {
       ack({ ok: false, error: rateLimit.error! });
+      return;
+    }
+
+    const sessionId = typeof payload.sessionId === "string" ? payload.sessionId.trim() : "";
+    if (!sessionId) {
+      ack({ ok: false, error: "セッション情報が見つかりません。" });
       return;
     }
 
@@ -140,7 +152,7 @@ io.on("connection", (socket) => {
       nickname: payload.nickname,
       guestId: payload.guestId,
       socketId: socket.id,
-      sessionId: payload.sessionId,
+      sessionId,
       ...(payload.deviceKind ? { deviceKind: payload.deviceKind } : {})
     });
 
@@ -149,7 +161,7 @@ io.on("connection", (socket) => {
         event: "room_join_failed",
         roomCode: payload.roomCode,
         guestId: payload.guestId,
-        sessionId: payload.sessionId,
+        sessionId,
         error: result.error
       });
       ack({ ok: false, error: result.error });
@@ -162,7 +174,7 @@ io.on("connection", (socket) => {
       roomCode: result.room.roomCode,
       playerId: result.playerId,
       guestId: payload.guestId,
-      sessionId: payload.sessionId
+      sessionId
     });
     ack({ ok: true, data: { playerId: result.playerId, room: result.room } });
     emitRoomState(result.room);

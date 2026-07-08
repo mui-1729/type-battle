@@ -901,7 +901,7 @@ export class RealtimeGatewayDurableObject {
   }
 
   private restorePersistedRoom(snapshot: PersistedRoomSnapshot): void {
-    restoreRoomStateIfValid(snapshot.room);
+    restoreRoomStateIfValid(snapshot.room, snapshot.playerSessions);
 
     const normalizedRoomCode = normalizeRoomCode(snapshot.room.roomCode);
     const internalRoom = rooms.get(normalizedRoomCode);
@@ -1219,7 +1219,7 @@ function isWebSocketUpgrade(request: Request): boolean {
   return request.headers.get("Upgrade")?.toLowerCase() === "websocket";
 }
 
-function restoreRoomStateIfValid(room: RoomState): void {
+function restoreRoomStateIfValid(room: RoomState, playerSessions: Record<string, string> = {}): void {
   if (typeof room.roomCode !== "string") {
     return;
   }
@@ -1229,10 +1229,13 @@ function restoreRoomStateIfValid(room: RoomState): void {
     return;
   }
 
-  restoreRoomState({
-    ...room,
-    roomCode: normalizedRoom
-  });
+  restoreRoomState(
+    {
+      ...room,
+      roomCode: normalizedRoom
+    },
+    playerSessions
+  );
 }
 
 async function parsePersistedRoomSnapshot(
