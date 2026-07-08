@@ -137,6 +137,7 @@ export function getMetrics() {
 
 export function restoreRoomState(room: RoomState): void {
   const roomCode = room.roomCode.toUpperCase();
+  const now = Date.now();
 
   rooms.set(roomCode, {
     roomCode,
@@ -146,9 +147,9 @@ export function restoreRoomState(room: RoomState): void {
     botDifficulty: room.botDifficulty,
     promptCategory: room.promptCategory,
     promptHistory: room.prompt ? [room.prompt.id] : [],
-    players: new Map(room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId)])),
-    createdAt: Date.now(),
-    lastActivityAt: Date.now(),
+    players: new Map(room.players.map((player) => [player.id, toInternalPlayer(player, room.hostPlayerId, now)])),
+    createdAt: now,
+    lastActivityAt: now,
     round: 1,
     ...(room.prompt ? { prompt: room.prompt } : {}),
     ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
@@ -859,6 +860,10 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     publicPlayer.finishTimeMs = player.finishTimeMs;
   }
 
+  if (player.disconnectedAt !== undefined) {
+    publicPlayer.disconnectedAt = player.disconnectedAt;
+  }
+
   return publicPlayer;
 }
 
@@ -917,11 +922,17 @@ function createPlayer(
   };
 }
 
-function toInternalPlayer(player: PlayerState, hostPlayerId: string): InternalPlayer {
+function toInternalPlayer(player: PlayerState, hostPlayerId: string, disconnectedAt: number): InternalPlayer {
+  const isBot = player.isBot;
+  const nextDisconnectedAt = isBot ? undefined : player.disconnectedAt ?? disconnectedAt;
+
   return {
     ...player,
+    connected: isBot ? player.connected : false,
+    ready: isBot ? player.ready : false,
     socketId: player.id,
-    isHost: player.id === hostPlayerId
+    isHost: player.id === hostPlayerId,
+    ...(nextDisconnectedAt !== undefined ? { disconnectedAt: nextDisconnectedAt } : {})
   };
 }
 

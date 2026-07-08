@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createRoom,
   joinRoom,
+  getRoom,
   metrics,
   rooms,
+  restoreRoomState,
   setMatchRule,
   setRoomEngineConfig,
   startMatch
@@ -57,5 +59,25 @@ describe("room engine config", () => {
     }
 
     expect(started.room.matchEndsAt).toBe(started.room.serverStartAt! + 5_000);
+  });
+
+  it("restores disconnected players with a timestamp", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_restore",
+      socketId: "socket_alice_restore"
+    });
+
+    restoreRoomState(created.room);
+
+    const restored = getRoom(created.room.roomCode);
+
+    expect(restored).not.toBeNull();
+    expect(restored?.players[0]).toEqual(
+      expect.objectContaining({
+        connected: false,
+        disconnectedAt: expect.any(Number)
+      })
+    );
   });
 });
