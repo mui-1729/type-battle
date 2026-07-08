@@ -14,6 +14,7 @@ import worker, { RoomDurableObject } from "../src/worker.js";
 class FakeStorage {
   readonly values = new Map<string, unknown>();
   alarmAt: number | null = null;
+  failAlarmWrites = false;
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
     return this.values.get(key) as T | undefined;
@@ -46,6 +47,10 @@ class FakeStorage {
   }
 
   async setAlarm(timestamp: number): Promise<void> {
+    if (this.failAlarmWrites) {
+      throw new Error("setAlarm failed");
+    }
+
     this.alarmAt = timestamp;
   }
 
@@ -54,6 +59,10 @@ class FakeStorage {
   }
 
   async deleteAlarm(): Promise<void> {
+    if (this.failAlarmWrites) {
+      throw new Error("deleteAlarm failed");
+    }
+
     this.alarmAt = null;
   }
 
@@ -161,11 +170,15 @@ function createEnv(): { ROOMS: FakeDurableObjectNamespace; ROOM_STATE_WRITE_TOKE
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
   let uuidCounter = 0;
   vi.stubGlobal("crypto", {
     randomUUID: vi.fn(() => `uuid-${++uuidCounter}`),
     getRandomValues: vi.fn((array: Uint8Array) => {
-      array.fill(0);
+      for (let index = 0; index < array.length; index += 1) {
+        array[index] = (uuidCounter + index) % 256;
+      }
+      uuidCounter += 1;
       return array;
     })
   });
@@ -620,6 +633,134 @@ describe("cloudflare gateway", () => {
     const updatedRoom = getRoom(roomCode);
     expect(updatedRoom?.status).toBe("finished");
     expect(updatedRoom?.players.find((player) => player.id === "guest-alice-forfeit")?.forfeited).toBe(true);
+  });
+
+  it("restores human players as disconnected until the same session rejoins", async () => {
+    const storage = new FakeStorage();
+    const activeRoom: RoomState = {
+      ...baseRoom,
+      roomCode: "RS1234",
+      hostPlayerId: "guest-alice-restore",
+      status: "playing",
+      players: [
+        {
+          id: "guest-alice-restore",
+          nickname: "Alice",
+          connected: true,
+          ready: true,
+          isHost: true,
+          isBot: false,
+          deviceKind: "desktop",
+          progressIndex: 0,
+          correctCharacters: 0,
+          totalTypedCharacters: 0,
+          mistakes: 0,
+          wpm: 0,
+          accuracy: 100,
+          currentStreak: 0,
+          maxStreak: 0
+        }
+      ]
+    };
+
+    storage.values.set("room:RS1234", {
+      room: activeRoom,
+      playerSessions: {
+        "guest-alice-restore": "session-alice-restore"
+      },
+      disconnectedAt: {}
+    });
+
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await gateway.ready;
+
+    const restoredPlayer = rooms.get("RS1234")?.players.get("guest-alice-restore");
+    expect(restoredPlayer).toMatchObject({
+      connected: false,
+      ready: false,
+      disconnectedAt: expect.any(Number)
+    });
+
+    gateway.attachSocket(socket as unknown as WebSocket);
+    socket.receive(
+      JSON.stringify({
+        id: "msg-rejoin-restored",
+        type: "client:room:join",
+        payload: {
+          roomCode: "RS1234",
+          nickname: "Alice",
+          guestId: "guest-alice-restore",
+          sessionId: "session-alice-restore"
+        }
+      })
+    );
+
+    expect(findLastAck(socket, "client:room:join")).toMatchObject({
+      type: "server:ack",
+      payload: {
+        ok: true
+      }
+    });
+    expect(getRoom("RS1234")?.players.find((player) => player.id === "guest-alice-restore")).toMatchObject({
+      connected: true
+    });
+    expect(rooms.get("RS1234")?.players.get("guest-alice-restore")?.disconnectedAt).toBeUndefined();
+  });
+
+  it("runs maintenance from a bounded fallback when alarm registration fails", async () => {
+    vi.useFakeTimers();
+    const storage = new FakeStorage();
+    storage.failAlarmWrites = true;
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await gateway.ready;
+    gateway.attachSocket(socket as unknown as WebSocket);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-create-fallback",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-alice-fallback",
+          sessionId: "session-alice-fallback"
+        }
+      })
+    );
+
+    const createAck = findLastAck(socket, "client:room:create");
+    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
+    socket.receive(
+      JSON.stringify({
+        id: "msg-start-fallback",
+        type: "client:match:start",
+        payload: {
+          roomCode
+        }
+      })
+    );
+
+    markPlaying(roomCode);
+    socket.close();
+    await Promise.resolve();
+
+    const player = rooms.get(roomCode)?.players.get("guest-alice-fallback");
+    if (player) {
+      player.disconnectedAt = Date.now() - 40_000;
+    }
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    const updatedRoom = getRoom(roomCode);
+    expect(updatedRoom?.status).toBe("finished");
+    expect(updatedRoom?.players.find((player) => player.id === "guest-alice-fallback")?.forfeited).toBe(true);
   });
 
   it("rejects invalid typing metric values", async () => {

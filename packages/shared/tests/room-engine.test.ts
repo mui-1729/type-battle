@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createRoom,
   joinRoom,
-  rooms,
   resetRoomEngineState,
   setReady,
   setMatchRule,

@@ -131,7 +131,6 @@ export default function HomePage() {
   const [error, setError] = useState("");
   const [countdownMs, setCountdownMs] = useState(0);
   const [matchTimerMs, setMatchTimerMs] = useState(0);
-  const [resumeAttempted, setResumeAttempted] = useState(false);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
@@ -526,15 +525,13 @@ export default function HomePage() {
   }, [mistakeTrendRecord, settingsHydrated]);
 
   useEffect(() => {
-    if (!connected || !guestId || !sessionId || !settingsHydrated || resumeAttempted) {
+    if (!connected || !guestId || !sessionId || !settingsHydrated) {
       return;
     }
 
     const storedRoomCode = window.localStorage.getItem(ROOM_CODE_KEY);
-    
-    // Resume only when there is a saved room and this tab is not already in one.
-    if (!storedRoomCode || room) {
-      setResumeAttempted(true);
+
+    if (!storedRoomCode) {
       return;
     }
 
@@ -544,7 +541,6 @@ export default function HomePage() {
       return;
     }
 
-    setResumeAttempted(true);
     socket.emit(
       "room:join",
       {
@@ -568,7 +564,7 @@ export default function HomePage() {
         clearPracticeState();
       }
     );
-  }, [clearPracticeState, connected, guestId, resumeAttempted, room, sessionId, settingsHydrated, updateGuestSession]);
+  }, [clearPracticeState, connected, guestId, sessionId, settingsHydrated, updateGuestSession]);
 
   useEffect(() => {
     if (!currentPlayer) {

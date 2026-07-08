@@ -127,6 +127,7 @@ const BOT_TICK_MS = 500;
 const ROOM_TTL_MS = 60_000;
 const DISCONNECT_GRACE_MS = 30_000;
 const ROOM_PERSIST_DEBOUNCE_MS = 1_000;
+const MAINTENANCE_ALARM_FALLBACK_MS = 5_000;
 const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
 
 type GatewayTimers = {
@@ -147,6 +148,7 @@ export class RealtimeGatewayDurableObject {
   private readonly roomJoinIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 100 });
   private readonly roomJoinGuestLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
   private readonly progressLimiter = new RateLimiter({ windowMs: 1000, max: 30 });
+  private maintenanceFallbackTimer: ReturnType<typeof setTimeout> | undefined;
   readonly ready: Promise<void>;
 
   constructor(private readonly state: DurableObjectState) {
@@ -887,18 +889,24 @@ export class RealtimeGatewayDurableObject {
   }
 
   private restorePersistedRoom(snapshot: PersistedRoomSnapshot): void {
-    restoreRoomStateIfValid(snapshot.room);
+    restoreRoomStateIfValid(snapshot.room, snapshot.playerSessions);
 
     const normalizedRoomCode = normalizeRoomCode(snapshot.room.roomCode);
     const internalRoom = rooms.get(normalizedRoomCode);
 
     if (internalRoom) {
       for (const [playerId, player] of internalRoom.players.entries()) {
+        if (player.isBot) {
+          continue;
+        }
+
         const disconnectedAt = snapshot.disconnectedAt[playerId];
+        player.connected = false;
+        player.ready = false;
 
         if (disconnectedAt !== undefined) {
           player.disconnectedAt = disconnectedAt;
-        } else if (!player.connected) {
+        } else {
           player.disconnectedAt = Date.now();
         }
       }
@@ -916,13 +924,35 @@ export class RealtimeGatewayDurableObject {
     try {
       if (nextAlarmAt === null) {
         await this.state.storage.deleteAlarm();
+        this.clearMaintenanceFallbackTimer();
         return;
       }
 
       await this.state.storage.setAlarm(Math.max(nextAlarmAt, Date.now()));
+      this.clearMaintenanceFallbackTimer();
     } catch {
-      // Alarm persistence should not break live room handling.
+      this.scheduleMaintenanceFallbackTimer();
     }
+  }
+
+  private scheduleMaintenanceFallbackTimer(): void {
+    if (this.maintenanceFallbackTimer) {
+      return;
+    }
+
+    this.maintenanceFallbackTimer = setTimeout(() => {
+      this.maintenanceFallbackTimer = undefined;
+      void this.alarm();
+    }, MAINTENANCE_ALARM_FALLBACK_MS);
+  }
+
+  private clearMaintenanceFallbackTimer(): void {
+    if (!this.maintenanceFallbackTimer) {
+      return;
+    }
+
+    clearTimeout(this.maintenanceFallbackTimer);
+    this.maintenanceFallbackTimer = undefined;
   }
 
   private syncRestoredRoom(roomCode: string): void {
@@ -1205,7 +1235,7 @@ function isWebSocketUpgrade(request: Request): boolean {
   return request.headers.get("Upgrade")?.toLowerCase() === "websocket";
 }
 
-function restoreRoomStateIfValid(room: RoomState): void {
+function restoreRoomStateIfValid(room: RoomState, playerSessions: Record<string, string> = {}): void {
   if (typeof room.roomCode !== "string") {
     return;
   }
@@ -1218,7 +1248,7 @@ function restoreRoomStateIfValid(room: RoomState): void {
   restoreRoomState({
     ...room,
     roomCode: normalizedRoom
-  });
+  }, playerSessions);
 }
 
 async function parsePersistedRoomSnapshot(

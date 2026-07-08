@@ -115,7 +115,7 @@
 
 - web は Vercel 前提で進める。
 - production build は Cloudflare transport を既定にしている。
-- Playwright E2E は Socket.IO を明示してローカル realtime server を使う。
+- Playwright E2E は Cloudflare transport を明示し、local Worker bridge server を使う。
 
 ### Cloudflare transport contract
 

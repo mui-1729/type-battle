@@ -6,6 +6,8 @@ class FakeStorage {
   constructor() {
     this.values = new Map();
     this.alarmAt = null;
+    this.alarmTimer = null;
+    this.alarmHandler = null;
   }
 
   async get(key) {
@@ -40,6 +42,14 @@ class FakeStorage {
 
   async setAlarm(timestamp) {
     this.alarmAt = timestamp;
+    if (this.alarmTimer) {
+      clearTimeout(this.alarmTimer);
+    }
+
+    this.alarmTimer = setTimeout(() => {
+      this.alarmTimer = null;
+      void this.alarmHandler?.();
+    }, Math.max(timestamp - Date.now(), 0));
   }
 
   async getAlarm() {
@@ -48,6 +58,10 @@ class FakeStorage {
 
   async deleteAlarm() {
     this.alarmAt = null;
+    if (this.alarmTimer) {
+      clearTimeout(this.alarmTimer);
+      this.alarmTimer = null;
+    }
   }
 
   async sync() {}
@@ -114,6 +128,7 @@ async function main() {
   const port = Number(process.env.PORT ?? 8787);
   const storage = new FakeStorage();
   const gateway = new RoomDurableObject(new FakeDurableObjectState(storage));
+  storage.alarmHandler = () => gateway.alarm();
 
   await gateway.ready;
 
