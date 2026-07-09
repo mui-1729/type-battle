@@ -76,6 +76,7 @@
 - lint / typecheck / unit test / build / Playwright E2E を実行する。
 - E2E は room join、2 player completion、reload rejoin、COM match、practice mode、long disconnect forfeit、player settings を確認する。
 - Cloudflare Worker test は room creation、join、finish、rejoin、COM、forfeit、storage persistence を確認する。
+- room state write は room code ごとの Durable Object に routing している。
 
 ### Player settings
 

@@ -1070,7 +1070,7 @@ describe("worker handler", () => {
     expect(env.ROOMS.stub.lastRequest?.url).toBe("https://example.com/");
   });
 
-  it("allows authorized state writes through to the gateway", async () => {
+  it("allows authorized state writes through to the room authority", async () => {
     const env = createEnv();
 
     const response = await worker.fetch(
@@ -1086,7 +1086,7 @@ describe("worker handler", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(env.ROOMS.getByNameCalls).toEqual(["gateway"]);
+    expect(env.ROOMS.getByNameCalls).toEqual(["AB12CD"]);
     expect(env.ROOMS.stub.fetchCalls).toBe(1);
     expect(env.ROOMS.stub.lastRequest?.method).toBe("PUT");
   });
