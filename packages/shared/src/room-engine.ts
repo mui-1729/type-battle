@@ -1,4 +1,4 @@
-import { getDailyChallengeInfo, pickDailyChallengePrompt, pickPrompt, PROMPTS } from "./prompts.js";
+import { getDailyChallengeInfo, getPromptsByCategory, pickDailyChallengePrompt, pickPrompt } from "./prompts.js";
 import { calculateAccuracy, calculateWpm, rankPlayers } from "./scoring.js";
 import { createRoomCode, normalizeNickname } from "./validation.js";
 import type {
@@ -507,10 +507,18 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
     return { error: "切断中のプレイヤーがいます。" };
   }
 
+  let prompt: Prompt;
+
+  try {
+    prompt = selectPromptForRoom(room, Date.now());
+  } catch {
+    return { error: "有効な課題文がありません。" };
+  }
+
   room.status = "countdown";
-  room.prompt = selectPromptForRoom(room, Date.now());
-  if (!room.promptHistory.includes(room.prompt.id)) {
-    room.promptHistory.push(room.prompt.id);
+  room.prompt = prompt;
+  if (!room.promptHistory.includes(prompt.id)) {
+    room.promptHistory.push(prompt.id);
   }
   room.serverStartAt = Date.now() + COUNTDOWN_MS;
   if (room.matchRule === "timeAttack") {
@@ -699,11 +707,20 @@ export function rematch(socketId: string, roomCode: string): { room: RoomState }
     return { error: "終了した試合だけ再戦できます。" };
   }
 
+  const nextRound = room.round + 1;
+  let prompt: Prompt;
+
+  try {
+    prompt = selectPromptForRoom(room, Date.now() + nextRound);
+  } catch {
+    return { error: "有効な課題文がありません。" };
+  }
+
   room.status = "waiting";
-  room.round += 1;
-  room.prompt = selectPromptForRoom(room, Date.now() + room.round);
-  if (!room.promptHistory.includes(room.prompt.id)) {
-    room.promptHistory.push(room.prompt.id);
+  room.round = nextRound;
+  room.prompt = prompt;
+  if (!room.promptHistory.includes(prompt.id)) {
+    room.promptHistory.push(prompt.id);
   }
   delete room.serverStartAt;
   delete room.matchEndsAt;
@@ -1032,18 +1049,42 @@ function createUniqueRoomCode(): string {
 }
 
 function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
-  const prompts = PROMPTS.filter((prompt) => prompt.category === room.promptCategory);
-  const unseenPrompts = prompts.filter((prompt) => !room.promptHistory.includes(prompt.id));
-  const pool = unseenPrompts.length > 0 ? unseenPrompts : prompts;
+  const selected = selectPromptFromPool(
+    getPromptsByCategory(room.promptCategory),
+    room.promptHistory,
+    room.prompt,
+    seed
+  );
 
-  if (pool.length === 0) {
-    return pickPrompt(room.promptCategory, seed);
+  if (selected) {
+    return selected;
   }
 
+  const fallback = selectPromptFromPool(getPromptsByCategory("standard"), room.promptHistory, room.prompt, seed);
+
+  if (fallback) {
+    return fallback;
+  }
+
+  throw new Error("有効な課題文がありません。");
+}
+
+function selectPromptFromPool(
+  prompts: Prompt[],
+  promptHistory: string[],
+  currentPrompt: Prompt | undefined,
+  seed: number
+): Prompt | null {
+  if (prompts.length === 0) {
+    return null;
+  }
+
+  const unseenPrompts = prompts.filter((prompt) => !promptHistory.includes(prompt.id));
+  const pool = unseenPrompts.length > 0 ? unseenPrompts : prompts;
   const index = Math.abs(seed) % pool.length;
   let selected = pool[index] ?? pool[0]!;
 
-  if (room.prompt && pool.length > 1 && selected.id === room.prompt.id) {
+  if (currentPrompt && pool.length > 1 && selected.id === currentPrompt.id) {
     selected = pool[(index + 1) % pool.length]!;
   }
 

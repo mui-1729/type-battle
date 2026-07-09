@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   advanceBot,
   createRoom,
@@ -13,6 +13,8 @@ import {
   setRoomEngineConfig,
   startMatch
 } from "../src/room-engine.js";
+import { PROMPTS } from "../src/prompts.js";
+import type { Prompt } from "../src/game-state.js";
 
 afterEach(() => {
   resetRoomEngineState();
@@ -54,6 +56,85 @@ describe("room engine config", () => {
     }
 
     expect(started.room.matchEndsAt).toBe(started.room.serverStartAt! + 5_000);
+  });
+
+  it("ignores invalid prompts when selecting a room prompt", () => {
+    const invalidPrompt = {
+      id: "standard-invalid-room-prompt",
+      text: "無効",
+      category: "standard",
+      enabled: false,
+      typing: {
+        romaji: "mukou",
+        hiragana: "むこう"
+      }
+    } satisfies Prompt;
+    const standardPromptCount = PROMPTS.filter((prompt) => prompt.category === "standard").length;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(standardPromptCount);
+
+    PROMPTS.push(invalidPrompt);
+
+    try {
+      const created = createRoom({
+        nickname: "Alice",
+        guestId: "guest_alice_invalid_prompt_filter",
+        socketId: "socket_alice_invalid_prompt_filter"
+      });
+
+      const started = startMatch("socket_alice_invalid_prompt_filter", created.room.roomCode);
+
+      expect("error" in started).toBe(false);
+      if ("error" in started) {
+        return;
+      }
+
+      const prompt = started.room.prompt;
+      expect(prompt).toBeDefined();
+      if (!prompt) {
+        return;
+      }
+
+      expect(prompt.id).not.toBe(invalidPrompt.id);
+    } finally {
+      nowSpy.mockRestore();
+      PROMPTS.pop();
+    }
+  });
+
+  it("returns an error without advancing the room when no valid prompt exists", () => {
+    const standardPrompts = PROMPTS.filter((prompt) => prompt.category === "standard");
+    const snapshots = standardPrompts.map((prompt) => ({
+      prompt,
+      value: {
+        id: prompt.id,
+        text: prompt.text,
+        category: prompt.category,
+        enabled: prompt.enabled,
+        typing: { ...prompt.typing }
+      }
+    }));
+
+    for (const prompt of standardPrompts) {
+      prompt.enabled = false;
+    }
+
+    try {
+      const created = createRoom({
+        nickname: "Alice",
+        guestId: "guest_alice_no_valid_prompt",
+        socketId: "socket_alice_no_valid_prompt"
+      });
+
+      const started = startMatch("socket_alice_no_valid_prompt", created.room.roomCode);
+
+      expect(started).toEqual({ error: "有効な課題文がありません。" });
+      expect(getRoom(created.room.roomCode)?.status).toBe("waiting");
+      expect(getRoom(created.room.roomCode)?.prompt).toBeUndefined();
+    } finally {
+      for (const { prompt, value } of snapshots) {
+        Object.assign(prompt, value);
+      }
+    }
   });
 
   it("invalidates the previous socket when an existing player rejoins", () => {

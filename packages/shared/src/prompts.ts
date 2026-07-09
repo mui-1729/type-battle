@@ -292,18 +292,35 @@ export const PROMPTS: Prompt[] = [
   }
 ];
 
-const CONTROL_CHAR_PATTERN = /[\r\n\t\f\v]/;
+const MIN_PROMPT_TEXT_LENGTH = 2;
+const MAX_PROMPT_TEXT_LENGTH = 240;
+const MIN_GUIDE_LENGTH = 2;
+const MAX_GUIDE_LENGTH = 320;
 
 export function validatePrompt(prompt: Prompt): string | null {
   if (!prompt.id.trim()) {
     return "prompt id を入力してください。";
   }
 
+  if (prompt.enabled === false) {
+    return "課題文は無効化されています。";
+  }
+
   if (!prompt.text.trim()) {
     return "課題文を入力してください。";
   }
 
-  if (CONTROL_CHAR_PATTERN.test(prompt.text)) {
+  const textLength = prompt.text.trim().length;
+
+  if (textLength < MIN_PROMPT_TEXT_LENGTH) {
+    return `課題文は${MIN_PROMPT_TEXT_LENGTH}文字以上にしてください。`;
+  }
+
+  if (textLength > MAX_PROMPT_TEXT_LENGTH) {
+    return `課題文は${MAX_PROMPT_TEXT_LENGTH}文字以内にしてください。`;
+  }
+
+  if (hasControlCharacters(prompt.text)) {
     return "課題文に改行や制御文字を含めないでください。";
   }
 
@@ -311,28 +328,47 @@ export function validatePrompt(prompt: Prompt): string | null {
     return "入力ガイドを入力してください。";
   }
 
-  if (CONTROL_CHAR_PATTERN.test(prompt.typing.romaji) || CONTROL_CHAR_PATTERN.test(prompt.typing.hiragana)) {
+  const romajiLength = prompt.typing.romaji.trim().length;
+  const hiraganaLength = prompt.typing.hiragana.trim().length;
+
+  if (romajiLength < MIN_GUIDE_LENGTH || hiraganaLength < MIN_GUIDE_LENGTH) {
+    return `入力ガイドは${MIN_GUIDE_LENGTH}文字以上にしてください。`;
+  }
+
+  if (romajiLength > MAX_GUIDE_LENGTH || hiraganaLength > MAX_GUIDE_LENGTH) {
+    return `入力ガイドは${MAX_GUIDE_LENGTH}文字以内にしてください。`;
+  }
+
+  if (hasControlCharacters(prompt.typing.romaji) || hasControlCharacters(prompt.typing.hiragana)) {
     return "入力ガイドに改行や制御文字を含めないでください。";
   }
 
   return null;
 }
 
-export function getPromptsByCategory(category: PromptCategory): Prompt[] {
-  return PROMPTS.filter((prompt) => prompt.category === category && validatePrompt(prompt) === null);
+export function getPromptsByCategory(category: PromptCategory, prompts: Prompt[] = PROMPTS): Prompt[] {
+  return prompts.filter((prompt) => prompt.category === category && validatePrompt(prompt) === null);
 }
 
 export function pickPrompt(
   category: PromptCategory = "standard",
   seed = Date.now(),
-  excludedPromptIds: string[] = []
+  excludedPromptIds: string[] = [],
+  prompts: Prompt[] = PROMPTS
 ): Prompt {
-  const prompts = getPromptsByCategory(category);
-  const availablePrompts = prompts.filter((prompt) => !excludedPromptIds.includes(prompt.id));
-  const pool = availablePrompts.length > 0 ? availablePrompts : prompts;
+  const validPrompts = getPromptsByCategory(category, prompts);
+  const availablePrompts = validPrompts.filter((prompt) => !excludedPromptIds.includes(prompt.id));
+  const pool = availablePrompts.length > 0 ? availablePrompts : validPrompts;
 
   if (pool.length === 0) {
-    return PROMPTS[0]!;
+    const fallbackPrompts = getPromptsByCategory("standard", prompts);
+
+    if (fallbackPrompts.length === 0) {
+      throw new Error("有効な課題文がありません。");
+    }
+
+    const fallbackIndex = Math.abs(seed) % fallbackPrompts.length;
+    return fallbackPrompts[fallbackIndex] ?? fallbackPrompts[0]!;
   }
 
   const index = Math.abs(seed) % pool.length;
@@ -371,4 +407,16 @@ function hashString(value: string): number {
   }
 
   return hash >>> 0;
+}
+
+function hasControlCharacters(value: string): boolean {
+  for (const char of value) {
+    const codePoint = char.codePointAt(0) ?? 0;
+
+    if (codePoint <= 0x1f || codePoint === 0x7f || codePoint === 0x2028 || codePoint === 0x2029) {
+      return true;
+    }
+  }
+
+  return false;
 }

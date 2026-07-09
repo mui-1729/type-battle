@@ -40,6 +40,7 @@ export type Prompt = {
   id: string;
   text: string;
   category: PromptCategory;
+  enabled?: boolean;
   typing: PromptTyping;
 };
 
