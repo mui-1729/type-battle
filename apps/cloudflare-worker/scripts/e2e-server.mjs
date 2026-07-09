@@ -1,7 +1,7 @@
 import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import worker, { GatewayDurableObject, RoomDurableObject } from "../dist/src/worker.js";
-import { resolveRoomRoute } from "../dist/src/room-routing.js";
+import worker, { RoomAuthorityDurableObject, RoomDurableObject } from "../dist/src/worker.js";
+import { isRoomRoutePath, resolveRoomRoute } from "../dist/src/room-routing.js";
 
 class FakeStorage {
   constructor() {
@@ -161,8 +161,8 @@ async function main() {
   const env = {
     ROOM_STATE_WRITE_TOKEN: "e2e-token"
   };
-  const gatewayNamespace = new FakeDurableObjectNamespace(GatewayDurableObject, env);
-  const roomNamespace = new FakeDurableObjectNamespace(RoomDurableObject, env);
+  const gatewayNamespace = new FakeDurableObjectNamespace(RoomDurableObject, env);
+  const roomNamespace = new FakeDurableObjectNamespace(RoomAuthorityDurableObject, env);
 
   env.GATEWAY = gatewayNamespace;
   env.ROOMS = roomNamespace;
@@ -192,6 +192,11 @@ async function main() {
     webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
       const route = resolveRoomRoute(url.pathname);
+      if (!route && isRoomRoutePath(url.pathname)) {
+        webSocket.close(1008, "Invalid room code");
+        return;
+      }
+
       const adapter = new NodeWebSocketAdapter(webSocket);
       const target = route?.action === "socket"
         ? roomNamespace.getByName(route.roomCode)

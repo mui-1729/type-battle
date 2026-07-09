@@ -17,7 +17,7 @@ Cloudflare へ realtime を移す場合に、無料枠で private beta まで耐
 - `apps/web/app/page.tsx` は `typing:progress` / `typing:finish` を keydown ごとに送る。
 - `packages/shared/src/cloudflare-events.ts` は command ごとに ack を返す前提になっている。
 - `packages/shared/src/room-engine.ts` の `BOT_TICK_MS` は 500 ms。
-- `apps/cloudflare-worker/src/worker.ts` は practice / shared rate limit を `GATEWAY` Durable Object、room state / room socket を room code ごとの `ROOMS` Durable Object へ振り分ける。
+- `apps/cloudflare-worker/src/worker.ts` は practice / shared rate limit を `GATEWAY` Durable Object、room state / room socket を room code ごとの `ROOMS` Durable Object へ振り分ける。既存storage継承のため、`GATEWAY` は legacy gateway class 名の `RoomDurableObject` に binding し、`ROOMS` は `RoomAuthorityDurableObject` に binding する。
 
 ## 公式ドキュメントの要点
 

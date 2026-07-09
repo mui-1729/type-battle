@@ -115,15 +115,15 @@ type DailyPracticePayload = {
   nickname: string;
 };
 
-type RoomRateLimitAction = "create" | "join";
+export type RoomRateLimitAction = "create" | "join";
 
-type RoomRateLimitInput = {
+export type RoomRateLimitInput = {
   action: RoomRateLimitAction;
   clientIp: string;
   guestId: string;
 };
 
-type RoomRateLimitResult = { ok: true } | { ok: false; error: string };
+export type RoomRateLimitResult = { ok: true } | { ok: false; error: string };
 
 type PersistedRoomSnapshot = {
   room: RoomState;
@@ -150,6 +150,7 @@ const DISCONNECT_GRACE_MS = 30_000;
 const ROOM_PERSIST_DEBOUNCE_MS = 1_000;
 const MAINTENANCE_ALARM_FALLBACK_MS = 5_000;
 const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
+export const GATEWAY_ROOM_RATE_LIMIT_PATH = "/__internal/room-rate-limit";
 
 type GatewayTimers = {
   countdown?: ReturnType<typeof setTimeout>;
@@ -192,6 +193,10 @@ export class RealtimeGatewayDurableObject {
     const url = new URL(request.url);
     const route = resolveRoomRoute(url.pathname);
 
+    if (url.pathname === GATEWAY_ROOM_RATE_LIMIT_PATH) {
+      return this.handleRoomRateLimitRequest(request);
+    }
+
     if (route?.action === "state") {
       return this.handleStateRequest(request, route.roomCode);
     }
@@ -221,7 +226,33 @@ export class RealtimeGatewayDurableObject {
     await this.scheduleMaintenanceAlarm();
   }
 
-  async checkRoomRequestRateLimit(input: RoomRateLimitInput): Promise<RoomRateLimitResult> {
+  private async handleRoomRateLimitRequest(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = await request.json();
+    } catch {
+      return Response.json({ ok: false, error: INVALID_MESSAGE_ERROR } satisfies RoomRateLimitResult, {
+        status: 400
+      });
+    }
+
+    const input = parseRoomRateLimitInput(payload);
+
+    if (!input) {
+      return Response.json({ ok: false, error: INVALID_MESSAGE_ERROR } satisfies RoomRateLimitResult, {
+        status: 400
+      });
+    }
+
+    return Response.json(this.checkRoomRequestRateLimit(input));
+  }
+
+  private checkRoomRequestRateLimit(input: RoomRateLimitInput): RoomRateLimitResult {
     const clientIp = normalizeClientIp(input.clientIp);
     const guestId = input.guestId.trim();
 
@@ -1444,6 +1475,26 @@ function parseClientMessage(rawMessage: string): ParsedClientMessage | null {
 
 function isCloudflareClientMessageType(type: string): type is CloudflareClientMessageType {
   return CLOUDFLARE_CLIENT_MESSAGE_TYPES.includes(type as CloudflareClientMessageType);
+}
+
+function parseRoomRateLimitInput(payload: unknown): RoomRateLimitInput | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const action = payload.action;
+  const clientIp = readString(payload.clientIp);
+  const guestId = readString(payload.guestId);
+
+  if ((action !== "create" && action !== "join") || !clientIp || !guestId) {
+    return null;
+  }
+
+  return {
+    action,
+    clientIp,
+    guestId
+  };
 }
 
 function parseCreateRoomPayload(payload: unknown): CreateRoomPayload | null {

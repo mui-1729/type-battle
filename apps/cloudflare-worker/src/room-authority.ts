@@ -27,6 +27,12 @@ import { CLOUDFLARE_CLIENT_MESSAGE_TYPES } from "@type-battle/shared/cloudflare-
 import type { RoomEngineHooks } from "@type-battle/shared/room-engine";
 import { normalizeRoomCode, resolveRoomRoute } from "./room-routing.js";
 import { RateLimiter } from "./rate-limiter.js";
+import {
+  GATEWAY_ROOM_RATE_LIMIT_PATH,
+  type RoomRateLimitAction,
+  type RoomRateLimitInput,
+  type RoomRateLimitResult
+} from "./realtime-gateway.js";
 
 type CloudflareSocketLike = {
   readyState: number;
@@ -102,7 +108,7 @@ type PersistedRoomSnapshot = {
 type RoomAuthorityEnv = {
   GATEWAY?: {
     getByName(name: string): {
-      checkRoomRequestRateLimit(input: RoomRateLimitInput): Promise<RoomRateLimitResult>;
+      fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
     };
   };
 };
@@ -145,14 +151,6 @@ type GuestSessionStorageRecord = Parameters<NonNullable<RoomEngineHooks["recordG
 type MatchResultStorageRecord = Parameters<NonNullable<RoomEngineHooks["recordMatchResult"]>>[0] & {
   createdAt: string;
 };
-
-type RoomRateLimitAction = "create" | "join";
-type RoomRateLimitInput = {
-  action: RoomRateLimitAction;
-  clientIp: string;
-  guestId: string;
-};
-type RoomRateLimitResult = { ok: true } | { ok: false; error: string };
 
 const OPEN_STATE = 1;
 const ROOM_STORAGE_KEY = "room";
@@ -1270,7 +1268,33 @@ export class RoomAuthorityDurableObject {
 
     if (gateway) {
       try {
-        return await gateway.checkRoomRequestRateLimit({ action, clientIp, guestId });
+        const response = await gateway.fetch(
+          new Request(`https://type-battle.internal${GATEWAY_ROOM_RATE_LIMIT_PATH}`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json"
+            },
+            body: JSON.stringify({ action, clientIp, guestId } satisfies RoomRateLimitInput)
+          })
+        );
+
+        if (!response.ok) {
+          return {
+            ok: false,
+            error: "リクエストを処理できませんでした。時間をおいて再試行してください。"
+          };
+        }
+
+        const result = parseRoomRateLimitResult(await response.json());
+
+        if (!result) {
+          return {
+            ok: false,
+            error: "リクエストを処理できませんでした。時間をおいて再試行してください。"
+          };
+        }
+
+        return result;
       } catch {
         return {
           ok: false,
@@ -1808,6 +1832,25 @@ function parseClientMessage(rawMessage: string): ParsedClientMessage | null {
 
 function isCloudflareClientMessageType(type: string): type is CloudflareClientMessageType {
   return (CLOUDFLARE_CLIENT_MESSAGE_TYPES as readonly string[]).includes(type);
+}
+
+function parseRoomRateLimitResult(value: unknown): RoomRateLimitResult | null {
+  if (!isRecord(value) || typeof value.ok !== "boolean") {
+    return null;
+  }
+
+  if (value.ok) {
+    return { ok: true };
+  }
+
+  if (typeof value.error !== "string" || value.error.trim().length === 0) {
+    return null;
+  }
+
+  return {
+    ok: false,
+    error: value.error
+  };
 }
 
 function parseCreateRoomPayload(payload: unknown): CreateRoomPayload | null {

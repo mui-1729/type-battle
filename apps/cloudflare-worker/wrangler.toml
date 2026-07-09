@@ -4,8 +4,8 @@ compatibility_date = "2026-07-04"
 
 [durable_objects]
 bindings = [
-  { name = "GATEWAY", class_name = "GatewayDurableObject" },
-  { name = "ROOMS", class_name = "RoomDurableObject" }
+  { name = "GATEWAY", class_name = "RoomDurableObject" },
+  { name = "ROOMS", class_name = "RoomAuthorityDurableObject" }
 ]
 
 [[migrations]]
@@ -14,4 +14,4 @@ new_sqlite_classes = ["RoomDurableObject"]
 
 [[migrations]]
 tag = "v2"
-new_sqlite_classes = ["GatewayDurableObject"]
+new_sqlite_classes = ["RoomAuthorityDurableObject"]

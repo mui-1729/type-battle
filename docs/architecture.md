@@ -14,13 +14,15 @@ Next.js Web App
 Cloudflare Worker
   |
   | Durable Object bindings
-  | - GATEWAY: practice / shared rate limit
-  | - ROOMS: room authority per room code
+  | - GATEWAY: practice / shared rate limit (RoomDurableObject, legacy gateway class name)
+  | - ROOMS: room authority per room code (RoomAuthorityDurableObject)
   v
 Durable Object SQLite storage
 ```
 
 Web UI は Vercel / Next.js、realtime backend は Cloudflare Worker / Durable Object を active 構成にする。room authority、countdown、COM、forfeit、room snapshot、guest session、match result は Cloudflare 側で扱う。
+
+`RoomDurableObject` は既存の `ROOMS.getByName("gateway")` storage を引き継ぐため、gateway class 名として維持する。新しい room scoped Durable Object は `RoomAuthorityDurableObject` として追加する。
 
 Cloudflare 構成と free tier リスクの整理は [docs/cloudflare-migration-plan.md](cloudflare-migration-plan.md) と [docs/cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md) にまとめる。
 

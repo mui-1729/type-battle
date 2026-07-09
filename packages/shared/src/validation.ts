@@ -28,6 +28,24 @@ export function createRoomCode(): string {
   return cryptoRandomString(ROOM_CODE_LENGTH, ROOM_CODE_ALPHABET);
 }
 
+export function isValidRoomCode(value: string): boolean {
+  const roomCode = value.trim().toUpperCase();
+
+  if (roomCode.length !== ROOM_CODE_LENGTH) {
+    return false;
+  }
+
+  return [...roomCode].every((character) => ROOM_CODE_ALPHABET.includes(character));
+}
+
+export function validateRoomCode(value: string): string | null {
+  if (!isValidRoomCode(value)) {
+    return "ルームコードの形式が正しくありません。";
+  }
+
+  return null;
+}
+
 function cryptoRandomString(length: number, alphabet = "abcdef0123456789"): string {
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);

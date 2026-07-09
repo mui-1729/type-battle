@@ -1,5 +1,8 @@
-import { resolveRoomRoute } from "./room-routing.js";
-import { RealtimeGatewayDurableObject as GatewayDurableObject } from "./realtime-gateway.js";
+import { isRoomRoutePath, resolveRoomRoute } from "./room-routing.js";
+import {
+  GATEWAY_ROOM_RATE_LIMIT_PATH,
+  RealtimeGatewayDurableObject as GatewayDurableObject
+} from "./realtime-gateway.js";
 import { RoomAuthorityDurableObject } from "./room-authority.js";
 
 export interface Env {
@@ -20,7 +23,15 @@ export default {
       });
     }
 
+    if (url.pathname === GATEWAY_ROOM_RATE_LIMIT_PATH) {
+      return new Response("Forbidden", { status: 403 });
+    }
+
     const route = resolveRoomRoute(url.pathname);
+
+    if (!route && isRoomRoutePath(url.pathname)) {
+      return new Response("Invalid room code", { status: 400 });
+    }
 
     if (route?.action === "state" && (request.method === "POST" || request.method === "PUT")) {
       if (!isAuthorizedStateWrite(request, env)) {
@@ -36,7 +47,7 @@ export default {
   }
 } satisfies ExportedHandler<Env>;
 
-export { GatewayDurableObject, RoomAuthorityDurableObject as RoomDurableObject };
+export { GatewayDurableObject, GatewayDurableObject as RoomDurableObject, RoomAuthorityDurableObject };
 
 function isAuthorizedStateWrite(request: Request, env: Env): boolean {
   if (!env.ROOM_STATE_WRITE_TOKEN) {
