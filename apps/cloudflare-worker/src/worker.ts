@@ -26,8 +26,8 @@ export default {
       }
     }
 
-    if (route?.action === "state" && route.roomCode) {
-      return env.ROOMS.getByName(route.roomCode).fetch(request);
+    if (route?.action === "state") {
+      return env.ROOMS.getByName("gateway").fetch(request);
     }
 
     return env.ROOMS.getByName("gateway").fetch(request);

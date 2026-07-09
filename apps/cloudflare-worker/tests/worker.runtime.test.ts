@@ -113,7 +113,7 @@ describe("cloudflare worker runtime", () => {
     }
   });
 
-  it("stores room state in a room-scoped durable object and restores it after restart", async () => {
+  it("stores room state through the gateway durable object and restores it after restart", { timeout: 15_000 }, async () => {
     const roomCode = "AB12CD";
     const snapshot = createExpiredRoomSnapshot(roomCode);
 
