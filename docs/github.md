@@ -96,11 +96,23 @@ Reference: https://www.conventionalcommits.org/en/v1.0.0/
 
 Node.js は LTS を使います。2026-06-07 時点では Node.js 24 LTS を第一候補にします。
 
-## Branch Protection 初期案
+## Branch Protection
 
-実装開始後、private beta 前に `main` に次を設定します。
+`main` には repository ruleset を設定しています。
 
-- pull request 必須
-- CI 成功必須
-- force push 禁止
-- branch deletion 禁止
+- Target: `main`
+- Enforcement: `active`
+- Merge path: pull request 経由のみ
+- Required status checks: `ci`
+- Force push: 禁止
+- Branch deletion: 禁止
+- Bypass actors: なし
+- Required reviews: 0
+
+`ci` は `.github/workflows/ci.yml` の単一 workflow job で、`Lint` / `Typecheck` / `Test` / `Build` / `E2E` を順に実行します。
+
+運用ルール:
+
+- `main` への直接 push は拒否される
+- CI が失敗した PR は merge できない
+- ルールを一時的に変える必要がある場合は、ruleset を編集して戻す

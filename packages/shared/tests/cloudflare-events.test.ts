@@ -12,6 +12,7 @@ describe("cloudflare events", () => {
     id: "msg_create_room",
     type: "client:room:create",
     payload: {
+      roomCode: "ABC123",
       nickname: "Alice",
       guestId: "guest_alice",
       sessionId: "session_alice"

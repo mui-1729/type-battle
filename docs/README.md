@@ -72,7 +72,6 @@ MVP では次を優先します。
 Private beta 前に優先する機能は次です。
 
 1. web deployment / Vercel wiring
-2. branch protection
 
 Public beta 以降に検討する主な機能は次です。
 

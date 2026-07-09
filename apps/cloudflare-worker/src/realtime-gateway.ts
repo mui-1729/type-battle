@@ -115,10 +115,20 @@ type DailyPracticePayload = {
   nickname: string;
 };
 
+export type RoomRateLimitAction = "create" | "join";
+
+export type RoomRateLimitInput = {
+  action: RoomRateLimitAction;
+  clientIp: string;
+  guestId: string;
+};
+
+export type RoomRateLimitResult = { ok: true } | { ok: false; error: string };
+
 type PersistedRoomSnapshot = {
   room: RoomState;
-  playerSessions: Record<string, string>;
-  disconnectedAt: Record<string, number>;
+  playerSessions?: Record<string, string>;
+  disconnectedAt?: Record<string, number>;
 };
 
 type InternalRoomRecord = (typeof rooms) extends Map<string, infer T> ? T : never;
@@ -140,6 +150,7 @@ const DISCONNECT_GRACE_MS = 30_000;
 const ROOM_PERSIST_DEBOUNCE_MS = 1_000;
 const MAINTENANCE_ALARM_FALLBACK_MS = 5_000;
 const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
+export const GATEWAY_ROOM_RATE_LIMIT_PATH = "/__internal/room-rate-limit";
 
 type GatewayTimers = {
   countdown?: ReturnType<typeof setTimeout>;
@@ -182,6 +193,10 @@ export class RealtimeGatewayDurableObject {
     const url = new URL(request.url);
     const route = resolveRoomRoute(url.pathname);
 
+    if (url.pathname === GATEWAY_ROOM_RATE_LIMIT_PATH) {
+      return this.handleRoomRateLimitRequest(request);
+    }
+
     if (route?.action === "state") {
       return this.handleStateRequest(request, route.roomCode);
     }
@@ -209,6 +224,75 @@ export class RealtimeGatewayDurableObject {
     await this.ready;
     await this.runMaintenance();
     await this.scheduleMaintenanceAlarm();
+  }
+
+  private async handleRoomRateLimitRequest(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    let payload: unknown;
+
+    try {
+      payload = await request.json();
+    } catch {
+      return Response.json({ ok: false, error: INVALID_MESSAGE_ERROR } satisfies RoomRateLimitResult, {
+        status: 400
+      });
+    }
+
+    const input = parseRoomRateLimitInput(payload);
+
+    if (!input) {
+      return Response.json({ ok: false, error: INVALID_MESSAGE_ERROR } satisfies RoomRateLimitResult, {
+        status: 400
+      });
+    }
+
+    return Response.json(this.checkRoomRequestRateLimit(input));
+  }
+
+  private checkRoomRequestRateLimit(input: RoomRateLimitInput): RoomRateLimitResult {
+    const clientIp = normalizeClientIp(input.clientIp);
+    const guestId = input.guestId.trim();
+
+    if (!guestId) {
+      return { ok: false, error: INVALID_MESSAGE_ERROR };
+    }
+
+    if (input.action === "create") {
+      if (!this.roomCreateIpLimiter.isAllowed(clientIp)) {
+        return {
+          ok: false,
+          error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
+        };
+      }
+
+      if (!this.roomCreateGuestLimiter.isAllowed(guestId)) {
+        return {
+          ok: false,
+          error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
+        };
+      }
+
+      return { ok: true };
+    }
+
+    if (!this.roomJoinIpLimiter.isAllowed(clientIp)) {
+      return {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
+      };
+    }
+
+    if (!this.roomJoinGuestLimiter.isAllowed(guestId)) {
+      return {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
+      };
+    }
+
+    return { ok: true };
   }
 
   attachSocket(socket: CloudflareSocketLike, options: AttachSocketOptions = {}): string {
@@ -945,7 +1029,10 @@ export class RealtimeGatewayDurableObject {
   }
 
   private restorePersistedRoom(snapshot: PersistedRoomSnapshot): void {
-    restoreRoomStateIfValid(snapshot.room, snapshot.playerSessions);
+    const playerSessions = snapshot.playerSessions ?? {};
+    const disconnectedAt = snapshot.disconnectedAt ?? {};
+
+    restoreRoomStateIfValid(snapshot.room, playerSessions);
 
     const normalizedRoomCode = normalizeRoomCode(snapshot.room.roomCode);
     const internalRoom = rooms.get(normalizedRoomCode);
@@ -956,22 +1043,19 @@ export class RealtimeGatewayDurableObject {
           continue;
         }
 
-        const disconnectedAt = snapshot.disconnectedAt[playerId];
+        const disconnectedAtValue = disconnectedAt[playerId];
         player.connected = false;
         player.ready = false;
 
-        if (disconnectedAt !== undefined) {
-          player.disconnectedAt = disconnectedAt;
+        if (disconnectedAtValue !== undefined) {
+          player.disconnectedAt = disconnectedAtValue;
         } else {
           player.disconnectedAt = Date.now();
         }
       }
     }
 
-    this.playerSessionsByRoom.set(
-      normalizedRoomCode,
-      new Map(Object.entries(snapshot.playerSessions))
-    );
+    this.playerSessionsByRoom.set(normalizedRoomCode, new Map(Object.entries(playerSessions)));
   }
 
   private async scheduleMaintenanceAlarm(): Promise<void> {
@@ -1391,6 +1475,26 @@ function parseClientMessage(rawMessage: string): ParsedClientMessage | null {
 
 function isCloudflareClientMessageType(type: string): type is CloudflareClientMessageType {
   return CLOUDFLARE_CLIENT_MESSAGE_TYPES.includes(type as CloudflareClientMessageType);
+}
+
+function parseRoomRateLimitInput(payload: unknown): RoomRateLimitInput | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const action = payload.action;
+  const clientIp = readString(payload.clientIp);
+  const guestId = readString(payload.guestId);
+
+  if ((action !== "create" && action !== "join") || !clientIp || !guestId) {
+    return null;
+  }
+
+  return {
+    action,
+    clientIp,
+    guestId
+  };
 }
 
 function parseCreateRoomPayload(payload: unknown): CreateRoomPayload | null {

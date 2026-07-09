@@ -70,7 +70,7 @@
 - [x] private beta feedback issue flow
 - [x] web hosting provider wiring
 - [x] realtime external deploy
-- [ ] branch protection
+- [x] branch protection
 - [x] Cloudflare storage persistence
 - [x] guest session
 

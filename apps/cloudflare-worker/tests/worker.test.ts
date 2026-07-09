@@ -9,7 +9,8 @@ import {
   startMatch
 } from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
-import worker, { RoomDurableObject } from "../src/worker.js";
+import worker, { RoomAuthorityDurableObject, RoomDurableObject } from "../src/worker.js";
+import { GATEWAY_ROOM_RATE_LIMIT_PATH } from "../src/realtime-gateway.js";
 
 class FakeStorage {
   readonly values = new Map<string, unknown>();
@@ -103,6 +104,71 @@ class FakeDurableObjectNamespace {
   }
 }
 
+type RateLimitInput = {
+  action: "create" | "join";
+  clientIp: string;
+  guestId: string;
+};
+
+type RateLimitResult = { ok: true } | { ok: false; error: string };
+
+class FakeGatewayRateLimitStub {
+  readonly calls: RateLimitInput[] = [];
+
+  constructor(private readonly maxPerGuestAction: number) {}
+
+  async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const request = input instanceof Request ? input : new Request(input, init);
+    const url = new URL(request.url);
+
+    if (url.pathname !== GATEWAY_ROOM_RATE_LIMIT_PATH) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    const payload = await request.json() as Partial<RateLimitInput>;
+
+    if (
+      (payload.action !== "create" && payload.action !== "join") ||
+      typeof payload.clientIp !== "string" ||
+      typeof payload.guestId !== "string"
+    ) {
+      return Response.json({ ok: false, error: "invalid rate limit request" } satisfies RateLimitResult, {
+        status: 400
+      });
+    }
+
+    const rateLimitInput: RateLimitInput = {
+      action: payload.action,
+      clientIp: payload.clientIp,
+      guestId: payload.guestId
+    };
+    this.calls.push(rateLimitInput);
+    const callCount = this.calls.filter(
+      (call) => call.action === rateLimitInput.action && call.guestId === rateLimitInput.guestId
+    ).length;
+
+    if (callCount > this.maxPerGuestAction) {
+      return Response.json({ ok: false, error: "central limited" } satisfies RateLimitResult);
+    }
+
+    return Response.json({ ok: true } satisfies RateLimitResult);
+  }
+}
+
+class FakeGatewayRateLimitNamespace {
+  readonly getByNameCalls: string[] = [];
+  readonly stub: FakeGatewayRateLimitStub;
+
+  constructor(maxPerGuestAction: number) {
+    this.stub = new FakeGatewayRateLimitStub(maxPerGuestAction);
+  }
+
+  getByName(name: string): FakeGatewayRateLimitStub {
+    this.getByNameCalls.push(name);
+    return this.stub;
+  }
+}
+
 class FakeSocket {
   readyState = 1;
   accepted = false;
@@ -144,7 +210,7 @@ class FakeSocket {
 }
 
 const baseRoom: RoomState = {
-  roomCode: "AB12CD",
+  roomCode: "AB23CD",
   hostPlayerId: "guest-alice",
   status: "waiting",
   matchRule: "race",
@@ -168,13 +234,18 @@ function findLastAck(
 }
 
 async function flushAsyncWork(): Promise<void> {
-  for (let index = 0; index < 5; index += 1) {
+  for (let index = 0; index < 50; index += 1) {
     await Promise.resolve();
   }
 }
 
-function createEnv(): { ROOMS: FakeDurableObjectNamespace; ROOM_STATE_WRITE_TOKEN: string } {
+function createEnv(): {
+  GATEWAY: FakeDurableObjectNamespace;
+  ROOMS: FakeDurableObjectNamespace;
+  ROOM_STATE_WRITE_TOKEN: string;
+} {
   return {
+    GATEWAY: new FakeDurableObjectNamespace(),
     ROOMS: new FakeDurableObjectNamespace(),
     ROOM_STATE_WRITE_TOKEN: "secret-token"
   };
@@ -984,7 +1055,7 @@ describe("cloudflare gateway", () => {
 
   it("restores persisted room snapshots for state reads", async () => {
     const storage = new FakeStorage();
-    storage.values.set("room:AB12CD", baseRoom);
+    storage.values.set("room:AB23CD", baseRoom);
 
     const gateway = new RoomDurableObject(
       new FakeDurableObjectState(storage) as unknown as DurableObjectState
@@ -992,14 +1063,14 @@ describe("cloudflare gateway", () => {
 
     await gateway.ready;
 
-    const response = await gateway.fetch(new Request("https://example.com/rooms/ab12cd/state"));
+    const response = await gateway.fetch(new Request("https://example.com/rooms/ab23cd/state"));
 
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body).toEqual({
       ok: true,
       room: expect.objectContaining({
-        roomCode: "AB12CD"
+        roomCode: "AB23CD"
       })
     });
   });
@@ -1044,12 +1115,227 @@ describe("cloudflare gateway", () => {
   });
 });
 
+describe("room authority", () => {
+  it("persists guest sessions and match results for room-scoped sockets", async () => {
+    const storage = new FakeStorage();
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(socket as unknown as WebSocket, {
+      roomCode: "AB23CD"
+    });
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-create-room-authority",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-alice-authority",
+          sessionId: "session-alice-authority"
+        }
+      })
+    );
+    await flushAsyncWork();
+
+    const createAck = findLastAck(socket, "client:room:create");
+    expect(createAck).toMatchObject({
+      type: "server:ack",
+      payload: {
+        ok: true,
+        data: {
+          roomCode: "AB23CD",
+          playerId: "guest-alice-authority"
+        }
+      }
+    });
+    expect(storage.values.get("guest-session:AB23CD:guest-alice-authority")).toMatchObject({
+      sessionId: "session-alice-authority",
+      guestId: "guest-alice-authority",
+      nickname: "Alice",
+      roomCode: "AB23CD",
+      createdAt: expect.any(String),
+      lastSeenAt: expect.any(String)
+    });
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-start-room-authority",
+        type: "client:match:start",
+        payload: {
+          roomCode: "AB23CD"
+        }
+      })
+    );
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    socket.receive(
+      JSON.stringify({
+        id: "msg-finish-room-authority",
+        type: "client:typing:finish",
+        payload: {
+          roomCode: "AB23CD",
+          progressIndex: 10_000,
+          correctCharacters: 10_000,
+          totalTypedCharacters: 10_000,
+          mistakes: 0
+        }
+      })
+    );
+    await flushAsyncWork();
+
+    expect(storage.values.get("match-result:AB23CD:1")).toMatchObject({
+      roomCode: "AB23CD",
+      round: 1,
+      prompt: expect.objectContaining({
+        id: expect.any(String)
+      }),
+      result: expect.objectContaining({
+        roomCode: "AB23CD"
+      }),
+      createdAt: expect.any(String)
+    });
+  });
+
+  it("marks players disconnected before detaching socket state", async () => {
+    const storage = new FakeStorage();
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(socket as unknown as WebSocket, {
+      roomCode: "CD34EF"
+    });
+    socket.receive(
+      JSON.stringify({
+        id: "msg-create-disconnect",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-alice-disconnect",
+          sessionId: "session-alice-disconnect"
+        }
+      })
+    );
+    await flushAsyncWork();
+    socket.receive(
+      JSON.stringify({
+        id: "msg-start-disconnect",
+        type: "client:match:start",
+        payload: {
+          roomCode: "CD34EF"
+        }
+      })
+    );
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    socket.close();
+    await flushAsyncWork();
+
+    const snapshot = storage.values.get("room") as
+      | { room?: RoomState; disconnectedAt?: Record<string, number> }
+      | undefined;
+    const player = snapshot?.room?.players.find((entry) => entry.id === "guest-alice-disconnect");
+
+    expect(player).toMatchObject({
+      connected: false,
+      ready: false
+    });
+    expect(snapshot?.disconnectedAt?.["guest-alice-disconnect"]).toEqual(expect.any(Number));
+    expect(storage.alarmAt).not.toBeNull();
+  });
+
+  it("uses the gateway rate limiter across different room authorities", async () => {
+    const gatewayNamespace = new FakeGatewayRateLimitNamespace(1);
+    const env = {
+      GATEWAY: gatewayNamespace
+    };
+    const firstRoom = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState,
+      env
+    );
+    const secondRoom = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState,
+      env
+    );
+    const firstSocket = new FakeSocket();
+    const secondSocket = new FakeSocket();
+
+    await firstRoom.ready;
+    await secondRoom.ready;
+    firstRoom.attachSocket(firstSocket as unknown as WebSocket, {
+      roomCode: "RL0001",
+      clientIp: "127.0.0.1"
+    });
+    secondRoom.attachSocket(secondSocket as unknown as WebSocket, {
+      roomCode: "RL0002",
+      clientIp: "127.0.0.1"
+    });
+
+    firstSocket.receive(
+      JSON.stringify({
+        id: "msg-create-rate-1",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-rate-limit",
+          sessionId: "session-rate-1"
+        }
+      })
+    );
+    await flushAsyncWork();
+
+    secondSocket.receive(
+      JSON.stringify({
+        id: "msg-create-rate-2",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-rate-limit",
+          sessionId: "session-rate-2"
+        }
+      })
+    );
+    await flushAsyncWork();
+
+    expect(findLastAck(firstSocket, "client:room:create")).toMatchObject({
+      payload: {
+        ok: true
+      }
+    });
+    expect(findLastAck(secondSocket, "client:room:create")).toMatchObject({
+      payload: {
+        ok: false,
+        error: "central limited"
+      }
+    });
+    expect(gatewayNamespace.getByNameCalls).toEqual(["gateway", "gateway"]);
+    expect(gatewayNamespace.stub.calls).toEqual([
+      {
+        action: "create",
+        clientIp: "127.0.0.1",
+        guestId: "guest-rate-limit"
+      },
+      {
+        action: "create",
+        clientIp: "127.0.0.1",
+        guestId: "guest-rate-limit"
+      }
+    ]);
+  });
+});
+
 describe("worker handler", () => {
   it("rejects unauthorized state writes and forwards gateway requests", async () => {
     const env = createEnv();
 
     const forbidden = await worker.fetch(
-      new Request("https://example.com/rooms/ab12cd/state", {
+      new Request("https://example.com/rooms/ab23cd/state", {
         method: "POST",
         headers: {
           "content-type": "application/json"
@@ -1061,20 +1347,22 @@ describe("worker handler", () => {
 
     expect(forbidden.status).toBe(403);
     expect(env.ROOMS.stub.fetchCalls).toBe(0);
+    expect(env.GATEWAY.stub.fetchCalls).toBe(0);
 
     const forwarded = await worker.fetch(new Request("https://example.com/"), env as unknown as Env);
 
     expect(forwarded.status).toBe(200);
-    expect(env.ROOMS.getByNameCalls).toEqual(["gateway"]);
-    expect(env.ROOMS.stub.fetchCalls).toBe(1);
-    expect(env.ROOMS.stub.lastRequest?.url).toBe("https://example.com/");
+    expect(env.GATEWAY.getByNameCalls).toEqual(["gateway"]);
+    expect(env.GATEWAY.stub.fetchCalls).toBe(1);
+    expect(env.GATEWAY.stub.lastRequest?.url).toBe("https://example.com/");
+    expect(env.ROOMS.getByNameCalls).toEqual([]);
   });
 
-  it("allows authorized state writes through to the gateway authority", async () => {
+  it("allows authorized state writes through to the room authority", async () => {
     const env = createEnv();
 
     const response = await worker.fetch(
-      new Request("https://example.com/rooms/ab12cd/state", {
+      new Request("https://example.com/rooms/ab23cd/state", {
         method: "PUT",
         headers: {
           authorization: "Bearer secret-token",
@@ -1086,9 +1374,69 @@ describe("worker handler", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(env.ROOMS.getByNameCalls).toEqual(["gateway"]);
+    expect(env.ROOMS.getByNameCalls).toEqual(["AB23CD"]);
     expect(env.ROOMS.stub.fetchCalls).toBe(1);
     expect(env.ROOMS.stub.lastRequest?.method).toBe("PUT");
-    expect(env.ROOMS.stub.lastRequest?.url).toBe("https://example.com/rooms/ab12cd/state");
+    expect(env.ROOMS.stub.lastRequest?.url).toBe("https://example.com/rooms/ab23cd/state");
+    expect(env.GATEWAY.getByNameCalls).toEqual([]);
+  });
+
+  it("rejects invalid room route codes before durable object lookup", async () => {
+    const env = createEnv();
+
+    const response = await worker.fetch(
+      new Request("https://example.com/rooms/ab12cd/socket", {
+        headers: {
+          upgrade: "websocket"
+        }
+      }),
+      env as unknown as Env
+    );
+
+    expect(response.status).toBe(400);
+    expect(env.ROOMS.getByNameCalls).toEqual([]);
+    expect(env.GATEWAY.getByNameCalls).toEqual([]);
+  });
+
+  it("does not expose the gateway internal rate-limit endpoint", async () => {
+    const env = createEnv();
+
+    const response = await worker.fetch(
+      new Request(`https://example.com${GATEWAY_ROOM_RATE_LIMIT_PATH}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          action: "create",
+          clientIp: "127.0.0.1",
+          guestId: "guest-test"
+        })
+      }),
+      env as unknown as Env
+    );
+
+    expect(response.status).toBe(403);
+    expect(env.ROOMS.getByNameCalls).toEqual([]);
+    expect(env.GATEWAY.getByNameCalls).toEqual([]);
+  });
+
+  it("forwards room websocket routes to room authorities", async () => {
+    const env = createEnv();
+
+    const response = await worker.fetch(
+      new Request("https://example.com/rooms/xy987z/socket", {
+        headers: {
+          upgrade: "websocket"
+        }
+      }),
+      env as unknown as Env
+    );
+
+    expect(response.status).toBe(200);
+    expect(env.ROOMS.getByNameCalls).toEqual(["XY987Z"]);
+    expect(env.ROOMS.stub.fetchCalls).toBe(1);
+    expect(env.ROOMS.stub.lastRequest?.url).toBe("https://example.com/rooms/xy987z/socket");
+    expect(env.GATEWAY.getByNameCalls).toEqual([]);
   });
 });

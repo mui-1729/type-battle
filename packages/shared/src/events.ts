@@ -20,6 +20,7 @@ export type JoinRoomPayload = {
 };
 
 export type CreateRoomPayload = {
+  roomCode?: string;
   nickname: string;
   guestId: string;
   sessionId: string;

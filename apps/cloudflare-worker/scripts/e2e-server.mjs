@@ -1,6 +1,7 @@
 import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { RoomDurableObject } from "../dist/src/worker.js";
+import worker, { RoomAuthorityDurableObject, RoomDurableObject } from "../dist/src/worker.js";
+import { isRoomRoutePath, resolveRoomRoute } from "../dist/src/room-routing.js";
 
 class FakeStorage {
   constructor() {
@@ -77,6 +78,37 @@ class FakeDurableObjectState {
   }
 }
 
+class FakeDurableObjectNamespace {
+  constructor(DurableObjectClass, env) {
+    this.DurableObjectClass = DurableObjectClass;
+    this.env = env;
+    this.instances = new Map();
+  }
+
+  getByName(name) {
+    return this.getInstance(name);
+  }
+
+  getInstance(name) {
+    const normalizedName = String(name).toUpperCase();
+    const existing = this.instances.get(normalizedName);
+
+    if (existing) {
+      return existing;
+    }
+
+    const storage = new FakeStorage();
+    const instance = new this.DurableObjectClass(new FakeDurableObjectState(storage), this.env);
+    storage.alarmHandler = () => {
+      if (typeof instance.alarm === "function") {
+        void instance.alarm();
+      }
+    };
+    this.instances.set(normalizedName, instance);
+    return instance;
+  }
+}
+
 class NodeWebSocketAdapter {
   constructor(socket) {
     this.socket = socket;
@@ -126,16 +158,21 @@ class NodeWebSocketAdapter {
 
 async function main() {
   const port = Number(process.env.PORT ?? 8787);
-  const storage = new FakeStorage();
-  const gateway = new RoomDurableObject(new FakeDurableObjectState(storage));
-  storage.alarmHandler = () => gateway.alarm();
+  const env = {
+    ROOM_STATE_WRITE_TOKEN: "e2e-token"
+  };
+  const gatewayNamespace = new FakeDurableObjectNamespace(RoomDurableObject, env);
+  const roomNamespace = new FakeDurableObjectNamespace(RoomAuthorityDurableObject, env);
 
-  await gateway.ready;
+  env.GATEWAY = gatewayNamespace;
+  env.ROOMS = roomNamespace;
+
+  await gatewayNamespace.getByName("gateway").ready;
 
   const server = http.createServer(async (request, response) => {
     try {
       const webRequest = await toWebRequest(request);
-      const webResponse = await gateway.fetch(webRequest);
+      const webResponse = await worker.fetch(webRequest, env);
       await writeWebResponse(response, webResponse);
     } catch (error) {
       response.statusCode = 500;
@@ -153,9 +190,21 @@ async function main() {
 
   server.on("upgrade", (request, socket, head) => {
     webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
+      const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
+      const route = resolveRoomRoute(url.pathname);
+      if (!route && isRoomRoutePath(url.pathname)) {
+        webSocket.close(1008, "Invalid room code");
+        return;
+      }
+
       const adapter = new NodeWebSocketAdapter(webSocket);
-      gateway.attachSocket(adapter, {
-        clientIp: readClientIp(request)
+      const target = route?.action === "socket"
+        ? roomNamespace.getByName(route.roomCode)
+        : gatewayNamespace.getByName("gateway");
+
+      target.attachSocket(adapter, {
+        clientIp: readClientIp(request),
+        ...(route?.action === "socket" ? { roomCode: route.roomCode } : {})
       });
     });
   });

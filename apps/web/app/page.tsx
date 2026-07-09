@@ -14,6 +14,7 @@ import {
   calculateProgress,
   calculateWpm,
   getDailyChallengeInfo,
+  createRoomCode,
   normalizeNickname,
   pickDailyChallengePrompt,
   validateNickname
@@ -105,6 +106,7 @@ const ROOM_CODE_KEY = "type-battle:room-code";
 
 export default function HomePage() {
   const socketRef = useRef<ClientSocket | null>(null);
+  const [socketMode, setSocketMode] = useState<"practice" | "room" | null>(null);
   const settingsRef = useRef(DEFAULT_PLAYER_SETTINGS);
   const nicknameRef = useRef(DEFAULT_PLAYER_SETTINGS.nickname);
   const nicknameInputRef = useRef<HTMLInputElement | null>(null);
@@ -270,13 +272,73 @@ export default function HomePage() {
     });
   }, []);
 
+  const attachSocketHandlers = useCallback((socket: ClientSocket) => {
+    socket.on("connect", () => setConnected(true));
+    socket.on("disconnect", () => setConnected(false));
+    socket.on("room:state", (nextRoom) => {
+      setRoom(nextRoom);
+      setResult(nextRoom.result ?? null);
+    });
+    socket.on("player:progress", (nextRoom) => {
+      setRoom(nextRoom);
+      setResult(nextRoom.result ?? null);
+    });
+    socket.on("match:countdown", ({ room: nextRoom, serverStartAt }) => {
+      resetTyping();
+      setRoom(nextRoom);
+      setResult(nextRoom.result ?? null);
+      setCountdownMs(Math.max(serverStartAt - Date.now(), 0));
+    });
+    socket.on("match:started", (nextRoom) => {
+      resetTyping();
+      setCountdownMs(0);
+      setRoom(nextRoom);
+      setResult(nextRoom.result ?? null);
+    });
+    socket.on("match:result", (nextResult) => {
+      setResult(nextResult);
+      setCountdownMs(0);
+      setRoom((current) =>
+        current && current.roomCode === nextResult.roomCode
+          ? {
+              ...current,
+              status: "finished",
+              result: nextResult
+            }
+          : current
+      );
+    });
+    socket.on("match:error", ({ message }) => setError(message));
+  }, [resetTyping]);
+
+  const connectSocket = useCallback(
+    (url: string, kind: "practice" | "room") => {
+    socketRef.current?.disconnect();
+    const socket = createRealtimeSocket({ transport: REALTIME_TRANSPORT, url });
+    socketRef.current = socket;
+    setSocketMode(kind);
+    attachSocketHandlers(socket);
+    return socket;
+    },
+    [attachSocketHandlers]
+  );
+
+  const connectPracticeSocket = useCallback(() => connectSocket(realtimeUrl, "practice"), [connectSocket, realtimeUrl]);
+  const connectRoomSocket = useCallback(
+    (roomCode: string) => {
+    const roomUrl = new URL(`/rooms/${roomCode}/socket`, realtimeUrl).toString();
+    return connectSocket(roomUrl, "room");
+    },
+    [connectSocket, realtimeUrl]
+  );
+
   const startPractice = useCallback(() => {
     const socket = socketRef.current;
     const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
     const validationError = validateNickname(currentNickname);
     const deviceKind = detectDeviceKind();
 
-    if (!realtimeConfigured || !socket || validationError || !guestId) {
+    if (!realtimeConfigured || !socket || socketMode !== "practice" || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
       return;
     }
@@ -303,7 +365,7 @@ export default function HomePage() {
         resetTyping();
       }
     );
-  }, [guestId, practiceCategory, realtimeConfigured, resetTyping]);
+  }, [guestId, practiceCategory, realtimeConfigured, resetTyping, socketMode]);
 
   const startDailyChallenge = useCallback(() => {
     const socket = socketRef.current;
@@ -311,7 +373,7 @@ export default function HomePage() {
     const validationError = validateNickname(currentNickname);
     const deviceKind = detectDeviceKind();
 
-    if (!realtimeConfigured || !socket || validationError || !guestId) {
+    if (!realtimeConfigured || !socket || socketMode !== "practice" || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
       return;
     }
@@ -335,7 +397,7 @@ export default function HomePage() {
       setPracticeProgress(createEmptyProgress());
       resetTyping();
     });
-  }, [guestId, realtimeConfigured, resetTyping]);
+  }, [guestId, realtimeConfigured, resetTyping, socketMode]);
 
   const finishPractice = useCallback(
     (finalProgress: ProgressState) => {
@@ -410,51 +472,46 @@ export default function HomePage() {
       return;
     }
 
-    const socket: ClientSocket = createRealtimeSocket({ transport: REALTIME_TRANSPORT, url: realtimeUrl });
-    socketRef.current = socket;
+    const storedRoomCode = window.localStorage.getItem(ROOM_CODE_KEY);
+    const guestIdFromSession = session?.guestId ?? "";
+    const sessionIdFromSession = session?.sessionId ?? "";
 
-    socket.on("connect", () => setConnected(true));
-    socket.on("disconnect", () => setConnected(false));
-    socket.on("room:state", (nextRoom) => {
-      setRoom(nextRoom);
-      setResult(nextRoom.result ?? null);
-    });
-    socket.on("player:progress", (nextRoom) => {
-      setRoom(nextRoom);
-      setResult(nextRoom.result ?? null);
-    });
-    socket.on("match:countdown", ({ room: nextRoom, serverStartAt }) => {
-      resetTyping();
-      setRoom(nextRoom);
-      setResult(nextRoom.result ?? null);
-      setCountdownMs(Math.max(serverStartAt - Date.now(), 0));
-    });
-    socket.on("match:started", (nextRoom) => {
-      resetTyping();
-      setCountdownMs(0);
-      setRoom(nextRoom);
-      setResult(nextRoom.result ?? null);
-    });
-    socket.on("match:result", (nextResult) => {
-      setResult(nextResult);
-      setCountdownMs(0);
-      setRoom((current) =>
-        current && current.roomCode === nextResult.roomCode
-          ? {
-              ...current,
-              status: "finished",
-              result: nextResult
-            }
-          : current
+    if (!storedRoomCode || !guestIdFromSession || !sessionIdFromSession) {
+      connectPracticeSocket();
+    } else {
+      const socket = connectRoomSocket(storedRoomCode);
+      socket.emit(
+        "room:join",
+        {
+          roomCode: storedRoomCode,
+          nickname: normalizeNickname(nicknameRef.current),
+          guestId: guestIdFromSession,
+          sessionId: sessionIdFromSession,
+          deviceKind: detectDeviceKind()
+        },
+        (response) => {
+          if (!response.ok) {
+            window.localStorage.removeItem(ROOM_CODE_KEY);
+            connectPracticeSocket();
+            return;
+          }
+
+          setError("");
+          setPlayerId(response.data.playerId);
+          setRoom(response.data.room);
+          setResult(response.data.room.result ?? null);
+          updateGuestSession();
+          clearPracticeState();
+        }
       );
-    });
-    socket.on("match:error", ({ message }) => setError(message));
+    }
 
     return () => {
-      socket.disconnect();
+      socketRef.current?.disconnect();
       socketRef.current = null;
+      setSocketMode(null);
     };
-  }, [realtimeConfigured, realtimeUrl, resetTyping]);
+  }, [clearPracticeState, connectPracticeSocket, connectRoomSocket, realtimeConfigured, updateGuestSession]);
 
   useEffect(() => {
     if (!settingsHydrated) {
@@ -519,48 +576,6 @@ export default function HomePage() {
 
     persistMistakeTrendRecord(window.localStorage, mistakeTrendRecord);
   }, [mistakeTrendRecord, settingsHydrated]);
-
-  useEffect(() => {
-    if (!connected || !guestId || !sessionId || !settingsHydrated) {
-      return;
-    }
-
-    const storedRoomCode = window.localStorage.getItem(ROOM_CODE_KEY);
-
-    if (!storedRoomCode) {
-      return;
-    }
-
-    const socket = socketRef.current;
-
-    if (!socket) {
-      return;
-    }
-
-    socket.emit(
-      "room:join",
-      {
-        roomCode: storedRoomCode,
-        nickname: normalizeNickname(nicknameRef.current),
-        guestId,
-        sessionId,
-        deviceKind: detectDeviceKind()
-      },
-      (response) => {
-        if (!response.ok) {
-          window.localStorage.removeItem(ROOM_CODE_KEY);
-          return;
-        }
-
-        setError("");
-        setPlayerId(response.data.playerId);
-        setRoom(response.data.room);
-        setResult(response.data.room.result ?? null);
-        updateGuestSession();
-        clearPracticeState();
-      }
-    );
-  }, [clearPracticeState, connected, guestId, sessionId, settingsHydrated, updateGuestSession]);
 
   useEffect(() => {
     if (!currentPlayer) {
@@ -805,19 +820,21 @@ export default function HomePage() {
   ]);
 
   const createRoom = () => {
-    const socket = socketRef.current;
     const currentNickname = nicknameRef.current;
+    const roomCode = createRoomCode();
     const validationError = validateNickname(currentNickname);
 
-    if (!realtimeConfigured || !socket || validationError || !guestId) {
+    if (!realtimeConfigured || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
       return;
     }
 
     void primeSoundPlayback();
+    const socket = connectRoomSocket(roomCode);
     socket.emit(
       "room:create",
       {
+        roomCode,
         nickname: normalizeNickname(currentNickname),
         guestId,
         sessionId,
@@ -826,6 +843,7 @@ export default function HomePage() {
       (response) => {
         if (!response.ok) {
           setError(response.error);
+          connectPracticeSocket();
           return;
         }
 
@@ -841,20 +859,26 @@ export default function HomePage() {
   };
 
   const joinRoom = () => {
-    const socket = socketRef.current;
     const currentNickname = nicknameRef.current;
+    const roomCode = joinCode.trim().toUpperCase();
     const validationError = validateNickname(currentNickname);
 
-    if (!realtimeConfigured || !socket || validationError || !guestId) {
+    if (!roomCode) {
+      setError("ルームコードを入力してください。");
+      return;
+    }
+
+    if (!realtimeConfigured || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
       return;
     }
 
     void primeSoundPlayback();
+    const socket = connectRoomSocket(roomCode);
     socket.emit(
       "room:join",
       {
-        roomCode: joinCode.trim().toUpperCase(),
+        roomCode,
         nickname: normalizeNickname(currentNickname),
         guestId,
         sessionId,
@@ -863,6 +887,7 @@ export default function HomePage() {
       (response) => {
         if (!response.ok) {
           setError(response.error);
+          connectPracticeSocket();
           return;
         }
 
@@ -878,10 +903,13 @@ export default function HomePage() {
   };
 
   const leaveRoom = () => {
-    if (socketRef.current && room) {
-      socketRef.current.emit("room:leave", { roomCode: room.roomCode });
+    const socket = socketRef.current;
+
+    if (socket && room) {
+      socket.emit("room:leave", { roomCode: room.roomCode });
     }
 
+    connectPracticeSocket();
     setRoom(null);
     setResult(null);
     setPlayerId("");

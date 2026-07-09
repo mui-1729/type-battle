@@ -85,10 +85,9 @@
 - guest session を実装する。
 - structured logging、軽量 rate limit、health endpoint を実装する。
 - Cloudflare Worker の health / WebSocket flow を E2E で確認する。
+- branch protection を有効化する。
 
 ### まだ足りない要件
-
-- branch protection を有効化する。
 
 ## Public Beta 要件
 

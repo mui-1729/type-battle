@@ -76,7 +76,7 @@
 - lint / typecheck / unit test / build / Playwright E2E を実行する。
 - E2E は room join、2 player completion、reload rejoin、COM match、practice mode、long disconnect forfeit、player settings を確認する。
 - Cloudflare Worker test は room creation、join、finish、rejoin、COM、forfeit、storage persistence を確認する。
-- Cloudflare Worker runtime test は gateway の state persistence と restart 後の復元を確認する。
+- Cloudflare Worker runtime test は room authority の state persistence と restart 後の復元を確認する。
 
 ### Player settings
 
@@ -121,10 +121,10 @@
 - web は Vercel 前提で進める。
 - production build は Cloudflare transport を既定にしている。
 - Playwright E2E は Cloudflare transport を明示し、local Worker bridge server を使う。
+- `main` は repository ruleset で保護している。
 
 ## 未実装
 
-- branch protection
 - Redis scaling
 - profile / ranking / rating
 - moderation / report / block
