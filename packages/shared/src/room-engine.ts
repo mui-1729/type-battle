@@ -507,10 +507,18 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
     return { error: "切断中のプレイヤーがいます。" };
   }
 
+  let prompt: Prompt;
+
+  try {
+    prompt = selectPromptForRoom(room, Date.now());
+  } catch {
+    return { error: "有効な課題文がありません。" };
+  }
+
   room.status = "countdown";
-  room.prompt = selectPromptForRoom(room, Date.now());
-  if (!room.promptHistory.includes(room.prompt.id)) {
-    room.promptHistory.push(room.prompt.id);
+  room.prompt = prompt;
+  if (!room.promptHistory.includes(prompt.id)) {
+    room.promptHistory.push(prompt.id);
   }
   room.serverStartAt = Date.now() + COUNTDOWN_MS;
   if (room.matchRule === "timeAttack") {
@@ -699,11 +707,20 @@ export function rematch(socketId: string, roomCode: string): { room: RoomState }
     return { error: "終了した試合だけ再戦できます。" };
   }
 
+  const nextRound = room.round + 1;
+  let prompt: Prompt;
+
+  try {
+    prompt = selectPromptForRoom(room, Date.now() + nextRound);
+  } catch {
+    return { error: "有効な課題文がありません。" };
+  }
+
   room.status = "waiting";
-  room.round += 1;
-  room.prompt = selectPromptForRoom(room, Date.now() + room.round);
-  if (!room.promptHistory.includes(room.prompt.id)) {
-    room.promptHistory.push(room.prompt.id);
+  room.round = nextRound;
+  room.prompt = prompt;
+  if (!room.promptHistory.includes(prompt.id)) {
+    room.promptHistory.push(prompt.id);
   }
   delete room.serverStartAt;
   delete room.matchEndsAt;

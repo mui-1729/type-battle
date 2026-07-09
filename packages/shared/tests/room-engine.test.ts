@@ -101,6 +101,42 @@ describe("room engine config", () => {
     }
   });
 
+  it("returns an error without advancing the room when no valid prompt exists", () => {
+    const standardPrompts = PROMPTS.filter((prompt) => prompt.category === "standard");
+    const snapshots = standardPrompts.map((prompt) => ({
+      prompt,
+      value: {
+        id: prompt.id,
+        text: prompt.text,
+        category: prompt.category,
+        enabled: prompt.enabled,
+        typing: { ...prompt.typing }
+      }
+    }));
+
+    for (const prompt of standardPrompts) {
+      prompt.enabled = false;
+    }
+
+    try {
+      const created = createRoom({
+        nickname: "Alice",
+        guestId: "guest_alice_no_valid_prompt",
+        socketId: "socket_alice_no_valid_prompt"
+      });
+
+      const started = startMatch("socket_alice_no_valid_prompt", created.room.roomCode);
+
+      expect(started).toEqual({ error: "有効な課題文がありません。" });
+      expect(getRoom(created.room.roomCode)?.status).toBe("waiting");
+      expect(getRoom(created.room.roomCode)?.prompt).toBeUndefined();
+    } finally {
+      for (const { prompt, value } of snapshots) {
+        Object.assign(prompt, value);
+      }
+    }
+  });
+
   it("invalidates the previous socket when an existing player rejoins", () => {
     const created = createRoom({
       nickname: "Alice",
