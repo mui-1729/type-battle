@@ -26,10 +26,6 @@ export default {
       }
     }
 
-    if (route?.action === "state") {
-      return env.ROOMS.getByName("gateway").fetch(request);
-    }
-
     return env.ROOMS.getByName("gateway").fetch(request);
   }
 } satisfies ExportedHandler<Env>;
