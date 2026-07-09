@@ -1,4 +1,4 @@
-import { getDailyChallengeInfo, pickDailyChallengePrompt, pickPrompt, PROMPTS } from "./prompts.js";
+import { getDailyChallengeInfo, getPromptsByCategory, pickDailyChallengePrompt, pickPrompt } from "./prompts.js";
 import { calculateAccuracy, calculateWpm, rankPlayers } from "./scoring.js";
 import { createRoomCode, normalizeNickname } from "./validation.js";
 import type {
@@ -82,8 +82,6 @@ const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistake
   hard: { charsPerTick: 3, mistakeChance: 0.01 }
 };
 
-// Check import of PlayerState. It should have maxStreak and currentStreak.
-// If it doesn't, I must update the shared package.
 type InternalPlayer = PlayerState & {
   socketId: string;
   disconnectedAt?: number;
@@ -906,18 +904,42 @@ function createUniqueRoomCode(): string {
 }
 
 function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
-  const prompts = PROMPTS.filter((prompt) => prompt.category === room.promptCategory);
-  const unseenPrompts = prompts.filter((prompt) => !room.promptHistory.includes(prompt.id));
-  const pool = unseenPrompts.length > 0 ? unseenPrompts : prompts;
+  const selected = selectPromptFromPool(
+    getPromptsByCategory(room.promptCategory),
+    room.promptHistory,
+    room.prompt,
+    seed
+  );
 
-  if (pool.length === 0) {
-    return pickPrompt(room.promptCategory, seed);
+  if (selected) {
+    return selected;
   }
 
+  const fallback = selectPromptFromPool(getPromptsByCategory("standard"), room.promptHistory, room.prompt, seed);
+
+  if (fallback) {
+    return fallback;
+  }
+
+  throw new Error("有効な課題文がありません。");
+}
+
+function selectPromptFromPool(
+  prompts: Prompt[],
+  promptHistory: string[],
+  currentPrompt: Prompt | undefined,
+  seed: number
+): Prompt | null {
+  if (prompts.length === 0) {
+    return null;
+  }
+
+  const unseenPrompts = prompts.filter((prompt) => !promptHistory.includes(prompt.id));
+  const pool = unseenPrompts.length > 0 ? unseenPrompts : prompts;
   const index = Math.abs(seed) % pool.length;
   let selected = pool[index] ?? pool[0]!;
 
-  if (room.prompt && pool.length > 1 && selected.id === room.prompt.id) {
+  if (currentPrompt && pool.length > 1 && selected.id === currentPrompt.id) {
     selected = pool[(index + 1) % pool.length]!;
   }
 
