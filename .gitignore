@@ -5,6 +5,7 @@ coverage/
 playwright-report/
 test-results/
 .turbo/
+.claude/worktrees/
 .env
 .env.local
 .DS_Store

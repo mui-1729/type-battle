@@ -75,8 +75,8 @@
 - GitHub Actions CI がある。
 - lint / typecheck / unit test / build / Playwright E2E を実行する。
 - E2E は room join、2 player completion、reload rejoin、COM match、practice mode、long disconnect forfeit、player settings を確認する。
-- smoke test スクリプトで health endpoint と socket 接続を確認できる。
-- realtime unit test は room creation、join、finish、rejoin、COM、forfeit を確認する。
+- Cloudflare Worker test は room creation、join、finish、rejoin、COM、forfeit、storage persistence を確認する。
+- Cloudflare Worker runtime test は gateway の state persistence と restart 後の復元を確認する。
 
 ### Player settings
 
@@ -94,11 +94,10 @@
 - Home と result 画面から feedback page に遷移できる。
 - GitHub issue template で room code / steps / expected / actual を収集できる。
 - guest session を localStorage で保存し、reload / reconnect に使っている。
-- server 側で guest session と match result を PostgreSQL に記録できる。
+- Cloudflare Durable Object storage に guest session と match result を記録できる。
 
 ### Observability / Rate limit
 
-- `pino` による構造化ログ。
 - IP、guest id、socket ごとの軽量な rate limit。
 - 試合開始、終了、接続数などの基本メトリクス。
 - health endpoint (`/health`) によるメトリクス露出。
@@ -106,15 +105,22 @@
 
 ### Deployment
 
-- realtime サーバーの `Dockerfile`。
-- `tests/smoke-test.ts` による health / socket / room create の確認。
+- Cloudflare Worker の `wrangler.toml`。
+- `npm run test:e2e` による Cloudflare transport の browser flow 確認。
 
 ## 部分実装
+
+### Cloudflare transport contract
+
+- `packages/shared/src/cloudflare-events.ts` に Cloudflare 向けの message contract がある。
+- `apps/web/app/_lib/realtime-client.ts` で Cloudflare WebSocket transport を扱う。
+- `apps/cloudflare-worker` に Cloudflare 側の realtime backend があり、production ではそれを既定にしている。
 
 ### Deployment automation
 
 - web は Vercel 前提で進める。
-- realtime の外部デプロイは当面行わない。
+- production build は Cloudflare transport を既定にしている。
+- Playwright E2E は Cloudflare transport を明示し、local Worker bridge server を使う。
 
 ## 未実装
 

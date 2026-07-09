@@ -76,6 +76,24 @@ export function setRoomEngineConfig(config: RoomEngineConfig): void {
   };
 }
 
+function runRoomEngineHook(callback: () => void | Promise<void>, scope: string): void {
+  try {
+    void Promise.resolve(callback()).catch((error: unknown) => {
+      engineHooks.logger?.warn?.({
+        event: "room_engine_hook_error",
+        scope,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    });
+  } catch (error) {
+    engineHooks.logger?.warn?.({
+      event: "room_engine_hook_error",
+      scope,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
 const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistakeChance: number }> = {
   easy: { charsPerTick: 1, mistakeChance: 0.05 },
   normal: { charsPerTick: 2, mistakeChance: 0.02 },
@@ -84,6 +102,7 @@ const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistake
 
 type InternalPlayer = PlayerState & {
   socketId: string;
+  sessionId: string;
   disconnectedAt?: number;
 };
 
@@ -133,6 +152,42 @@ export function getMetrics() {
   };
 }
 
+export function resetRoomEngineState(): void {
+  rooms.clear();
+  socketIndex.clear();
+  metrics.matchesStarted = 0;
+  metrics.matchesFinished = 0;
+  metrics.disconnectCount = 0;
+  metrics.serverErrors = 0;
+}
+
+export function restoreRoomState(room: RoomState, playerSessions: Record<string, string> = {}): void {
+  const roomCode = room.roomCode.toUpperCase();
+
+  rooms.set(roomCode, {
+    roomCode,
+    hostPlayerId: room.hostPlayerId,
+    status: room.status,
+    matchRule: room.matchRule,
+    botDifficulty: room.botDifficulty,
+    promptCategory: room.promptCategory,
+    promptHistory: room.prompt ? [room.prompt.id] : [],
+    players: new Map(
+      room.players.map((player) => [
+        player.id,
+        toInternalPlayer(player, room.hostPlayerId, playerSessions[player.id] ?? player.id)
+      ])
+    ),
+    createdAt: Date.now(),
+    lastActivityAt: Date.now(),
+    round: 1,
+    ...(room.prompt ? { prompt: room.prompt } : {}),
+    ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
+    ...(room.matchEndsAt !== undefined ? { matchEndsAt: room.matchEndsAt } : {}),
+    ...(room.result ? { result: room.result } : {})
+  });
+}
+
 export function createRoom(input: {
   nickname: string;
   guestId: string;
@@ -144,7 +199,14 @@ export function createRoom(input: {
   playerId: string;
 } {
   const roomCode = createUniqueRoomCode();
-  const player = createPlayer(input.guestId, input.nickname, input.socketId, true, input.deviceKind);
+  const player = createPlayer(
+    input.guestId,
+    input.nickname,
+    input.socketId,
+    true,
+    input.sessionId ?? input.guestId,
+    input.deviceKind
+  );
   const room: InternalRoom = {
     roomCode,
     hostPlayerId: player.id,
@@ -161,12 +223,15 @@ export function createRoom(input: {
 
   rooms.set(roomCode, room);
   socketIndex.set(input.socketId, { roomCode, playerId: player.id });
-  void engineHooks.recordGuestSession?.({
-    sessionId: input.sessionId ?? input.guestId,
-    guestId: input.guestId,
-    nickname: player.nickname,
-    roomCode
-  });
+  runRoomEngineHook(
+    () => engineHooks.recordGuestSession?.({
+      sessionId: input.sessionId ?? input.guestId,
+      guestId: input.guestId,
+      nickname: player.nickname,
+      roomCode
+    }),
+    "guest_session"
+  );
 
   return { room: toPublicRoom(room), playerId: player.id };
 }
@@ -189,18 +254,31 @@ export function joinRoom(input: {
   const existing = room.players.get(input.guestId);
 
   if (existing) {
+    if (existing.sessionId !== (input.sessionId ?? input.guestId)) {
+      return { error: "このプレイヤーは別のセッションで使用されています。" };
+    }
+
+    const previousSocketId = existing.socketId;
+    if (previousSocketId && previousSocketId !== input.socketId) {
+      socketIndex.delete(previousSocketId);
+    }
+
     existing.socketId = input.socketId;
     existing.connected = true;
     delete existing.disconnectedAt;
     existing.nickname = normalizeNickname(input.nickname);
     existing.deviceKind = input.deviceKind ?? existing.deviceKind ?? "desktop";
     socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: existing.id });
-    void engineHooks.recordGuestSession?.({
-      sessionId: input.sessionId ?? input.guestId,
-      guestId: input.guestId,
-      nickname: existing.nickname,
-      roomCode: room.roomCode
-    });
+    ensureConnectedHost(room);
+    runRoomEngineHook(
+      () => engineHooks.recordGuestSession?.({
+        sessionId: input.sessionId ?? input.guestId,
+        guestId: input.guestId,
+        nickname: existing.nickname,
+        roomCode: room.roomCode
+      }),
+      "guest_session"
+    );
     return { room: toPublicRoom(room), playerId: existing.id };
   }
 
@@ -212,15 +290,26 @@ export function joinRoom(input: {
     return { error: "このルームは満員です。" };
   }
 
-  const player = createPlayer(input.guestId, input.nickname, input.socketId, false, input.deviceKind);
+  const player = createPlayer(
+    input.guestId,
+    input.nickname,
+    input.socketId,
+    false,
+    input.sessionId ?? input.guestId,
+    input.deviceKind
+  );
   room.players.set(player.id, player);
   socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: player.id });
-  void engineHooks.recordGuestSession?.({
-    sessionId: input.sessionId ?? input.guestId,
-    guestId: input.guestId,
-    nickname: player.nickname,
-    roomCode: room.roomCode
-  });
+  ensureConnectedHost(room);
+  runRoomEngineHook(
+    () => engineHooks.recordGuestSession?.({
+      sessionId: input.sessionId ?? input.guestId,
+      guestId: input.guestId,
+      nickname: player.nickname,
+      roomCode: room.roomCode
+    }),
+    "guest_session"
+  );
 
   return { room: toPublicRoom(room), playerId: player.id };
 }
@@ -326,7 +415,7 @@ export function leaveBySocket(socketId: string): RoomState | null {
     if (activePlayers.length === 0) {
       return toPublicRoom(room);
     }
-    
+
     // Transfer host to the first active human player, or remain if no humans
     const nextHost = activePlayers.find(p => !p.isBot) || activePlayers[0];
     if (nextHost) {
@@ -451,7 +540,7 @@ function areHumansFinished(room: InternalRoom): boolean {
   return [...room.players.values()]
     .filter((p) => !p.isBot)
     .every((p) => {
-      if (!p.connected) {
+      if (p.forfeited) {
         return true;
       }
 
@@ -461,6 +550,21 @@ function areHumansFinished(room: InternalRoom): boolean {
 
       return p.progressIndex >= getTypingLength(room, p);
     });
+}
+
+function ensureConnectedHost(room: InternalRoom): void {
+  const currentHost = room.players.get(room.hostPlayerId);
+
+  if (currentHost?.connected || currentHost?.isBot) {
+    return;
+  }
+
+  const nextHost = [...room.players.values()].find((player) => player.connected && !player.isBot)
+    ?? [...room.players.values()].find((player) => player.connected || player.isBot);
+
+  if (nextHost) {
+    room.hostPlayerId = nextHost.id;
+  }
 }
 
 function finalizeUnfinishedBots(room: InternalRoom): void {
@@ -525,6 +629,10 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
 }
 
 export function updateProgress(socketId: string, payload: TypingProgress): RoomState | MatchResult | null {
+  if (!isValidTypingProgressPayload(payload)) {
+    return null;
+  }
+
   const context = getContext(socketId, payload.roomCode);
 
   if (!context || context.room.status !== "playing" || !context.room.prompt) {
@@ -542,6 +650,10 @@ export function updateProgress(socketId: string, payload: TypingProgress): RoomS
 }
 
 export function finishTyping(socketId: string, payload: TypingFinish): MatchResult | RoomState | null {
+  if (!isValidTypingProgressPayload(payload)) {
+    return null;
+  }
+
   const context = getContext(socketId, payload.roomCode);
 
   if (!context || context.room.status !== "playing" || !context.room.prompt) {
@@ -744,21 +856,25 @@ function toMatchResult(room: InternalRoom): MatchResult {
 
 function finalizeRoom(room: InternalRoom): MatchResult {
   room.status = "finished";
-  room.result = toMatchResult(room);
+  const result = toMatchResult(room);
+  room.result = result;
   metrics.matchesFinished += 1;
 
-  void engineHooks.recordMatchResult?.({
-    roomCode: room.roomCode,
-    round: room.round,
-    prompt: room.prompt ?? pickPrompt(),
-    promptCategory: room.promptCategory,
-    botDifficulty: room.botDifficulty,
-    playerCount: room.players.size,
-    hasBot: [...room.players.values()].some((player) => player.isBot),
-    result: room.result
-  });
+  runRoomEngineHook(
+    () => engineHooks.recordMatchResult?.({
+      roomCode: room.roomCode,
+      round: room.round,
+      prompt: room.prompt ?? pickPrompt(),
+      promptCategory: room.promptCategory,
+      botDifficulty: room.botDifficulty,
+      playerCount: room.players.size,
+      hasBot: [...room.players.values()].some((player) => player.isBot),
+      result
+    }),
+    "match_result"
+  );
 
-  return room.result;
+  return result;
 }
 
 function toPublicRoom(room: InternalRoom): RoomState {
@@ -854,6 +970,7 @@ function addBotPlayer(room: InternalRoom): void {
     ready: true,
     isHost: false,
     isBot: true,
+    sessionId: BOT_PLAYER_ID,
     deviceKind: "desktop",
     progressIndex: 0,
     correctCharacters: 0,
@@ -871,11 +988,13 @@ function createPlayer(
   nickname: string,
   socketId: string,
   isHost: boolean,
+  sessionId: string,
   deviceKind: DeviceKind = "desktop"
 ): InternalPlayer {
   return {
     id,
     socketId,
+    sessionId,
     nickname: normalizeNickname(nickname),
     connected: true,
     ready: false,
@@ -890,6 +1009,15 @@ function createPlayer(
     currentStreak: 0,
     wpm: 0,
     accuracy: 100
+  };
+}
+
+function toInternalPlayer(player: PlayerState, hostPlayerId: string, sessionId: string): InternalPlayer {
+  return {
+    ...player,
+    socketId: player.id,
+    sessionId,
+    isHost: player.id === hostPlayerId
   };
 }
 
@@ -946,8 +1074,8 @@ function selectPromptFromPool(
   return selected;
 }
 
-const ROOM_TTL_MS = 60 * 1000; // 1 minute
-const DISCONNECT_GRACE_MS = 30_000;
+export const ROOM_TTL_MS = 60 * 1000; // 1 minute
+export const DISCONNECT_GRACE_MS = 30_000;
 
 export function cleanupExpiredRooms(): void {
   const now = Date.now();
@@ -1053,6 +1181,22 @@ export function startDailyPractice(nickname: string): { practiceId: string; prom
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(Math.floor(value), min), max);
+}
+
+function isValidTypingProgressPayload(payload: TypingProgress): boolean {
+  return (
+    Number.isInteger(payload.progressIndex) &&
+    payload.progressIndex >= 0 &&
+    Number.isInteger(payload.correctCharacters) &&
+    payload.correctCharacters >= 0 &&
+    Number.isInteger(payload.totalTypedCharacters) &&
+    payload.totalTypedCharacters >= 0 &&
+    Number.isInteger(payload.mistakes) &&
+    payload.mistakes >= 0 &&
+    payload.correctCharacters <= payload.totalTypedCharacters &&
+    payload.mistakes <= payload.totalTypedCharacters &&
+    payload.progressIndex <= payload.totalTypedCharacters
+  );
 }
 
 function maybeFinalizeRoom(room: InternalRoom): MatchResult | null {

@@ -1,0 +1,25 @@
+{
+  "name": "@type-battle/cloudflare-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run",
+    "lint": "eslint src tests",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@type-battle/shared": "0.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260705.1",
+    "esbuild": "^0.28.1",
+    "miniflare": "^4.20260706.0",
+    "wrangler": "^4.107.0",
+    "ws": "^8.21.0"
+  }
+}

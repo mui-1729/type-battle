@@ -10,6 +10,7 @@ AI エージェントが作業する場合もこのルールに従います。
 - 大きい作業は tracking issue で分割し、個別 issue ごとに PR を作る。
 - PR は小さく保ち、同じファイルを複数人で同時に触らないようにする。
 - Cloudflare 移行のような並行作業では、tracking issue の担当分けと merge 順を優先する。
+- 複数人で並行作業する場合は、担当 issue ごとに `git worktree` を分ける。
 
 ## ブランチ命名
 
@@ -44,6 +45,45 @@ chore/8-cloudflare-worker-skeleton
 - 説明は短くし、30 文字程度を目安にする。
 - `main` に直接 commit しない。
 
+
+## worktree 運用
+
+複数人や複数エージェントで並行作業する場合は、`main` の checkout で直接作業せず、issue ごとに worktree を作ります。
+
+### 基本手順
+
+```bash
+git switch main
+git pull --ff-only origin main
+git worktree add -b <type>/<issue-number>-<short-description> ../type-battle-issue-<issue-number> main
+```
+
+作業は作成した worktree 側で行います。
+
+```bash
+cd ../type-battle-issue-<issue-number>
+```
+
+### 例
+
+```bash
+git worktree add -b feature/9-cloudflare-transport-contract ../type-battle-issue-9 main
+git worktree add -b refactor/10-room-engine-runtime-neutral ../type-battle-issue-10 main
+git worktree add -b feature/16-web-cloudflare-transport ../type-battle-issue-16 main
+```
+
+### ルール
+
+- `main` の作業ディレクトリでは直接実装しない。
+- 1 issue につき 1 worktree を基本にする。
+- worktree 名は `../type-battle-issue-<issue-number>` を基本にする。
+- 新しい issue に着手する前に、元の repo の `main` を `origin/main` に合わせる。
+- merge 済み branch の worktree は削除する。
+
+```bash
+git worktree remove ../type-battle-issue-<issue-number>
+git branch -d <type>/<issue-number>-<short-description>
+```
 ## コミットメッセージ
 
 Conventional Commits 形式を使います。
@@ -117,7 +157,7 @@ feat(web): Cloudflare realtime adapterを追加 (#16)
 ## Cloudflare 移行時の注意
 
 - `apps/web/app/page.tsx` は web integration 担当だけが触る。
-- `apps/realtime/src/rooms.ts` は room engine 担当だけが触る。
+- `packages/shared/src/room-engine.ts` は room engine 担当だけが触る。
 - `apps/cloudflare-worker/wrangler.toml` は Cloudflare 基盤担当と backend 担当で事前に同期する。
 - `package-lock.json` を触る PR は同時に複数出さない。
 - cleanup PR は最後に単独で出す。
@@ -128,6 +168,7 @@ feat(web): Cloudflare realtime adapterを追加 (#16)
 ## Git Rules
 
 - Start every branch from the latest `main`.
+- Use `git worktree` for issue-based parallel work.
 - Branch naming: `<type>/<issue-number>-<short-description>`.
 - Include the issue number in every branch name.
 - Use Conventional Commits for commits and PR titles.

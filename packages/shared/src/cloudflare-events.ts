@@ -1,4 +1,12 @@
-import type { CreateRoomData, CreateRoomPayload, JoinRoomData, JoinRoomPayload, PracticeSessionData, ReadyPayload, RoomCodePayload } from "./events.js";
+import type {
+  CreateRoomData,
+  CreateRoomPayload,
+  JoinRoomData,
+  JoinRoomPayload,
+  PracticeSessionData,
+  ReadyPayload,
+  RoomCodePayload
+} from "./events.js";
 import type {
   AckResponse,
   BotDifficulty,
@@ -21,7 +29,7 @@ type CloudflareClientCommandMap = {
   };
   "client:room:leave": {
     request: RoomCodePayload;
-    response: RoomState;
+    response: RoomState | null;
   };
   "client:player:ready": {
     request: ReadyPayload;
@@ -136,12 +144,15 @@ export type CloudflareServerEventEnvelope<TType extends CloudflareServerEventTyp
       }
     : never;
 
-export type CloudflareServerMessage =
-  | CloudflareAckEnvelope
-  | CloudflareServerEventEnvelope;
-
+export type CloudflareServerMessage = CloudflareAckEnvelope | CloudflareServerEventEnvelope;
 export type CloudflareClientMessage = CloudflareRequestEnvelope;
+export type CloudflareRequestPayload<TType extends CloudflareClientMessageType> =
+  CloudflareClientCommandMap[TType]["request"];
+export type CloudflareResponsePayload<TType extends CloudflareClientMessageType> =
+  CloudflareClientCommandMap[TType]["response"];
+export type CloudflareServerEventPayload<TType extends CloudflareServerEventType> =
+  CloudflareServerEventMap[TType];
 
-export type CloudflareRequestPayload<TType extends CloudflareClientMessageType> = CloudflareClientCommandMap[TType]["request"];
-export type CloudflareResponsePayload<TType extends CloudflareClientMessageType> = CloudflareClientCommandMap[TType]["response"];
-export type CloudflareServerEventPayload<TType extends CloudflareServerEventType> = CloudflareServerEventMap[TType];
+export type CloudflareClientEventName = CloudflareClientMessageType;
+export type CloudflareServerEventName = CloudflareServerEventType;
+export type CloudflareInboundMessage = CloudflareServerMessage;
