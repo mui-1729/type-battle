@@ -121,10 +121,10 @@
 - web は Vercel 前提で進める。
 - production build は Cloudflare transport を既定にしている。
 - Playwright E2E は Cloudflare transport を明示し、local Worker bridge server を使う。
+- `main` は repository ruleset で保護している。
 
 ## 未実装
 
-- branch protection
 - Redis scaling
 - profile / ranking / rating
 - moderation / report / block

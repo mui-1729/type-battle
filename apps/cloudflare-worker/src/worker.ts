@@ -1,5 +1,6 @@
 import { resolveRoomRoute } from "./room-routing.js";
-import { RealtimeGatewayDurableObject as RoomDurableObject } from "./realtime-gateway.js";
+import { RealtimeGatewayDurableObject as GatewayDurableObject } from "./realtime-gateway.js";
+import { RoomAuthorityDurableObject } from "./room-authority.js";
 
 export interface Env {
   ROOMS: DurableObjectNamespace;
@@ -26,11 +27,15 @@ export default {
       }
     }
 
+    if (route?.action === "state" || route?.action === "socket") {
+      return env.ROOMS.getByName(route.roomCode).fetch(request);
+    }
+
     return env.ROOMS.getByName("gateway").fetch(request);
   }
 } satisfies ExportedHandler<Env>;
 
-export { RoomDurableObject };
+export { GatewayDurableObject, RoomAuthorityDurableObject as RoomDurableObject };
 
 function isAuthorizedStateWrite(request: Request, env: Env): boolean {
   if (!env.ROOM_STATE_WRITE_TOKEN) {

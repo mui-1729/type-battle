@@ -117,8 +117,8 @@ type DailyPracticePayload = {
 
 type PersistedRoomSnapshot = {
   room: RoomState;
-  playerSessions: Record<string, string>;
-  disconnectedAt: Record<string, number>;
+  playerSessions?: Record<string, string>;
+  disconnectedAt?: Record<string, number>;
 };
 
 type InternalRoomRecord = (typeof rooms) extends Map<string, infer T> ? T : never;
@@ -945,7 +945,10 @@ export class RealtimeGatewayDurableObject {
   }
 
   private restorePersistedRoom(snapshot: PersistedRoomSnapshot): void {
-    restoreRoomStateIfValid(snapshot.room, snapshot.playerSessions);
+    const playerSessions = snapshot.playerSessions ?? {};
+    const disconnectedAt = snapshot.disconnectedAt ?? {};
+
+    restoreRoomStateIfValid(snapshot.room, playerSessions);
 
     const normalizedRoomCode = normalizeRoomCode(snapshot.room.roomCode);
     const internalRoom = rooms.get(normalizedRoomCode);
@@ -956,22 +959,19 @@ export class RealtimeGatewayDurableObject {
           continue;
         }
 
-        const disconnectedAt = snapshot.disconnectedAt[playerId];
+        const disconnectedAtValue = disconnectedAt[playerId];
         player.connected = false;
         player.ready = false;
 
-        if (disconnectedAt !== undefined) {
-          player.disconnectedAt = disconnectedAt;
+        if (disconnectedAtValue !== undefined) {
+          player.disconnectedAt = disconnectedAtValue;
         } else {
           player.disconnectedAt = Date.now();
         }
       }
     }
 
-    this.playerSessionsByRoom.set(
-      normalizedRoomCode,
-      new Map(Object.entries(snapshot.playerSessions))
-    );
+    this.playerSessionsByRoom.set(normalizedRoomCode, new Map(Object.entries(playerSessions)));
   }
 
   private async scheduleMaintenanceAlarm(): Promise<void> {

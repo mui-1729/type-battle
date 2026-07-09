@@ -376,7 +376,7 @@ describe("realtime client", () => {
   });
 
   it("bridges the Cloudflare adapter to the worker gateway and returns acks", async () => {
-    const { RoomDurableObject } = await import("../../cloudflare-worker/src/worker");
+    const { GatewayDurableObject: RoomDurableObject } = await import("../../cloudflare-worker/src/worker");
 
     const storage = new FakeStorage();
     const gateway = new RoomDurableObject(
@@ -409,6 +409,7 @@ describe("realtime client", () => {
     socket.emit(
       "room:create",
       {
+        roomCode: "AB12CD",
         nickname: "Alice",
         guestId: "guest-alice-bridge",
         sessionId: "session-alice-bridge"
