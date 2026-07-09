@@ -68,6 +68,56 @@ describe("prompts", () => {
     ).toBe("課題文は240文字以内にしてください。");
   });
 
+  it("accepts prompts at the boundary lengths and rejects control characters", () => {
+    expect(
+      validatePrompt({
+        id: "boundary",
+        text: "ああ",
+        category: "short",
+        typing: {
+          romaji: "aa",
+          hiragana: "ああ"
+        }
+      })
+    ).toBeNull();
+
+    expect(
+      validatePrompt({
+        id: "boundary-long",
+        text: "あ".repeat(240),
+        category: "standard",
+        typing: {
+          romaji: "a".repeat(240),
+          hiragana: "あ".repeat(240)
+        }
+      })
+    ).toBeNull();
+
+    expect(
+      validatePrompt({
+        id: "control-text",
+        text: "あ\nい",
+        category: "short",
+        typing: {
+          romaji: "ai",
+          hiragana: "あい"
+        }
+      })
+    ).toBe("課題文に改行や制御文字を含めないでください。");
+
+    expect(
+      validatePrompt({
+        id: "control-guide",
+        text: "有効",
+        category: "short",
+        typing: {
+          romaji: "a\ti",
+          hiragana: "あい"
+        }
+      })
+    ).toBe("入力ガイドに改行や制御文字を含めないでください。");
+  });
+
   it("skips invalid prompts when selecting from a prompt pool", () => {
     const invalidPrompt = {
       id: "invalid",
@@ -90,6 +140,30 @@ describe("prompts", () => {
     } satisfies Prompt;
 
     expect(pickPrompt("short", 0, [], [invalidPrompt, validPrompt]).id).toBe("valid");
+  });
+
+  it("falls back to a valid standard prompt when the requested category has none", () => {
+    const invalidShortPrompt = {
+      id: "invalid-short",
+      text: "無効",
+      category: "short",
+      enabled: false,
+      typing: {
+        romaji: "mukou",
+        hiragana: "むこう"
+      }
+    } satisfies Prompt;
+    const validStandardPrompt = {
+      id: "valid-standard",
+      text: "有効",
+      category: "standard",
+      typing: {
+        romaji: "yuukou",
+        hiragana: "ゆうこう"
+      }
+    } satisfies Prompt;
+
+    expect(pickPrompt("short", 0, [], [invalidShortPrompt, validStandardPrompt]).id).toBe("valid-standard");
   });
 
   it("creates a deterministic daily challenge key and prompt", () => {

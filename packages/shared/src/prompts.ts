@@ -361,7 +361,14 @@ export function pickPrompt(
   const pool = availablePrompts.length > 0 ? availablePrompts : validPrompts;
 
   if (pool.length === 0) {
-    return PROMPTS[0]!;
+    const fallbackPrompts = getPromptsByCategory("standard", prompts);
+
+    if (fallbackPrompts.length === 0) {
+      throw new Error("有効な課題文がありません。");
+    }
+
+    const fallbackIndex = Math.abs(seed) % fallbackPrompts.length;
+    return fallbackPrompts[fallbackIndex] ?? fallbackPrompts[0]!;
   }
 
   const index = Math.abs(seed) % pool.length;
