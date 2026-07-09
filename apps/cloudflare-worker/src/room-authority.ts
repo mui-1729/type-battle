@@ -46,6 +46,7 @@ type SocketState = {
 
 type AttachSocketOptions = {
   clientIp?: string;
+  roomCode?: string;
 };
 
 type ParsedClientMessage = {
@@ -98,6 +99,14 @@ type PersistedRoomSnapshot = {
   disconnectedAt?: Record<string, number>;
 };
 
+type RoomAuthorityEnv = {
+  GATEWAY?: {
+    getByName(name: string): {
+      checkRoomRequestRateLimit(input: RoomRateLimitInput): Promise<RoomRateLimitResult>;
+    };
+  };
+};
+
 type InternalPlayer = PlayerState & {
   socketId: string;
   sessionId: string;
@@ -128,8 +137,27 @@ type GatewayTimers = {
   persist?: ReturnType<typeof setTimeout> | undefined;
 };
 
+type GuestSessionStorageRecord = Parameters<NonNullable<RoomEngineHooks["recordGuestSession"]>>[0] & {
+  createdAt: string;
+  lastSeenAt: string;
+};
+
+type MatchResultStorageRecord = Parameters<NonNullable<RoomEngineHooks["recordMatchResult"]>>[0] & {
+  createdAt: string;
+};
+
+type RoomRateLimitAction = "create" | "join";
+type RoomRateLimitInput = {
+  action: RoomRateLimitAction;
+  clientIp: string;
+  guestId: string;
+};
+type RoomRateLimitResult = { ok: true } | { ok: false; error: string };
+
 const OPEN_STATE = 1;
 const ROOM_STORAGE_KEY = "room";
+const GUEST_SESSION_STORAGE_PREFIX = "guest-session:";
+const MATCH_RESULT_STORAGE_PREFIX = "match-result:";
 const BOT_TICK_MS = 500;
 const ROOM_TTL_MS = 60_000;
 const DISCONNECT_GRACE_MS = 30_000;
@@ -167,8 +195,18 @@ export class RoomAuthorityDurableObject {
   private room: InternalRoom | null = null;
   readonly ready: Promise<void>;
 
-  constructor(private readonly state: DurableObjectState) {
-    this.hooks = {};
+  constructor(
+    private readonly state: DurableObjectState,
+    private readonly env: RoomAuthorityEnv = {}
+  ) {
+    this.hooks = {
+      recordGuestSession: (input) => {
+        void this.persistGuestSessionRecord(input);
+      },
+      recordMatchResult: (input) => {
+        void this.persistMatchResultRecord(input);
+      }
+    };
     this.ready = this.state.blockConcurrencyWhile(async () => {
       await this.restoreRoom();
     });
@@ -189,7 +227,7 @@ export class RoomAuthorityDurableObject {
     }
 
     if (isWebSocketUpgrade(request)) {
-      return this.handleWebSocketUpgrade(request);
+      return this.handleWebSocketUpgrade(request, route?.action === "socket" ? route.roomCode : undefined);
     }
 
     if (url.pathname === "/" || url.pathname === "/health") {
@@ -255,7 +293,7 @@ export class RoomAuthorityDurableObject {
     });
   }
 
-  private async handleWebSocketUpgrade(request: Request): Promise<Response> {
+  private async handleWebSocketUpgrade(request: Request, roomCode?: string): Promise<Response> {
     const upgradeHeader = request.headers.get("Upgrade");
 
     if (upgradeHeader?.toLowerCase() !== "websocket") {
@@ -267,7 +305,8 @@ export class RoomAuthorityDurableObject {
     const server = pair[1];
 
     this.attachSocket(server as unknown as CloudflareSocketLike, {
-      clientIp: readClientIp(request.headers)
+      clientIp: readClientIp(request.headers),
+      ...(roomCode ? { roomCode } : {})
     });
 
     return new Response(null, {
@@ -278,10 +317,17 @@ export class RoomAuthorityDurableObject {
 
   attachSocket(socket: CloudflareSocketLike, options: AttachSocketOptions = {}): string {
     const socketId = crypto.randomUUID();
+    const roomCode = options.roomCode ? normalizeRoomCode(options.roomCode) : null;
+
+    if (roomCode) {
+      this.ensureRoomCode(roomCode);
+    }
+
     this.sockets.set(socketId, socket);
     this.socketStates.set(socketId, {
       socketId,
-      clientIp: normalizeClientIp(options.clientIp)
+      clientIp: normalizeClientIp(options.clientIp),
+      ...(roomCode ? { roomCode } : {})
     });
     socket.accept();
 
@@ -357,19 +403,22 @@ export class RoomAuthorityDurableObject {
   }
 
   private async handleSocketClose(socketId: string): Promise<void> {
-    const roomCode = this.socketStates.get(socketId)?.roomCode ?? this.roomCode;
-    this.detachSocket(socketId);
+    await this.disconnectSocket(socketId);
+  }
 
+  private async disconnectSocket(socketId: string): Promise<void> {
+    const roomCode = this.socketStates.get(socketId)?.roomCode ?? this.roomCode;
     const room = this.leaveBySocket(socketId);
+    this.detachSocket(socketId);
 
     if (room) {
       this.broadcastRoomState(room);
-      void this.persistRoom(room.roomCode);
+      await this.persistRoom(room.roomCode);
       return;
     }
 
     if (roomCode) {
-      void this.persistRoom(roomCode);
+      await this.persistRoom(roomCode);
     }
   }
 
@@ -381,20 +430,9 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    const clientIp = this.socketStates.get(socketId)?.clientIp ?? "unknown";
-    if (!this.roomCreateIpLimiter.isAllowed(clientIp)) {
-      this.sendAck(socketId, messageId, "client:room:create", {
-        ok: false,
-        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
-      });
-      return;
-    }
-
-    if (!this.roomCreateGuestLimiter.isAllowed(parsedPayload.guestId)) {
-      this.sendAck(socketId, messageId, "client:room:create", {
-        ok: false,
-        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
-      });
+    const rateLimit = await this.checkRoomRequestRateLimit("create", socketId, parsedPayload.guestId);
+    if (!rateLimit.ok) {
+      this.sendAck(socketId, messageId, "client:room:create", { ok: false, error: rateLimit.error });
       return;
     }
 
@@ -444,20 +482,9 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    const clientIp = this.socketStates.get(socketId)?.clientIp ?? "unknown";
-    if (!this.roomJoinIpLimiter.isAllowed(clientIp)) {
-      this.sendAck(socketId, messageId, "client:room:join", {
-        ok: false,
-        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
-      });
-      return;
-    }
-
-    if (!this.roomJoinGuestLimiter.isAllowed(parsedPayload.guestId)) {
-      this.sendAck(socketId, messageId, "client:room:join", {
-        ok: false,
-        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
-      });
+    const rateLimit = await this.checkRoomRequestRateLimit("join", socketId, parsedPayload.guestId);
+    if (!rateLimit.ok) {
+      this.sendAck(socketId, messageId, "client:room:join", { ok: false, error: rateLimit.error });
       return;
     }
 
@@ -761,14 +788,14 @@ export class RoomAuthorityDurableObject {
     const socket = this.sockets.get(socketId);
 
     if (!socket || socket.readyState !== OPEN_STATE) {
-      this.detachSocket(socketId);
+      void this.disconnectSocket(socketId);
       return;
     }
 
     try {
       socket.send(JSON.stringify(message));
     } catch {
-      this.detachSocket(socketId);
+      void this.disconnectSocket(socketId);
     }
   }
 
@@ -819,6 +846,43 @@ export class RoomAuthorityDurableObject {
     }
 
     await this.scheduleMaintenanceAlarm();
+  }
+
+  private async persistGuestSessionRecord(
+    input: Parameters<NonNullable<RoomEngineHooks["recordGuestSession"]>>[0]
+  ): Promise<void> {
+    const roomCode = normalizeRoomCode(input.roomCode);
+    const storageKey = `${GUEST_SESSION_STORAGE_PREFIX}${roomCode}:${input.guestId}`;
+    const now = new Date().toISOString();
+
+    try {
+      const existing = await this.state.storage.get<GuestSessionStorageRecord>(storageKey);
+      await this.state.storage.put<GuestSessionStorageRecord>(storageKey, {
+        ...input,
+        roomCode,
+        createdAt: existing?.createdAt ?? now,
+        lastSeenAt: now
+      });
+    } catch {
+      // Guest-session persistence is best-effort and must not interrupt active rooms.
+    }
+  }
+
+  private async persistMatchResultRecord(
+    input: Parameters<NonNullable<RoomEngineHooks["recordMatchResult"]>>[0]
+  ): Promise<void> {
+    const roomCode = normalizeRoomCode(input.roomCode);
+    const storageKey = `${MATCH_RESULT_STORAGE_PREFIX}${roomCode}:${input.round}`;
+
+    try {
+      await this.state.storage.put<MatchResultStorageRecord>(storageKey, {
+        ...input,
+        roomCode,
+        createdAt: new Date().toISOString()
+      });
+    } catch {
+      // Result persistence is best-effort; gameplay completion must still be emitted.
+    }
   }
 
   private createPersistedRoomSnapshot(room: InternalRoom): PersistedRoomSnapshot {
@@ -1162,8 +1226,16 @@ export class RoomAuthorityDurableObject {
   }
 
   private recordPlayerSession(roomCode: string, playerId: string, sessionId: string): void {
-    void roomCode;
     this.playerSessions.set(playerId, sessionId);
+    const normalizedRoomCode = normalizeRoomCode(roomCode);
+    const nickname = this.room?.players.get(playerId)?.nickname ?? playerId;
+
+    void this.hooks.recordGuestSession?.({
+      sessionId,
+      guestId: playerId,
+      nickname,
+      roomCode: normalizedRoomCode
+    });
   }
 
   private validateExistingPlayerSession(guestId: string, sessionId: string): string | null {
@@ -1186,6 +1258,68 @@ export class RoomAuthorityDurableObject {
     }
 
     return null;
+  }
+
+  private async checkRoomRequestRateLimit(
+    action: RoomRateLimitAction,
+    socketId: string,
+    guestId: string
+  ): Promise<RoomRateLimitResult> {
+    const clientIp = this.socketStates.get(socketId)?.clientIp ?? "unknown";
+    const gateway = this.env.GATEWAY?.getByName("gateway");
+
+    if (gateway) {
+      try {
+        return await gateway.checkRoomRequestRateLimit({ action, clientIp, guestId });
+      } catch {
+        return {
+          ok: false,
+          error: "リクエストを処理できませんでした。時間をおいて再試行してください。"
+        };
+      }
+    }
+
+    return this.checkLocalRoomRequestRateLimit(action, clientIp, guestId);
+  }
+
+  private checkLocalRoomRequestRateLimit(
+    action: RoomRateLimitAction,
+    clientIp: string,
+    guestId: string
+  ): RoomRateLimitResult {
+    if (action === "create") {
+      if (!this.roomCreateIpLimiter.isAllowed(clientIp)) {
+        return {
+          ok: false,
+          error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
+        };
+      }
+
+      if (!this.roomCreateGuestLimiter.isAllowed(guestId)) {
+        return {
+          ok: false,
+          error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
+        };
+      }
+
+      return { ok: true };
+    }
+
+    if (!this.roomJoinIpLimiter.isAllowed(clientIp)) {
+      return {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
+      };
+    }
+
+    if (!this.roomJoinGuestLimiter.isAllowed(guestId)) {
+      return {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
+      };
+    }
+
+    return { ok: true };
   }
 
   private joinRoom(input: {
@@ -1222,7 +1356,8 @@ export class RoomAuthorityDurableObject {
       this.socketStates.set(input.socketId, {
         socketId: input.socketId,
         clientIp: this.socketStates.get(input.socketId)?.clientIp ?? "unknown",
-        playerId: existing.id
+        playerId: existing.id,
+        roomCode: this.room.roomCode
       });
       ensureConnectedHost(this.room);
       this.recordPlayerSession(this.room.roomCode, existing.id, input.sessionId ?? input.guestId);
@@ -1249,7 +1384,8 @@ export class RoomAuthorityDurableObject {
     this.socketStates.set(input.socketId, {
       socketId: input.socketId,
       clientIp: this.socketStates.get(input.socketId)?.clientIp ?? "unknown",
-      playerId: player.id
+      playerId: player.id,
+      roomCode: this.room.roomCode
     });
     ensureConnectedHost(this.room);
     this.recordPlayerSession(this.room.roomCode, player.id, input.sessionId ?? input.guestId);
@@ -1396,7 +1532,7 @@ export class RoomAuthorityDurableObject {
     applyProgress(context.player, context.room, payload);
     context.room.lastActivityAt = Date.now();
 
-    const result = maybeFinalizeRoom(context.room);
+    const result = this.maybeFinalizeRoom(context.room);
     if (result) {
       return result;
     }
@@ -1424,14 +1560,14 @@ export class RoomAuthorityDurableObject {
       context.player.finishTimeMs = now - (context.room.serverStartAt ?? now);
     }
 
-    const result = maybeFinalizeRoom(context.room);
+    const result = this.maybeFinalizeRoom(context.room);
     if (result) {
       return result;
     }
 
     if (areHumansFinished(context.room)) {
       finalizeUnfinishedBots(context.room);
-      return finalizeRoom(context.room);
+      return this.finalizeRoom(context.room);
     }
 
     return toPublicRoom(context.room);
@@ -1588,7 +1724,7 @@ export class RoomAuthorityDurableObject {
       bot.finishTimeMs = bot.finishedAt - (this.room.serverStartAt ?? bot.finishedAt);
     }
 
-    const result = maybeFinalizeRoom(this.room);
+    const result = this.maybeFinalizeRoom(this.room);
     if (result) {
       return { type: "result", result };
     }
@@ -1597,7 +1733,7 @@ export class RoomAuthorityDurableObject {
       if (bot.progressIndex < promptLength) {
         finalizeUnfinishedBots(this.room);
       }
-      return { type: "result", result: finalizeRoom(this.room) };
+      return { type: "result", result: this.finalizeRoom(this.room) };
     }
 
     return { type: "progress", room: toPublicRoom(this.room) };
@@ -1611,8 +1747,38 @@ export class RoomAuthorityDurableObject {
     finalizeUnfinishedBots(room);
   }
 
+  private maybeFinalizeRoom(room: InternalRoom): MatchResult | null {
+    if (room.matchRule === "hpBattle") {
+      const hasElimination = [...room.players.values()].some((player) => (player.hp ?? 1) <= 0);
+
+      if (hasElimination) {
+        return this.finalizeRoom(room);
+      }
+    }
+
+    if (areHumansFinished(room)) {
+      finalizeUnfinishedBots(room);
+      return this.finalizeRoom(room);
+    }
+
+    return null;
+  }
+
   private finalizeRoom(room: InternalRoom): MatchResult {
-    return finalizeRoom(room);
+    const result = finalizeRoom(room);
+
+    void this.hooks.recordMatchResult?.({
+      roomCode: room.roomCode,
+      round: room.round,
+      prompt: room.prompt ?? pickPrompt(),
+      promptCategory: room.promptCategory,
+      botDifficulty: room.botDifficulty,
+      playerCount: room.players.size,
+      hasBot: [...room.players.values()].some((player) => player.isBot),
+      result
+    });
+
+    return result;
   }
 }
 
@@ -2047,23 +2213,6 @@ function ensureConnectedHost(room: InternalRoom): void {
   if (nextHost) {
     room.hostPlayerId = nextHost.id;
   }
-}
-
-function maybeFinalizeRoom(room: InternalRoom): MatchResult | null {
-  if (room.matchRule === "hpBattle") {
-    const hasElimination = [...room.players.values()].some((player) => (player.hp ?? 1) <= 0);
-
-    if (hasElimination) {
-      return finalizeRoom(room);
-    }
-  }
-
-  if (areHumansFinished(room)) {
-    finalizeUnfinishedBots(room);
-    return finalizeRoom(room);
-  }
-
-  return null;
 }
 
 function syncMatchRuleState(room: InternalRoom): void {

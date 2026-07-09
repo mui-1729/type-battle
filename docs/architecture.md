@@ -13,7 +13,9 @@ Next.js Web App
   v
 Cloudflare Worker
   |
-  | Durable Object gateway
+  | Durable Object bindings
+  | - GATEWAY: practice / shared rate limit
+  | - ROOMS: room authority per room code
   v
 Durable Object SQLite storage
 ```
@@ -33,6 +35,7 @@ apps/
   cloudflare-worker/
     src/
       realtime-gateway.ts
+      room-authority.ts
       worker.ts
 packages/
   shared/

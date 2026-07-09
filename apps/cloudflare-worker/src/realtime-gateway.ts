@@ -115,6 +115,16 @@ type DailyPracticePayload = {
   nickname: string;
 };
 
+type RoomRateLimitAction = "create" | "join";
+
+type RoomRateLimitInput = {
+  action: RoomRateLimitAction;
+  clientIp: string;
+  guestId: string;
+};
+
+type RoomRateLimitResult = { ok: true } | { ok: false; error: string };
+
 type PersistedRoomSnapshot = {
   room: RoomState;
   playerSessions?: Record<string, string>;
@@ -209,6 +219,49 @@ export class RealtimeGatewayDurableObject {
     await this.ready;
     await this.runMaintenance();
     await this.scheduleMaintenanceAlarm();
+  }
+
+  async checkRoomRequestRateLimit(input: RoomRateLimitInput): Promise<RoomRateLimitResult> {
+    const clientIp = normalizeClientIp(input.clientIp);
+    const guestId = input.guestId.trim();
+
+    if (!guestId) {
+      return { ok: false, error: INVALID_MESSAGE_ERROR };
+    }
+
+    if (input.action === "create") {
+      if (!this.roomCreateIpLimiter.isAllowed(clientIp)) {
+        return {
+          ok: false,
+          error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
+        };
+      }
+
+      if (!this.roomCreateGuestLimiter.isAllowed(guestId)) {
+        return {
+          ok: false,
+          error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
+        };
+      }
+
+      return { ok: true };
+    }
+
+    if (!this.roomJoinIpLimiter.isAllowed(clientIp)) {
+      return {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
+      };
+    }
+
+    if (!this.roomJoinGuestLimiter.isAllowed(guestId)) {
+      return {
+        ok: false,
+        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
+      };
+    }
+
+    return { ok: true };
   }
 
   attachSocket(socket: CloudflareSocketLike, options: AttachSocketOptions = {}): string {

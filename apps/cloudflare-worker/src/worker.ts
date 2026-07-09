@@ -3,6 +3,7 @@ import { RealtimeGatewayDurableObject as GatewayDurableObject } from "./realtime
 import { RoomAuthorityDurableObject } from "./room-authority.js";
 
 export interface Env {
+  GATEWAY: DurableObjectNamespace;
   ROOMS: DurableObjectNamespace;
   ROOM_STATE_WRITE_TOKEN: string;
 }
@@ -31,7 +32,7 @@ export default {
       return env.ROOMS.getByName(route.roomCode).fetch(request);
     }
 
-    return env.ROOMS.getByName("gateway").fetch(request);
+    return env.GATEWAY.getByName("gateway").fetch(request);
   }
 } satisfies ExportedHandler<Env>;
 
