@@ -29,7 +29,7 @@ async function createRuntime(persistenceDir: string): Promise<Miniflare> {
   return new Miniflare({
     script: bundledWorkerScript,
     modules: true,
-    compatibilityDate: "2026-07-09",
+    compatibilityDate: "2026-07-04",
     durableObjects: {
       ROOMS: "RoomDurableObject"
     },
