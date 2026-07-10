@@ -13,7 +13,8 @@ if (!healthResponse.ok) {
   process.exit(1);
 }
 
-const roomCode = crypto.randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase();
+const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const roomCode = Array.from(crypto.getRandomValues(new Uint8Array(6)), (value) => ROOM_CODE_ALPHABET[value & 31]).join("");
 const wsUrl = new URL(`/rooms/${roomCode}/socket`, workerUrl);
 wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
 

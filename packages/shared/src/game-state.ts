@@ -17,6 +17,7 @@ export type PlayerState = {
   isBot: boolean;
   progressIndex: number;
   typingProgressIndex?: number;
+  pendingInput?: string;
   correctCharacters: number;
   totalTypedCharacters: number;
   mistakes: number;

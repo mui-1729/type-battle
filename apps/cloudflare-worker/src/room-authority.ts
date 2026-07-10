@@ -2675,7 +2675,7 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     isBot: player.isBot,
     progressIndex: player.progressIndex,
     ...(player.deviceKind === "desktop"
-      ? { typingProgressIndex: player.typingProgressIndex + Array.from(player.pendingInput).length }
+      ? { typingProgressIndex: player.typingProgressIndex, pendingInput: player.pendingInput }
       : {}),
     correctCharacters: player.correctCharacters,
     totalTypedCharacters: player.totalTypedCharacters,

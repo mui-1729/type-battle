@@ -641,18 +641,28 @@ export default function HomePage() {
     }
 
     setLocalProgress((previous) => {
-      if (currentPlayer.progressIndex <= previous.progressIndex) {
+      const nextProgressIndex = currentPlayer.typingProgressIndex ?? currentPlayer.progressIndex;
+      const nextPendingInput = currentPlayer.pendingInput ?? "";
+      if (
+        nextProgressIndex === previous.progressIndex &&
+        nextPendingInput === previous.pendingInput &&
+        currentPlayer.correctCharacters === previous.correctCharacters &&
+        currentPlayer.totalTypedCharacters === previous.totalTypedCharacters &&
+        currentPlayer.mistakes === previous.mistakes &&
+        currentPlayer.currentStreak === previous.currentStreak &&
+        currentPlayer.maxStreak === previous.maxStreak
+      ) {
         return previous;
       }
 
       return {
-        progressIndex: currentPlayer.typingProgressIndex ?? currentPlayer.progressIndex,
+        progressIndex: nextProgressIndex,
         correctCharacters: currentPlayer.correctCharacters,
         totalTypedCharacters: currentPlayer.totalTypedCharacters,
         mistakes: currentPlayer.mistakes,
         currentStreak: currentPlayer.currentStreak,
         maxStreak: currentPlayer.maxStreak,
-        pendingInput: previous.pendingInput
+        pendingInput: nextPendingInput
       };
     });
   }, [currentPlayer]);

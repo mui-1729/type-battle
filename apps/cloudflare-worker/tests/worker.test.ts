@@ -530,11 +530,23 @@ describe("room authority", () => {
 
     const rejoinAck = findLastAck(rejoinedSocket, "client:room:join") as { payload?: { data?: { room?: RoomState } } };
     const player = rejoinAck.payload?.data?.room?.players.find((entry) => entry.id === "guest-rejoin-progress");
+    const completedGuideLength = plan.units
+      .slice(0, partialUnitIndex)
+      .reduce((length, unit) => length + unit.guide.length, 0);
     expect(player).toMatchObject({
-      typingProgressIndex: partialInput.length,
+      typingProgressIndex: completedGuideLength,
+      pendingInput: plan.units[partialUnitIndex]!.guide[0],
       correctCharacters: partialInput.length,
       totalTypedCharacters: partialInput.length
     });
+
+    const remainingInput = `${plan.units[partialUnitIndex]!.guide.slice(1)}${plan.units
+      .slice(partialUnitIndex + 1)
+      .map((unit) => unit.guide)
+      .join("")}`;
+    sendTypingInput(rejoinedSocket, "RJ34KL", remainingInput);
+    await flushAsyncWork();
+    expect(parseMessages(rejoinedSocket).some((message) => message.type === "server:match:result")).toBe(true);
   });
 
   it("marks players disconnected before detaching socket state", async () => {
