@@ -878,6 +878,7 @@ export class RoomAuthorityDurableObject {
     delete socketState.playerId;
     delete socketState.roomCode;
     this.socketStates.set(socketId, socketState);
+    this.scheduleUnjoinedSocketTimeout(socketId);
   }
 
   private detachSocket(socketId: string): void {
@@ -956,6 +957,7 @@ export class RoomAuthorityDurableObject {
         createdAt: existing?.createdAt ?? now,
         lastSeenAt: now
       });
+      await this.scheduleMaintenanceAlarm();
     } catch {
       // Guest-session persistence is best-effort and must not interrupt active rooms.
     }
@@ -973,6 +975,7 @@ export class RoomAuthorityDurableObject {
         roomCode,
         createdAt: new Date().toISOString()
       });
+      await this.scheduleMaintenanceAlarm();
     } catch {
       // Result persistence is best-effort; gameplay completion must still be emitted.
     }
@@ -1276,17 +1279,45 @@ export class RoomAuthorityDurableObject {
     }
   }
 
-  private getNextMaintenanceAlarmAt(): number | null {
-    if (!this.room) {
-      return null;
-    }
-
+  private async getNextMaintenanceAlarmAt(): Promise<number | null> {
     const now = Date.now();
     let nextAlarmAt: number | null = null;
 
+    const addDeadline = (deadline: number): void => {
+      if (!Number.isFinite(deadline)) {
+        return;
+      }
+      const candidate = Math.max(deadline, now);
+      if (nextAlarmAt === null || candidate < nextAlarmAt) {
+        nextAlarmAt = candidate;
+      }
+    };
+
+    try {
+      const [guestSessions, matchResults] = await Promise.all([
+        this.state.storage.list<GuestSessionStorageRecord>({ prefix: GUEST_SESSION_STORAGE_PREFIX }),
+        this.state.storage.list<MatchResultStorageRecord>({ prefix: MATCH_RESULT_STORAGE_PREFIX })
+      ]);
+      for (const record of guestSessions.values()) {
+        addDeadline(Date.parse(record.lastSeenAt) + GUEST_SESSION_RETENTION_MS);
+      }
+      for (const record of matchResults.values()) {
+        addDeadline(Date.parse(record.createdAt) + MATCH_RESULT_RETENTION_MS);
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "retention_alarm_lookup_failed",
+        error: error instanceof Error ? error.message : String(error)
+      }));
+    }
+
+    if (!this.room) {
+      return nextAlarmAt;
+    }
+
     const expirationDeadline = getRoomExpirationDeadline(this.room);
     if (expirationDeadline !== null) {
-      nextAlarmAt = expirationDeadline > now ? expirationDeadline : now;
+      addDeadline(expirationDeadline);
     }
 
     if (this.room.status === "playing") {
@@ -1296,16 +1327,12 @@ export class RoomAuthorityDurableObject {
         }
 
         const deadline = player.disconnectedAt + DISCONNECT_GRACE_MS;
-        if (nextAlarmAt === null || deadline < nextAlarmAt) {
-          nextAlarmAt = deadline;
-        }
+        addDeadline(deadline);
       }
 
       if (this.room.matchRule === "timeAttack" && this.room.matchEndsAt !== undefined) {
         const deadline = this.room.matchEndsAt;
-        if (nextAlarmAt === null || deadline < nextAlarmAt) {
-          nextAlarmAt = deadline;
-        }
+        addDeadline(deadline);
       }
     }
 
@@ -1313,7 +1340,7 @@ export class RoomAuthorityDurableObject {
   }
 
   private async scheduleMaintenanceAlarm(): Promise<void> {
-    const nextAlarmAt = this.getNextMaintenanceAlarmAt();
+    const nextAlarmAt = await this.getNextMaintenanceAlarmAt();
 
     try {
       if (nextAlarmAt === null) {
@@ -1609,6 +1636,10 @@ export class RoomAuthorityDurableObject {
     }
 
     context.room.botDifficulty = difficulty;
+    const bot = context.room.players.get(BOT_PLAYER_ID);
+    if (bot) {
+      bot.nickname = formatBotNickname(difficulty);
+    }
     context.room.lastActivityAt = Date.now();
     return { room: toPublicRoom(context.room) };
   }
@@ -2249,8 +2280,7 @@ function addBotPlayer(room: InternalRoom): void {
     return;
   }
 
-  const difficultyLabel = room.botDifficulty.charAt(0).toUpperCase() + room.botDifficulty.slice(1);
-  const nickname = `${BOT_NICKNAME} (${difficultyLabel})`;
+  const nickname = formatBotNickname(room.botDifficulty);
 
   room.players.set(BOT_PLAYER_ID, {
     id: BOT_PLAYER_ID,
@@ -2274,6 +2304,11 @@ function addBotPlayer(room: InternalRoom): void {
     wpm: 0,
     accuracy: 100
   });
+}
+
+function formatBotNickname(difficulty: BotDifficulty): string {
+  const difficultyLabel = difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
+  return `${BOT_NICKNAME} (${difficultyLabel})`;
 }
 
 function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
@@ -2406,7 +2441,7 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
   }
 
   player.progressIndex = clamp(player.progressIndex, 0, promptLength);
-  player.wpm = calculateWpm(player.progressIndex, now - startedAt);
+  player.wpm = calculateWpm(player.correctCharacters, now - startedAt);
   player.accuracy = calculateAccuracy(player.correctCharacters, player.totalTypedCharacters);
 
   if (room.matchRule === "hpBattle") {
@@ -2621,6 +2656,7 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     isHost: player.id === hostPlayerId,
     isBot: player.isBot,
     progressIndex: player.progressIndex,
+    ...(player.deviceKind === "desktop" ? { typingProgressIndex: player.typingProgressIndex } : {}),
     correctCharacters: player.correctCharacters,
     totalTypedCharacters: player.totalTypedCharacters,
     mistakes: player.mistakes,

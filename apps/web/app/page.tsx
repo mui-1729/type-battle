@@ -646,7 +646,7 @@ export default function HomePage() {
       }
 
       return {
-        progressIndex: currentPlayer.progressIndex,
+        progressIndex: currentPlayer.typingProgressIndex ?? currentPlayer.progressIndex,
         correctCharacters: currentPlayer.correctCharacters,
         totalTypedCharacters: currentPlayer.totalTypedCharacters,
         mistakes: currentPlayer.mistakes,

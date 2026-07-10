@@ -24,9 +24,32 @@ await new Promise((resolve, reject) => {
   }, 5_000);
 
   socket.once("open", () => {
-    clearTimeout(timeout);
-    socket.close();
-    resolve();
+    socket.send(JSON.stringify({
+      id: crypto.randomUUID(),
+      type: "client:room:create",
+      payload: {
+        nickname: "Smoke",
+        guestId: `smoke-${crypto.randomUUID()}`,
+        sessionId: crypto.randomUUID(),
+        deviceKind: "desktop"
+      }
+    }));
+  });
+
+  socket.on("message", (rawMessage) => {
+    try {
+      const message = JSON.parse(rawMessage.toString());
+      if (message.type !== "server:ack" || !message.payload?.ok) {
+        return;
+      }
+      clearTimeout(timeout);
+      socket.close();
+      resolve();
+    } catch (error) {
+      clearTimeout(timeout);
+      socket.close();
+      reject(error);
+    }
   });
 
   socket.once("error", (error) => {

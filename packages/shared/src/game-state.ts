@@ -16,6 +16,7 @@ export type PlayerState = {
   isHost: boolean;
   isBot: boolean;
   progressIndex: number;
+  typingProgressIndex?: number;
   correctCharacters: number;
   totalTypedCharacters: number;
   mistakes: number;

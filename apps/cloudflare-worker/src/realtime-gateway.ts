@@ -20,6 +20,7 @@ type CloudflareSocketLike = {
 type SocketState = {
   socketId: string;
   clientIp: string;
+  idleTimer?: ReturnType<typeof setTimeout>;
 };
 
 type AttachSocketOptions = {
@@ -55,6 +56,8 @@ const OPEN_STATE = 1;
 const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
 const MAX_WEB_SOCKET_MESSAGE_BYTES = 16 * 1024;
 const MAX_MESSAGE_ID_LENGTH = 80;
+const MAX_GATEWAY_SOCKETS = 256;
+const GATEWAY_SOCKET_IDLE_MS = 60_000;
 const ROOM_COMMAND_ERROR = "Room commands must use /rooms/:roomCode/socket.";
 export const GATEWAY_ROOM_RATE_LIMIT_PATH = "/__internal/room-rate-limit";
 
@@ -133,6 +136,12 @@ export class RealtimeGatewayDurableObject {
 
   attachSocket(socket: CloudflareSocketLike, options: AttachSocketOptions = {}): string {
     const socketId = crypto.randomUUID();
+    if (this.sockets.size >= MAX_GATEWAY_SOCKETS) {
+      socket.accept();
+      socket.close(1013, "Gateway connection limit exceeded.");
+      return socketId;
+    }
+
     this.sockets.set(socketId, socket);
     this.socketStates.set(socketId, {
       socketId,
@@ -147,6 +156,7 @@ export class RealtimeGatewayDurableObject {
     socket.addEventListener("close", () => {
       this.detachSocket(socketId);
     });
+    this.scheduleSocketIdleTimeout(socketId);
 
     return socketId;
   }
@@ -270,6 +280,7 @@ export class RealtimeGatewayDurableObject {
   }
 
   private async handleSocketMessage(socketId: string, rawMessage: unknown): Promise<void> {
+    this.scheduleSocketIdleTimeout(socketId);
     if (typeof rawMessage !== "string") {
       return;
     }
@@ -383,8 +394,31 @@ export class RealtimeGatewayDurableObject {
   }
 
   private detachSocket(socketId: string): void {
+    const socketState = this.socketStates.get(socketId);
+    if (socketState?.idleTimer) {
+      clearTimeout(socketState.idleTimer);
+    }
     this.sockets.delete(socketId);
     this.socketStates.delete(socketId);
+  }
+
+  private scheduleSocketIdleTimeout(socketId: string): void {
+    const socketState = this.socketStates.get(socketId);
+    if (!socketState) {
+      return;
+    }
+
+    if (socketState.idleTimer) {
+      clearTimeout(socketState.idleTimer);
+    }
+    socketState.idleTimer = setTimeout(() => {
+      const socket = this.sockets.get(socketId);
+      this.detachSocket(socketId);
+      if (socket?.readyState === OPEN_STATE) {
+        socket.close(1008, "Idle connection closed.");
+      }
+    }, GATEWAY_SOCKET_IDLE_MS);
+    this.socketStates.set(socketId, socketState);
   }
 }
 
