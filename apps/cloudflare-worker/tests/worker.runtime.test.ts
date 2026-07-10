@@ -94,7 +94,11 @@ async function waitForRoomState(
   const url = `https://example.com/rooms/${roomCode}/state`;
 
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    const response = await mf.dispatchFetch(url);
+    const response = await mf.dispatchFetch(url, {
+      headers: {
+        authorization: "Bearer secret-token"
+      }
+    });
 
     if (response.status === 200) {
       const body = (await response.json()) as { ok?: boolean; room?: RoomState };
@@ -185,7 +189,11 @@ describe("cloudflare worker runtime", () => {
 
     const secondRuntime = await createRuntime(persistenceDir);
     try {
-      const response = await secondRuntime.dispatchFetch(`https://example.com/rooms/${roomCode}/state`);
+      const response = await secondRuntime.dispatchFetch(`https://example.com/rooms/${roomCode}/state`, {
+        headers: {
+          authorization: "Bearer secret-token"
+        }
+      });
       expect(response.status).toBe(200);
       const body = (await response.json()) as { ok?: boolean; room?: RoomState };
 

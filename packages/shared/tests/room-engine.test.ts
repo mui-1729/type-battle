@@ -11,7 +11,8 @@ import {
   setReady,
   setMatchRule,
   setRoomEngineConfig,
-  startMatch
+  startMatch,
+  updateProgress
 } from "../src/room-engine.js";
 import { PROMPTS } from "../src/prompts.js";
 import type { Prompt } from "../src/game-state.js";
@@ -155,6 +156,46 @@ describe("room engine config", () => {
 
     expect(setReady("socket_alice_rebind_1", created.room.roomCode, true)).toBeNull();
     expect(setReady("socket_alice_rebind_2", created.room.roomCode, true)).not.toBeNull();
+  });
+
+  it("lets a rejoined player restart input sequence without reusing the old socket", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_rejoin_sequence",
+      socketId: "socket_alice_rejoin_sequence_1"
+    });
+
+    const started = startMatch("socket_alice_rejoin_sequence_1", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    markPlaying(created.room.roomCode);
+
+    const promptInput = getRoom(created.room.roomCode)?.prompt?.typing.romaji ?? "";
+    expect(promptInput.length).toBeGreaterThan(0);
+
+    expect(updateProgress("socket_alice_rejoin_sequence_1", {
+      roomCode: created.room.roomCode,
+      input: promptInput[0] ?? "",
+      sequence: 1
+    })).not.toBeNull();
+
+    const rejoined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Alice",
+      guestId: "guest_alice_rejoin_sequence",
+      socketId: "socket_alice_rejoin_sequence_2"
+    });
+
+    expect("error" in rejoined).toBe(false);
+    expect(updateProgress("socket_alice_rejoin_sequence_1", {
+      roomCode: created.room.roomCode,
+      input: promptInput[0] ?? "",
+      sequence: 2
+    })).toBeNull();
+    expect(updateProgress("socket_alice_rejoin_sequence_2", {
+      roomCode: created.room.roomCode,
+      input: promptInput[0] ?? "",
+      sequence: 1
+    })).not.toBeNull();
   });
 
   it("keeps disconnected humans in grace instead of finishing a COM match immediately", () => {

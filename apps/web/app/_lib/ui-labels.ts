@@ -82,7 +82,7 @@ export function getPlayerConnectionLabel(player: RoomState["players"][number]): 
     return "COM";
   }
 
-  if (player.finishTimeMs === Infinity) {
+  if (player.finishStatus === "forfeited" || player.forfeited) {
     return "棄権";
   }
 

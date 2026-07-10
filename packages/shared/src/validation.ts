@@ -3,7 +3,7 @@ const ROOM_CODE_LENGTH = 6;
 const MAX_NICKNAME_LENGTH = 18;
 
 export function normalizeNickname(value: string): string {
-  return value.replace(/\s+/g, " ").trim().slice(0, MAX_NICKNAME_LENGTH);
+  return value.replace(/\s+/g, " ").trim();
 }
 
 export function validateNickname(value: string): string | null {

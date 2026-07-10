@@ -134,6 +134,10 @@ export default function HomePage() {
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
   const localProgressRef = useRef<ProgressState>(createEmptyProgress());
   const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
+  const inputSequenceRef = useRef(0);
+  const roomRef = useRef<RoomState | null>(null);
+  const guestSessionRef = useRef<GuestSession | null>(null);
+  const socketModeRef = useRef<"practice" | "room" | null>(null);
   const realtimeUrl = CLOUDFLARE_REALTIME_URL || localRealtimeUrl;
   const realtimeConfigured = realtimeUrl.length > 0;
   const guestId = guestSession?.guestId ?? "";
@@ -149,14 +153,14 @@ export default function HomePage() {
     () => room?.players.find((player) => player.id === playerId) ?? null,
     [playerId, room]
   );
-  const dailyChallengeDate = useMemo(() => new Date(), []);
+  const [dailyChallengeNow, setDailyChallengeNow] = useState(() => new Date());
   const activePracticePlayer = practiceResult?.players[0] ?? null;
   const activeResult = result ?? practiceResult;
   const activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
   const activePromptText = activePrompt?.text ?? "";
   const activeInputDeviceKind = room ? currentPlayer?.deviceKind ?? "desktop" : practiceSession?.deviceKind ?? "desktop";
-  const dailyChallengeInfo = useMemo(() => getDailyChallengeInfo(dailyChallengeDate), [dailyChallengeDate]);
-  const dailyChallengePrompt = useMemo(() => pickDailyChallengePrompt(dailyChallengeDate), [dailyChallengeDate]);
+  const dailyChallengeInfo = useMemo(() => getDailyChallengeInfo(dailyChallengeNow), [dailyChallengeNow]);
+  const dailyChallengePrompt = useMemo(() => pickDailyChallengePrompt(dailyChallengeNow), [dailyChallengeNow]);
   const activePracticeMode = practiceSession?.mode ?? "practice";
   const mistakeTrendSummary = useMemo(() => summarizeMistakeTrendRecord(mistakeTrendRecord), [mistakeTrendRecord]);
   const mistakeTrendTotal = useMemo(
@@ -190,7 +194,9 @@ export default function HomePage() {
     room?.status === "waiting" &&
     currentPlayer?.isHost &&
     room.players.length >= 1 &&
-    room.players.every((player) => player.connected || player.isBot);
+    room.players.every((player) => player.connected || player.isBot) &&
+    (room.players.filter((player) => !player.isBot).length <= 1 ||
+      room.players.filter((player) => !player.isBot).every((player) => player.ready));
   const acceptingTextInput = (isRoomPlaying && !result) || isPracticePlaying;
 
   const setPromptCategory = useCallback(
@@ -259,6 +265,7 @@ export default function HomePage() {
   const resetTyping = useCallback(() => {
     setLocalProgress(createEmptyProgress());
     localProgressRef.current = createEmptyProgress();
+    inputSequenceRef.current = 0;
     setResult(null);
   }, []);
 
@@ -272,8 +279,50 @@ export default function HomePage() {
     });
   }, []);
 
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
+
+  useEffect(() => {
+    guestSessionRef.current = guestSession;
+  }, [guestSession]);
+
+  useEffect(() => {
+    socketModeRef.current = socketMode;
+  }, [socketMode]);
+
   const attachSocketHandlers = useCallback((socket: ClientSocket) => {
-    socket.on("connect", () => setConnected(true));
+    socket.on("connect", () => {
+      setConnected(true);
+      const currentRoom = roomRef.current;
+      const currentSession = guestSessionRef.current;
+
+      if (socketModeRef.current !== "room" || !currentRoom || !currentSession) {
+        return;
+      }
+
+      socket.emit(
+        "room:join",
+        {
+          roomCode: currentRoom.roomCode,
+          nickname: normalizeNickname(nicknameRef.current),
+          guestId: currentSession.guestId,
+          sessionId: currentSession.sessionId,
+          deviceKind: detectDeviceKind()
+        },
+        (response) => {
+          if (!response.ok) {
+            setError(response.error);
+            return;
+          }
+
+          setPlayerId(response.data.playerId);
+          setRoom(response.data.room);
+          setResult(response.data.room.result ?? null);
+          resetTyping();
+        }
+      );
+    });
     socket.on("disconnect", () => setConnected(false));
     socket.on("room:state", (nextRoom) => {
       setRoom(nextRoom);
@@ -540,6 +589,15 @@ export default function HomePage() {
   }, [dailyChallengeInfo.challengeKey, settingsHydrated]);
 
   useEffect(() => {
+    const delay = Math.max(dailyChallengeInfo.nextChallengeAt - Date.now(), 1_000);
+    const timer = window.setTimeout(() => {
+      setDailyChallengeNow(new Date());
+    }, delay);
+
+    return () => window.clearTimeout(timer);
+  }, [dailyChallengeInfo.nextChallengeAt]);
+
+  useEffect(() => {
     if (!settingsHydrated) {
       return;
     }
@@ -657,19 +715,26 @@ export default function HomePage() {
   }, [acceptingTextInput, activeTypingText]);
 
   const emitProgress = useCallback(
-    (nextProgress: TypingProgress, finish: boolean) => {
+    (input: string, finish: boolean) => {
       const socket = socketRef.current;
 
       if (!socket || !room) {
         return;
       }
 
+      const payload: TypingProgress = {
+        roomCode: room.roomCode,
+        input,
+        sequence: inputSequenceRef.current + 1
+      };
+      inputSequenceRef.current = payload.sequence;
+
       if (finish) {
-        socket.emit("typing:finish", nextProgress);
+        socket.emit("typing:finish", payload);
         return;
       }
 
-      socket.emit("typing:progress", nextProgress);
+      socket.emit("typing:progress", payload);
     },
     [room]
   );
@@ -699,19 +764,12 @@ export default function HomePage() {
         const previous = localProgressRef.current;
         const next = updateTypingProgress(previous, typedText);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
-        const payload: TypingProgress = {
-          roomCode: room.roomCode,
-          progressIndex: next.progress.progressIndex,
-          correctCharacters: next.progress.correctCharacters,
-          totalTypedCharacters: next.progress.totalTypedCharacters,
-          mistakes: next.progress.mistakes
-        };
 
         setLocalProgress(next.progress);
         localProgressRef.current = next.progress;
         recordMistakeSamples(next.mistakeSamples);
         void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
-        emitProgress(payload, next.progress.progressIndex >= activeTypingText.length);
+        emitProgress(typedText, next.progress.progressIndex >= activeTypingText.length);
         return;
       }
 
@@ -771,19 +829,11 @@ export default function HomePage() {
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const soundOptions = settingsRef.current;
 
-        const payload: TypingProgress = {
-          roomCode: room.roomCode,
-          progressIndex: next.progress.progressIndex,
-          correctCharacters: next.progress.correctCharacters,
-          totalTypedCharacters: next.progress.totalTypedCharacters,
-          mistakes: next.progress.mistakes
-        };
-
         setLocalProgress(next.progress);
         localProgressRef.current = next.progress;
         recordMistakeSamples(next.mistakeSamples);
         void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
-        emitProgress(payload, next.progress.progressIndex >= activeTypingText.length);
+        emitProgress(typedKey, next.progress.progressIndex >= activeTypingText.length);
         return;
       }
 
@@ -1333,7 +1383,7 @@ export default function HomePage() {
                     <RivalBar
                       key={player.id}
                       player={player}
-                      promptLength={activeTypingText.length}
+                      promptLength={activePrompt ? Array.from(activePrompt.typing.hiragana).length : activeTypingText.length}
                       isSelf={player.id === playerId}
                     />
                   ))}

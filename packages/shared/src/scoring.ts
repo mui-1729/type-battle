@@ -35,14 +35,20 @@ export function rankPlayers(
 ): PlayerResult[] {
   const sorted = [...players].sort((a, b) => comparePlayers(a, b, promptLength, matchRule));
 
-  const winner = sorted[0];
-  const winnerTime = winner?.finishTimeMs ?? 0;
   const getPromptLength = typeof promptLength === "function" ? promptLength : () => promptLength;
+  const winner = sorted[0];
+  const winnerTime = isPlayerFinished(winner, getPromptLength) ? winner?.finishTimeMs : undefined;
 
   return sorted.map((player, index): PlayerResult => {
-    const isFinished = player.progressIndex >= getPromptLength(player);
+    const isFinished = isPlayerFinished(player, getPromptLength);
     const finishGap =
-      isFinished && winner && player.id !== winner.id ? (player.finishTimeMs ?? 0) - winnerTime : undefined;
+      isFinished &&
+      winner &&
+      player.id !== winner.id &&
+      winnerTime !== undefined &&
+      player.finishTimeMs !== undefined
+        ? player.finishTimeMs - winnerTime
+        : undefined;
 
     return {
       ...player,
@@ -62,8 +68,8 @@ function comparePlayers(
   const getPromptLength = typeof promptLength === "function" ? promptLength : () => promptLength;
   const aPromptLength = getPromptLength(a);
   const bPromptLength = getPromptLength(b);
-  const aFinished = a.progressIndex >= aPromptLength;
-  const bFinished = b.progressIndex >= bPromptLength;
+  const aFinished = isPlayerFinished(a, getPromptLength);
+  const bFinished = isPlayerFinished(b, getPromptLength);
 
   if (matchRule === "timeAttack") {
     const aCompletion = aPromptLength > 0 ? a.progressIndex / aPromptLength : 0;
@@ -71,10 +77,6 @@ function comparePlayers(
 
     if (aCompletion !== bCompletion) {
       return bCompletion - aCompletion;
-    }
-
-    if (a.correctCharacters !== b.correctCharacters) {
-      return b.correctCharacters - a.correctCharacters;
     }
 
     if (a.totalTypedCharacters !== b.totalTypedCharacters) {
@@ -131,6 +133,21 @@ function comparePlayers(
   }
 
   return a.mistakes - b.mistakes;
+}
+
+function isPlayerFinished(
+  player: PlayerState | undefined,
+  getPromptLength: (player: PlayerState) => number
+): player is PlayerState {
+  if (!player) {
+    return false;
+  }
+
+  if (player.finishStatus !== undefined) {
+    return player.finishStatus === "finished";
+  }
+
+  return player.progressIndex >= getPromptLength(player);
 }
 
 function roundToOne(value: number): number {

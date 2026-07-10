@@ -1,5 +1,7 @@
 import { getDailyChallengeInfo, getPromptsByCategory, pickDailyChallengePrompt, pickPrompt } from "./prompts.js";
+import { advanceRomajiProgress, buildRomajiTypingPlan, getRomajiTypingUnitIndex } from "./romaji-typing.js";
 import { calculateAccuracy, calculateWpm, rankPlayers } from "./scoring.js";
+import { advanceProgress, createEmptyProgress } from "./typing-progress.js";
 import { createRoomCode, normalizeNickname } from "./validation.js";
 import type {
   BotDifficulty,
@@ -104,6 +106,9 @@ type InternalPlayer = PlayerState & {
   socketId: string;
   sessionId: string;
   disconnectedAt?: number;
+  typingProgressIndex: number;
+  pendingInput: string;
+  lastInputSequence: number;
 };
 
 export type BotTickOutcome =
@@ -268,6 +273,7 @@ export function joinRoom(input: {
     delete existing.disconnectedAt;
     existing.nickname = normalizeNickname(input.nickname);
     existing.deviceKind = input.deviceKind ?? existing.deviceKind ?? "desktop";
+    resetPlayerInputSession(existing, room);
     socketIndex.set(input.socketId, { roomCode: room.roomCode, playerId: existing.id });
     ensureConnectedHost(room);
     runRoomEngineHook(
@@ -579,7 +585,8 @@ function finalizeUnfinishedBots(room: InternalRoom): void {
   for (const bot of [...room.players.values()].filter((p) => p.isBot)) {
     if (bot.progressIndex < getTypingLength(room, bot)) {
       bot.finishedAt = Date.now();
-      bot.finishTimeMs = Infinity;
+      delete bot.finishTimeMs;
+      bot.finishStatus = "unfinished";
     }
   }
 }
@@ -605,19 +612,14 @@ export function advanceBot(roomCode: string): BotTickOutcome | null {
   const speed = Math.max(1, settings.charsPerTick + variance);
   const charsToAdd = isMistake ? 0 : speed;
 
-  applyProgress(bot, room, {
-    roomCode: room.roomCode,
-    progressIndex: bot.progressIndex + charsToAdd,
-    correctCharacters: bot.correctCharacters + charsToAdd,
-    totalTypedCharacters: bot.totalTypedCharacters + speed,
-    mistakes: bot.mistakes + (isMistake ? speed : 0)
-  });
+  applyBotProgress(bot, room, charsToAdd, speed, isMistake);
 
   const promptLength = getTypingLength(room, bot);
 
   if (bot.progressIndex >= promptLength) {
     bot.finishedAt = Date.now();
     bot.finishTimeMs = bot.finishedAt - (room.serverStartAt ?? bot.finishedAt);
+    bot.finishStatus = "finished";
   }
 
   const result = maybeFinalizeRoom(room);
@@ -647,7 +649,9 @@ export function updateProgress(socketId: string, payload: TypingProgress): RoomS
     return null;
   }
 
-  applyProgress(context.player, context.room, payload);
+  if (!applyProgress(context.player, context.room, payload)) {
+    return null;
+  }
 
   const result = maybeFinalizeRoom(context.room);
   if (result) {
@@ -668,7 +672,9 @@ export function finishTyping(socketId: string, payload: TypingFinish): MatchResu
     return null;
   }
 
-  applyProgress(context.player, context.room, payload);
+  if (!applyProgress(context.player, context.room, payload)) {
+    return null;
+  }
 
   const promptLength = getTypingLength(context.room, context.player);
 
@@ -676,6 +682,7 @@ export function finishTyping(socketId: string, payload: TypingFinish): MatchResu
     const now = Date.now();
     context.player.finishedAt = now;
     context.player.finishTimeMs = now - (context.room.serverStartAt ?? now);
+    context.player.finishStatus = "finished";
   }
 
   const result = maybeFinalizeRoom(context.room);
@@ -755,60 +762,68 @@ function getContext(
   return { room, player };
 }
 
-function getTypingLength(room: InternalRoom, player: InternalPlayer): number {
+function getTypingLength(room: InternalRoom, player: InternalPlayer | PlayerState): number {
+  void player;
   const prompt = room.prompt ?? pickPrompt(room.promptCategory, Date.now() + room.round);
-  return (player.deviceKind === "mobile" ? prompt.typing.hiragana : prompt.typing.romaji).length;
+  return Array.from(prompt.typing.hiragana).length;
 }
 
-function applyProgress(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): void {
+function applyProgress(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): boolean {
+  if (!isValidTypingProgressPayload(payload) || payload.sequence !== player.lastInputSequence + 1) {
+    return false;
+  }
+
+  player.lastInputSequence = payload.sequence;
+
   const promptLength = getTypingLength(room, player);
   const previousProgressIndex = player.progressIndex;
-  const previousCorrectCharacters = player.correctCharacters;
   const previousMistakes = player.mistakes;
-  const nextIndex = clamp(payload.progressIndex, player.progressIndex, promptLength);
-
-  // Basic suspicious detection: jumping too many characters
-  if (nextIndex - player.progressIndex > 10) {
-    engineHooks.logger?.warn?.({
-      event: "suspicious_progress",
-      roomCode: room.roomCode,
-      playerId: player.id,
-      jumpSize: nextIndex - player.progressIndex,
-      from: player.progressIndex,
-      to: nextIndex
-    });
-  }
-
-  const totalTypedCharacters = Math.max(payload.totalTypedCharacters, player.totalTypedCharacters);
-  const correctCharacters = Math.max(payload.correctCharacters, player.correctCharacters);
-  const mistakes = Math.max(payload.mistakes, player.mistakes);
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
+  let progressDelta = 0;
 
-  // Update streaks based on correctly accepted input, not just unit completion.
-  const isCorrect = correctCharacters > player.correctCharacters;
-  if (isCorrect) {
-    player.currentStreak += 1;
-    player.maxStreak = Math.max(player.maxStreak, player.currentStreak);
+  if (player.deviceKind === "mobile") {
+    for (const typedChar of Array.from(payload.input)) {
+      const before = createProgressState(player);
+      const after = advanceProgress(before, room.prompt?.typing.hiragana[player.progressIndex], typedChar);
+      applyProgressState(player, after);
+      progressDelta += Math.max(after.progressIndex - before.progressIndex, 0);
+    }
   } else {
-    player.currentStreak = 0;
+    const plan = buildRomajiTypingPlan(room.prompt?.typing.hiragana ?? "");
+    for (const typedChar of Array.from(payload.input)) {
+      const before = createProgressState(player, player.typingProgressIndex);
+      const beforeUnitIndex = getRomajiTypingUnitIndex(plan, before.progressIndex);
+      const after = advanceRomajiProgress(before, plan, typedChar);
+      const completedUnit = after.progressIndex > before.progressIndex ? plan.units[beforeUnitIndex] : undefined;
+
+      applyProgressState(player, after);
+      player.typingProgressIndex = after.progressIndex;
+
+      if (completedUnit) {
+        const canonicalDelta = Array.from(completedUnit.hiragana).length;
+        player.progressIndex = clamp(player.progressIndex + canonicalDelta, 0, promptLength);
+        progressDelta += canonicalDelta;
+      }
+    }
   }
 
-  player.progressIndex = nextIndex;
-  player.correctCharacters = correctCharacters;
-  player.totalTypedCharacters = totalTypedCharacters;
-  player.mistakes = mistakes;
-  player.wpm = calculateWpm(correctCharacters, now - startedAt);
-  player.accuracy = calculateAccuracy(correctCharacters, totalTypedCharacters);
+  player.progressIndex = clamp(player.progressIndex, 0, promptLength);
+  player.wpm = calculateWpm(player.progressIndex, now - startedAt);
+  player.accuracy = calculateAccuracy(player.correctCharacters, player.totalTypedCharacters);
 
   if (room.matchRule !== "hpBattle") {
-    return;
+    if (player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
+      player.finishedAt = now;
+      player.finishTimeMs = now - startedAt;
+      player.finishStatus = "finished";
+    }
+    return true;
   }
 
-  const correctDelta = Math.max(correctCharacters - previousCorrectCharacters, 0);
-  const mistakeDelta = Math.max(mistakes - previousMistakes, 0);
+  const mistakeDelta = Math.max(player.mistakes - previousMistakes, 0);
 
-  if (correctDelta > 0) {
+  if (progressDelta > 0) {
     for (const opponent of room.players.values()) {
       if (
         opponent.id === player.id ||
@@ -819,7 +834,7 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
         continue;
       }
 
-      applyHpDamage(opponent, correctDelta * HP_BATTLE_ATTACK_DAMAGE, room, now);
+      applyHpDamage(opponent, progressDelta * HP_BATTLE_ATTACK_DAMAGE, room, now);
     }
   }
 
@@ -830,11 +845,68 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
   if (player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
     player.finishedAt = now;
     player.finishTimeMs = now - startedAt;
+    player.finishStatus = "finished";
+  }
+
+  return true;
+}
+
+function createProgressState(player: InternalPlayer, progressIndex = player.progressIndex) {
+  return {
+    ...createEmptyProgress(),
+    progressIndex,
+    correctCharacters: player.correctCharacters,
+    totalTypedCharacters: player.totalTypedCharacters,
+    mistakes: player.mistakes,
+    currentStreak: player.currentStreak,
+    maxStreak: player.maxStreak,
+    pendingInput: player.pendingInput
+  };
+}
+
+function applyProgressState(player: InternalPlayer, progress: ReturnType<typeof createProgressState>): void {
+  player.correctCharacters = progress.correctCharacters;
+  player.totalTypedCharacters = progress.totalTypedCharacters;
+  player.mistakes = progress.mistakes;
+  player.currentStreak = progress.currentStreak;
+  player.maxStreak = progress.maxStreak;
+  player.pendingInput = progress.pendingInput;
+
+  if (player.deviceKind === "mobile") {
+    player.progressIndex = progress.progressIndex;
   }
 }
 
+function applyBotProgress(
+  bot: InternalPlayer,
+  room: InternalRoom,
+  charsToAdd: number,
+  totalTypedDelta: number,
+  isMistake: boolean
+): void {
+  const promptLength = getTypingLength(room, bot);
+  const now = Date.now();
+  const startedAt = room.serverStartAt ?? now;
+  const progressDelta = Math.min(charsToAdd, Math.max(promptLength - bot.progressIndex, 0));
+
+  bot.totalTypedCharacters += totalTypedDelta;
+
+  if (isMistake) {
+    bot.mistakes += totalTypedDelta;
+    bot.currentStreak = 0;
+  } else if (progressDelta > 0) {
+    bot.progressIndex += progressDelta;
+    bot.correctCharacters += progressDelta;
+    bot.currentStreak += progressDelta;
+    bot.maxStreak = Math.max(bot.maxStreak, bot.currentStreak);
+  }
+
+  bot.wpm = calculateWpm(bot.progressIndex, now - startedAt);
+  bot.accuracy = calculateAccuracy(bot.correctCharacters, bot.totalTypedCharacters);
+}
+
 function resetPlayers(room: InternalRoom): void {
-  const promptLength = room.prompt?.text.length ?? 0;
+  const promptLength = room.prompt ? Array.from(room.prompt.typing.hiragana).length : 0;
   const maxHp = room.matchRule === "hpBattle" ? Math.max(HP_BATTLE_MIN_HP, promptLength * HP_BATTLE_HP_PER_PROMPT_CHAR) : undefined;
 
   for (const player of room.players.values()) {
@@ -845,6 +917,9 @@ function resetPlayers(room: InternalRoom): void {
     player.mistakes = 0;
     player.maxStreak = 0;
     player.currentStreak = 0;
+    player.typingProgressIndex = 0;
+    player.pendingInput = "";
+    player.lastInputSequence = 0;
     player.wpm = 0;
     player.accuracy = 100;
     if (maxHp !== undefined) {
@@ -855,10 +930,38 @@ function resetPlayers(room: InternalRoom): void {
       delete player.hp;
     }
     delete player.forfeited;
+    delete player.finishStatus;
     delete player.disconnectedAt;
     delete player.finishedAt;
     delete player.finishTimeMs;
   }
+}
+
+function resetPlayerInputSession(player: InternalPlayer, room: InternalRoom): void {
+  player.lastInputSequence = 0;
+  player.pendingInput = "";
+  player.typingProgressIndex =
+    player.deviceKind === "desktop" && room.prompt
+      ? getRomajiProgressIndexForCanonicalProgress(room.prompt, player.progressIndex)
+      : player.progressIndex;
+}
+
+function getRomajiProgressIndexForCanonicalProgress(prompt: Prompt, canonicalProgressIndex: number): number {
+  const plan = buildRomajiTypingPlan(prompt.typing.hiragana);
+  let canonicalCursor = 0;
+  let romajiCursor = 0;
+
+  for (const unit of plan.units) {
+    const unitLength = Array.from(unit.hiragana).length;
+    if (canonicalCursor + unitLength > canonicalProgressIndex) {
+      break;
+    }
+
+    canonicalCursor += unitLength;
+    romajiCursor += unit.guide.length;
+  }
+
+  return romajiCursor;
 }
 
 function toMatchResult(room: InternalRoom): MatchResult {
@@ -964,8 +1067,12 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     publicPlayer.finishedAt = player.finishedAt;
   }
 
-  if (player.finishTimeMs !== undefined) {
+  if (player.finishTimeMs !== undefined && Number.isFinite(player.finishTimeMs)) {
     publicPlayer.finishTimeMs = player.finishTimeMs;
+  }
+
+  if (player.finishStatus !== undefined) {
+    publicPlayer.finishStatus = player.finishStatus;
   }
 
   return publicPlayer;
@@ -995,6 +1102,9 @@ function addBotPlayer(room: InternalRoom): void {
     mistakes: 0,
     maxStreak: 0,
     currentStreak: 0,
+    typingProgressIndex: 0,
+    pendingInput: "",
+    lastInputSequence: 0,
     wpm: 0,
     accuracy: 100
   });
@@ -1024,6 +1134,9 @@ function createPlayer(
     mistakes: 0,
     maxStreak: 0,
     currentStreak: 0,
+    typingProgressIndex: 0,
+    pendingInput: "",
+    lastInputSequence: 0,
     wpm: 0,
     accuracy: 100
   };
@@ -1034,7 +1147,10 @@ function toInternalPlayer(player: PlayerState, hostPlayerId: string, sessionId: 
     ...player,
     socketId: player.id,
     sessionId,
-    isHost: player.id === hostPlayerId
+    isHost: player.id === hostPlayerId,
+    typingProgressIndex: 0,
+    pendingInput: "",
+    lastInputSequence: 0
   };
 }
 
@@ -1128,7 +1244,8 @@ export function checkForForfeits(): RoomState[] {
             }
 
             player.finishedAt = now;
-            player.finishTimeMs = Infinity; // Keep for internal logic if needed
+            delete player.finishTimeMs;
+            player.finishStatus = "forfeited";
             player.forfeited = true;
             changed = true;
             // If all humans are finished now, finish the match
@@ -1202,17 +1319,10 @@ function clamp(value: number, min: number, max: number): number {
 
 function isValidTypingProgressPayload(payload: TypingProgress): boolean {
   return (
-    Number.isInteger(payload.progressIndex) &&
-    payload.progressIndex >= 0 &&
-    Number.isInteger(payload.correctCharacters) &&
-    payload.correctCharacters >= 0 &&
-    Number.isInteger(payload.totalTypedCharacters) &&
-    payload.totalTypedCharacters >= 0 &&
-    Number.isInteger(payload.mistakes) &&
-    payload.mistakes >= 0 &&
-    payload.correctCharacters <= payload.totalTypedCharacters &&
-    payload.mistakes <= payload.totalTypedCharacters &&
-    payload.progressIndex <= payload.totalTypedCharacters
+    typeof payload.input === "string" &&
+    Array.from(payload.input).length <= 16 &&
+    Number.isSafeInteger(payload.sequence) &&
+    payload.sequence >= 1
   );
 }
 
@@ -1252,6 +1362,7 @@ function applyHpDamage(player: InternalPlayer, damage: number, room: InternalRoo
 
   if (nextHp === 0) {
     player.finishedAt = now;
-    player.finishTimeMs = now - (room.serverStartAt ?? now);
+    delete player.finishTimeMs;
+    player.finishStatus = "eliminated";
   }
 }

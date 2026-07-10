@@ -42,8 +42,10 @@ ROOM_STATE_WRITE_TOKEN=...
 1. `main` に merge
 2. CI が lint / typecheck / test / build / E2E を通す
 3. web を Vercel に deploy
-4. Preview / Production の URL を共有
-5. `npm run test:e2e` で Cloudflare transport の browser flow を確認する
+4. Worker / shared contract を含む変更は `Deploy Cloudflare Worker` workflow を手動実行し、CI 成功済み commit SHA を指定する
+5. GitHub production environment approval 後、workflow が Worker を deploy する
+6. Preview / Production の URL を共有
+7. `npm run test:e2e` で Cloudflare transport の browser flow を確認する
 
 ## Smoke Test
 
@@ -51,6 +53,7 @@ deploy 後に最低限確認する。
 
 - Web URL が 200 を返す。
 - Worker `/health` が 200 を返す。
+- Worker `/ready` が 200 を返す。
 - browser から Cloudflare WebSocket gateway に接続できる。
 - room create ができる。
 - room join ができる。
@@ -74,8 +77,7 @@ Private beta 公開前に必要:
 初期は manual rollback でよい。
 
 - Web: 前 deployment に戻す。
-- Realtime: 前 image / release に戻す。
-- Worker: 前 deployment に戻す。
+- Realtime / Worker: 直前の既知 commit SHA を `Deploy Cloudflare Worker` workflow に指定して再deployする。
 - Durable Object storage schema が変わる場合は backward compatible にする。
 
 外部 DB migration 導入前は rollback を単純化できる。

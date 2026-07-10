@@ -203,8 +203,10 @@ public beta を目指す段階で追加する。
 
 - `main` merge 後、Vercel の production deployment を基本にする。
 - web deploy 先は private beta 用 URL とする。
-- web deploy 後に Cloudflare Worker health / WebSocket smoke test を実行する。
+- Worker / shared contract を含む変更は `.github/workflows/deploy-cloudflare-worker.yml` を `workflow_dispatch` で実行し、CI 成功済み commit SHA を production environment approval 後に Cloudflare Worker へ deploy する。
+- Worker deploy 後に `/health` と WebSocket upgrade smoke test を実行する。
 - realtime は Cloudflare Worker を active backend として運用する。
+- rollback は直前の既知 commit SHA を同じ workflow で再deployする。Cloudflare secret は GitHub log に出さず、必要時は Cloudflare 側で rotate する。
 
 ### Public Beta
 
