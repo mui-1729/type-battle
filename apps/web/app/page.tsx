@@ -49,6 +49,7 @@ import {
   buildRomajiTypingPlan
 } from "./_lib/romaji-typing";
 import { detectDeviceKind } from "./_lib/device-kind";
+import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
 import {
   BOT_DIFFICULTY_LABELS,
   DEVICE_KIND_LABELS,
@@ -640,31 +641,7 @@ export default function HomePage() {
       return;
     }
 
-    setLocalProgress((previous) => {
-      const nextProgressIndex = currentPlayer.typingProgressIndex ?? currentPlayer.progressIndex;
-      const nextPendingInput = currentPlayer.pendingInput ?? "";
-      if (
-        nextProgressIndex === previous.progressIndex &&
-        nextPendingInput === previous.pendingInput &&
-        currentPlayer.correctCharacters === previous.correctCharacters &&
-        currentPlayer.totalTypedCharacters === previous.totalTypedCharacters &&
-        currentPlayer.mistakes === previous.mistakes &&
-        currentPlayer.currentStreak === previous.currentStreak &&
-        currentPlayer.maxStreak === previous.maxStreak
-      ) {
-        return previous;
-      }
-
-      return {
-        progressIndex: nextProgressIndex,
-        correctCharacters: currentPlayer.correctCharacters,
-        totalTypedCharacters: currentPlayer.totalTypedCharacters,
-        mistakes: currentPlayer.mistakes,
-        currentStreak: currentPlayer.currentStreak,
-        maxStreak: currentPlayer.maxStreak,
-        pendingInput: nextPendingInput
-      };
-    });
+    setLocalProgress((previous) => reconcileRoomProgress(previous, currentPlayer));
   }, [currentPlayer]);
 
   useEffect(() => {
