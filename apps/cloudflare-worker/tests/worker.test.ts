@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RoomState } from "@type-battle/shared";
+import { buildRomajiTypingPlan, type RoomState } from "@type-battle/shared";
 import { resetRoomEngineState } from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
 import worker, { RoomAuthorityDurableObject, RoomDurableObject } from "../src/worker.js";
@@ -326,6 +326,26 @@ describe("cloudflare gateway", () => {
     });
   });
 
+  it("closes idle gateway sockets and rejects connections over the limit", async () => {
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const idleSocket = new FakeSocket();
+
+    await gateway.ready;
+    gateway.attachSocket(idleSocket as unknown as WebSocket);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(idleSocket.readyState).toBe(3);
+
+    const sockets = Array.from({ length: 256 }, () => new FakeSocket());
+    sockets.forEach((socket) => gateway.attachSocket(socket as unknown as WebSocket));
+    const rejectedSocket = new FakeSocket();
+    gateway.attachSocket(rejectedSocket as unknown as WebSocket);
+
+    expect(rejectedSocket.accepted).toBe(true);
+    expect(rejectedSocket.readyState).toBe(3);
+  });
+
   it("reports readiness from durable object storage", async () => {
     const gateway = new RoomDurableObject(
       new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
@@ -431,6 +451,7 @@ describe("room authority", () => {
       createdAt: expect.any(String),
       lastSeenAt: expect.any(String)
     });
+    expect(storage.values.get("retention-alarm-at")).toEqual(expect.any(Number));
 
     socket.receive(
       JSON.stringify({
@@ -456,6 +477,63 @@ describe("room authority", () => {
         roomCode: "AB23CD"
       }),
       createdAt: expect.any(String)
+    });
+  });
+
+  it("preserves partial romaji input and its statistics when a player reconnects", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const firstSocket = new FakeSocket();
+    const rejoinedSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(firstSocket as unknown as WebSocket, { roomCode: "RJ34KL" });
+    firstSocket.receive(JSON.stringify({
+      id: "msg-create-rejoin-progress",
+      type: "client:room:create",
+      payload: { nickname: "Alice", guestId: "guest-rejoin-progress", sessionId: "session-rejoin-progress", deviceKind: "desktop" }
+    }));
+    await flushAsyncWork();
+    firstSocket.receive(JSON.stringify({
+      id: "msg-category-rejoin-progress",
+      type: "client:room:setPromptCategory",
+      payload: { roomCode: "RJ34KL", category: "short" }
+    }));
+    firstSocket.receive(JSON.stringify({
+      id: "msg-start-rejoin-progress",
+      type: "client:match:start",
+      payload: { roomCode: "RJ34KL" }
+    }));
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    const prompt = getCountdownRoom(firstSocket).prompt!;
+    const plan = buildRomajiTypingPlan(prompt.typing.hiragana);
+    const partialUnitIndex = plan.units.findIndex((unit) => unit.guide.length > 1);
+    expect(partialUnitIndex).toBeGreaterThanOrEqual(0);
+    const partialInput = `${plan.units.slice(0, partialUnitIndex).map((unit) => unit.guide).join("")}${plan.units[partialUnitIndex]!.guide[0]}`;
+
+    firstSocket.receive(JSON.stringify({
+      id: "msg-progress-rejoin-progress",
+      type: "client:typing:progress",
+      payload: { roomCode: "RJ34KL", input: partialInput, sequence: 1 }
+    }));
+    await flushAsyncWork();
+
+    roomAuthority.attachSocket(rejoinedSocket as unknown as WebSocket, { roomCode: "RJ34KL" });
+    rejoinedSocket.receive(JSON.stringify({
+      id: "msg-join-rejoin-progress",
+      type: "client:room:join",
+      payload: { roomCode: "RJ34KL", nickname: "Alice", guestId: "guest-rejoin-progress", sessionId: "session-rejoin-progress", deviceKind: "desktop" }
+    }));
+    await flushAsyncWork();
+
+    const rejoinAck = findLastAck(rejoinedSocket, "client:room:join") as { payload?: { data?: { room?: RoomState } } };
+    const player = rejoinAck.payload?.data?.room?.players.find((entry) => entry.id === "guest-rejoin-progress");
+    expect(player).toMatchObject({
+      typingProgressIndex: partialInput.length,
+      correctCharacters: partialInput.length,
+      totalTypedCharacters: partialInput.length
     });
   });
 
@@ -507,6 +585,30 @@ describe("room authority", () => {
     });
     expect(snapshot?.disconnectedAt?.["guest-alice-disconnect"]).toEqual(expect.any(Number));
     expect(storage.alarmAt).not.toBeNull();
+  });
+
+  it("closes a socket that remains after leaving a room", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(socket as unknown as WebSocket, { roomCode: "LV56MN" });
+    socket.receive(JSON.stringify({
+      id: "msg-create-leave-timeout",
+      type: "client:room:create",
+      payload: { nickname: "Alice", guestId: "guest-leave-timeout", sessionId: "session-leave-timeout" }
+    }));
+    await flushAsyncWork();
+    socket.receive(JSON.stringify({
+      id: "msg-leave-timeout",
+      type: "client:room:leave",
+      payload: { roomCode: "LV56MN" }
+    }));
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(socket.readyState).toBe(3);
   });
 
   it("uses the gateway rate limiter across different room authorities", async () => {

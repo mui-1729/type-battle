@@ -176,6 +176,7 @@ type MatchResultStorageRecord = Parameters<NonNullable<RoomEngineHooks["recordMa
 
 const OPEN_STATE = 1;
 const ROOM_STORAGE_KEY = "room";
+const RETENTION_ALARM_STORAGE_KEY = "retention-alarm-at";
 const ROOM_SNAPSHOT_SCHEMA_VERSION = 2;
 const GUEST_SESSION_STORAGE_PREFIX = "guest-session:";
 const MATCH_RESULT_STORAGE_PREFIX = "match-result:";
@@ -223,6 +224,7 @@ export class RoomAuthorityDurableObject {
   private readonly progressLimiter = new RateLimiter({ windowMs: 1000, max: 120 });
   private readonly hooks: RoomEngineHooks;
   private maintenanceFallbackTimer: ReturnType<typeof setTimeout> | undefined;
+  private retentionAlarmAt: number | null | undefined;
   private roomCode: string | null = null;
   private room: InternalRoom | null = null;
   readonly ready: Promise<void>;
@@ -957,6 +959,7 @@ export class RoomAuthorityDurableObject {
         createdAt: existing?.createdAt ?? now,
         lastSeenAt: now
       });
+      await this.refreshRetentionAlarmAt();
       await this.scheduleMaintenanceAlarm();
     } catch {
       // Guest-session persistence is best-effort and must not interrupt active rooms.
@@ -975,6 +978,7 @@ export class RoomAuthorityDurableObject {
         roomCode,
         createdAt: new Date().toISOString()
       });
+      await this.refreshRetentionAlarmAt();
       await this.scheduleMaintenanceAlarm();
     } catch {
       // Result persistence is best-effort; gameplay completion must still be emitted.
@@ -1260,6 +1264,7 @@ export class RoomAuthorityDurableObject {
       MATCH_RESULT_STORAGE_PREFIX,
       (record) => Date.parse(record.createdAt) + MATCH_RESULT_RETENTION_MS < now
     );
+    await this.refreshRetentionAlarmAt();
   }
 
   private async cleanupRecordsByPrefix<T>(prefix: string, shouldDelete: (record: T) => boolean): Promise<void> {
@@ -1293,22 +1298,9 @@ export class RoomAuthorityDurableObject {
       }
     };
 
-    try {
-      const [guestSessions, matchResults] = await Promise.all([
-        this.state.storage.list<GuestSessionStorageRecord>({ prefix: GUEST_SESSION_STORAGE_PREFIX }),
-        this.state.storage.list<MatchResultStorageRecord>({ prefix: MATCH_RESULT_STORAGE_PREFIX })
-      ]);
-      for (const record of guestSessions.values()) {
-        addDeadline(Date.parse(record.lastSeenAt) + GUEST_SESSION_RETENTION_MS);
-      }
-      for (const record of matchResults.values()) {
-        addDeadline(Date.parse(record.createdAt) + MATCH_RESULT_RETENTION_MS);
-      }
-    } catch (error) {
-      console.warn(JSON.stringify({
-        event: "retention_alarm_lookup_failed",
-        error: error instanceof Error ? error.message : String(error)
-      }));
+    const retentionAlarmAt = await this.getRetentionAlarmAt();
+    if (retentionAlarmAt !== null) {
+      addDeadline(retentionAlarmAt);
     }
 
     if (!this.room) {
@@ -1337,6 +1329,55 @@ export class RoomAuthorityDurableObject {
     }
 
     return nextAlarmAt;
+  }
+
+  private async getRetentionAlarmAt(): Promise<number | null> {
+    if (this.retentionAlarmAt !== undefined) {
+      return this.retentionAlarmAt;
+    }
+
+    try {
+      const storedDeadline = await this.state.storage.get<number>(RETENTION_ALARM_STORAGE_KEY);
+      if (typeof storedDeadline === "number" && Number.isFinite(storedDeadline)) {
+        this.retentionAlarmAt = storedDeadline;
+        return storedDeadline;
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "retention_alarm_read_failed",
+        error: error instanceof Error ? error.message : String(error)
+      }));
+      return null;
+    }
+
+    await this.refreshRetentionAlarmAt();
+    return this.retentionAlarmAt ?? null;
+  }
+
+  private async refreshRetentionAlarmAt(): Promise<void> {
+    try {
+      const [guestSessions, matchResults] = await Promise.all([
+        this.state.storage.list<GuestSessionStorageRecord>({ prefix: GUEST_SESSION_STORAGE_PREFIX }),
+        this.state.storage.list<MatchResultStorageRecord>({ prefix: MATCH_RESULT_STORAGE_PREFIX })
+      ]);
+      const deadlines = [
+        ...[...guestSessions.values()].map((record) => Date.parse(record.lastSeenAt) + GUEST_SESSION_RETENTION_MS),
+        ...[...matchResults.values()].map((record) => Date.parse(record.createdAt) + MATCH_RESULT_RETENTION_MS)
+      ].filter(Number.isFinite);
+      const nextDeadline = deadlines.length > 0 ? Math.min(...deadlines) : null;
+
+      this.retentionAlarmAt = nextDeadline;
+      if (nextDeadline === null) {
+        await this.state.storage.delete(RETENTION_ALARM_STORAGE_KEY);
+      } else {
+        await this.state.storage.put(RETENTION_ALARM_STORAGE_KEY, nextDeadline);
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "retention_alarm_refresh_failed",
+        error: error instanceof Error ? error.message : String(error)
+      }));
+    }
   }
 
   private async scheduleMaintenanceAlarm(): Promise<void> {
@@ -1539,7 +1580,7 @@ export class RoomAuthorityDurableObject {
       delete existing.disconnectedAt;
       existing.nickname = normalizeNickname(input.nickname);
       existing.deviceKind = input.deviceKind ?? existing.deviceKind ?? "desktop";
-      resetPlayerInputSession(existing, this.room);
+      resetPlayerInputSession(existing);
       if (previousSocketId && previousSocketId !== input.socketId) {
         this.closeSocket(previousSocketId, 4000, "Rejoined from another socket.");
       }
@@ -2362,31 +2403,8 @@ function resetPlayers(room: InternalRoom): void {
   }
 }
 
-function resetPlayerInputSession(player: InternalPlayer, room: InternalRoom): void {
+function resetPlayerInputSession(player: InternalPlayer): void {
   player.lastInputSequence = 0;
-  player.pendingInput = "";
-  player.typingProgressIndex =
-    player.deviceKind === "desktop" && room.prompt
-      ? getRomajiProgressIndexForCanonicalProgress(room.prompt, player.progressIndex)
-      : player.progressIndex;
-}
-
-function getRomajiProgressIndexForCanonicalProgress(prompt: Prompt, canonicalProgressIndex: number): number {
-  const plan = buildRomajiTypingPlan(prompt.typing.hiragana);
-  let canonicalCursor = 0;
-  let romajiCursor = 0;
-
-  for (const unit of plan.units) {
-    const unitLength = Array.from(unit.hiragana).length;
-    if (canonicalCursor + unitLength > canonicalProgressIndex) {
-      break;
-    }
-
-    canonicalCursor += unitLength;
-    romajiCursor += unit.guide.length;
-  }
-
-  return romajiCursor;
 }
 
 function getTypingLength(room: InternalRoom, player: InternalPlayer | PlayerState): number {
@@ -2656,7 +2674,9 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     isHost: player.id === hostPlayerId,
     isBot: player.isBot,
     progressIndex: player.progressIndex,
-    ...(player.deviceKind === "desktop" ? { typingProgressIndex: player.typingProgressIndex } : {}),
+    ...(player.deviceKind === "desktop"
+      ? { typingProgressIndex: player.typingProgressIndex + Array.from(player.pendingInput).length }
+      : {}),
     correctCharacters: player.correctCharacters,
     totalTypedCharacters: player.totalTypedCharacters,
     mistakes: player.mistakes,

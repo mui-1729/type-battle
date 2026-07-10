@@ -13,7 +13,8 @@ if (!healthResponse.ok) {
   process.exit(1);
 }
 
-const wsUrl = new URL("/rooms/AB23CD/socket", workerUrl);
+const roomCode = crypto.randomUUID().replaceAll("-", "").slice(0, 6).toUpperCase();
+const wsUrl = new URL(`/rooms/${roomCode}/socket`, workerUrl);
 wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
 
 await new Promise((resolve, reject) => {
@@ -43,6 +44,11 @@ await new Promise((resolve, reject) => {
         return;
       }
       clearTimeout(timeout);
+      socket.send(JSON.stringify({
+        id: crypto.randomUUID(),
+        type: "client:room:leave",
+        payload: { roomCode }
+      }));
       socket.close();
       resolve();
     } catch (error) {
