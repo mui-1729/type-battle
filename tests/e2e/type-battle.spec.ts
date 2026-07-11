@@ -1,4 +1,12 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function readInputGuide(page: Page): Promise<string> {
+  return (await page.getByLabel("入力ガイド").innerText()).replace(/\s+/g, "");
+}
+
+async function typeInputGuide(page: Page, guide: string): Promise<void> {
+  await page.getByLabel("入力欄").pressSequentially(guide, { delay: 40 });
+}
 
 test("creates a room and lets a second player join", async ({ browser }) => {
   const hostContext = await browser.newContext();
@@ -41,15 +49,19 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await guest.getByLabel("ルームコード").fill(roomCode);
   await guest.getByTitle("ルームに参加").click();
 
+  await host.getByRole("button", { name: "準備する" }).click();
+  await guest.getByRole("button", { name: "準備する" }).click();
   await host.getByRole("button", { name: "開始" }).click();
   await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
   await expect(guest.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
-  const promptText = await host.getByLabel("課題文").innerText();
+  const hostGuide = await readInputGuide(host);
+  const guestGuide = await readInputGuide(guest);
+  expect(guestGuide).toBe(hostGuide);
 
   await Promise.all([
-    host.keyboard.type(promptText, { delay: 1 }),
-    guest.keyboard.type(promptText, { delay: 1 })
+    typeInputGuide(host, hostGuide),
+    typeInputGuide(guest, guestGuide)
   ]);
 
   await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
@@ -95,8 +107,7 @@ test("starts a match against COM when alone", async ({ browser }) => {
   await expect(host.getByLabel("ルーム操作").getByText("COM (Hard)", { exact: true })).toBeVisible();
   await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
-  const promptText = await host.getByLabel("課題文").innerText();
-  await host.keyboard.type(promptText, { delay: 1 });
+  await typeInputGuide(host, await readInputGuide(host));
 
   await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 8_000 });
   await expect(host.locator(".resultPanel").getByText("COM (Hard)", { exact: true })).toBeVisible();
@@ -123,6 +134,8 @@ test("forfeits the match after long disconnect", async ({ browser }) => {
   await guest.getByLabel("ルームコード").fill(roomCode);
   await guest.getByTitle("ルームに参加").click();
 
+  await host.getByRole("button", { name: "準備する" }).click();
+  await guest.getByRole("button", { name: "準備する" }).click();
   await host.getByRole("button", { name: "開始" }).click();
   await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
   await expect(guest.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
@@ -151,8 +164,7 @@ test("completes a practice session", async ({ browser }) => {
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
-  const promptText = await page.getByLabel("課題文").innerText();
-  await page.keyboard.type(promptText, { delay: 1 });
+  await typeInputGuide(page, await readInputGuide(page));
 
   await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(page.locator(".resultPanel").getByText("もう一度練習")).toBeVisible();

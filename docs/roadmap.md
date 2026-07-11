@@ -45,6 +45,7 @@
 - [x] room join Playwright smoke E2E
 - [x] GitHub Actions CI
 - [x] local build check
+- [x] mobile Chromium typing smoke E2E
 
 ## Phase 4: Private Beta
 
@@ -65,6 +66,7 @@
 - [x] structured logging
 - [x] basic monitoring
 - [x] deployment scaffolding
+- [x] Cloudflare Worker deploy workflow
 - [x] Cloudflare E2E smoke test
 - [x] player settings sound wiring
 - [x] private beta feedback issue flow
@@ -72,6 +74,9 @@
 - [x] realtime external deploy
 - [x] branch protection
 - [x] Cloudflare storage persistence
+- [x] room-scoped Durable Object authority
+- [x] server authoritative typing validation
+- [x] retention cleanup for guest sessions and match results
 - [x] guest session
 
 ## Phase 5: Public Beta

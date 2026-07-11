@@ -91,8 +91,8 @@ npm run typecheck --workspace @type-battle/cloudflare-worker
 
 Worker は `/health` と Cloudflare WebSocket gateway を持ちます。WebSocket broadcast は shared の Cloudflare message contract に合わせて `server:room:state` を送ります。
 
-`/rooms/:roomCode/state` は内部更新用の入口として `ROOM_STATE_WRITE_TOKEN` が必要です。
-通常の room create / join / match flow は WebSocket gateway で処理します。
+`/rooms/:roomCode/state` は内部保守用の state import / read endpoint で、GET / PUT とも `ROOM_STATE_WRITE_TOKEN` が必要です。
+通常の room create / join / match flow は `/rooms/:roomCode/socket` の WebSocket で処理します。
 
 ```bash
 npm run dev --workspace @type-battle/cloudflare-worker
@@ -101,9 +101,11 @@ npm run deploy --workspace @type-battle/cloudflare-worker
 ```
 
 `wrangler` は `@type-battle/cloudflare-worker` の workspace 依存として解決される前提です。
-ローカル開発では `apps/cloudflare-worker/.dev.vars` に `ROOM_STATE_WRITE_TOKEN` を置いても動かせます。
+ローカル開発では example をコピーして `apps/cloudflare-worker/.dev.vars` に `ROOM_STATE_WRITE_TOKEN` を置いても動かせます。
+`.dev.vars` と `.dev.vars.*` は Git 管理対象外です。実値は commit しないでください。
 
 ```bash
+cp apps/cloudflare-worker/.dev.vars.example apps/cloudflare-worker/.dev.vars
 npm exec --workspace @type-battle/cloudflare-worker -- wrangler secret put ROOM_STATE_WRITE_TOKEN
 curl http://127.0.0.1:8787/health
 ```
@@ -134,8 +136,8 @@ npm run test:e2e
 
 ## 次の作業
 
-1. web deployment / Vercel wiring を詰める。
-2. branch protection を有効化する。
+1. Cloudflare Worker deploy workflow の production secret / environment approval を設定する。
+2. private beta の known issues を GitHub Issue と [docs/current-implementation.md](docs/current-implementation.md) に集約する。
 3. public beta 向け機能の優先順位を決める。
 
 機能実装前の詳細仕様は [docs/features/README.md](docs/features/README.md) にまとめています。

@@ -1,2 +1,5 @@
 dist/
 node_modules/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example

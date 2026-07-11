@@ -1,12 +1,17 @@
 import type { AckResponse, RoomState, TypingFinish, TypingProgress } from "@type-battle/shared";
 import {
+  advanceProgress,
+  advanceRomajiProgress,
+  buildRomajiTypingPlan,
   calculateAccuracy,
   calculateWpm,
+  createEmptyProgress,
+  getRomajiTypingUnitIndex,
   pickPrompt,
   PROMPTS,
   rankPlayers
 } from "@type-battle/shared";
-import { normalizeNickname, validateNickname } from "@type-battle/shared";
+import { isValidRoomCode, normalizeNickname, validateNickname } from "@type-battle/shared";
 import type {
   BotDifficulty,
   DeviceKind,
@@ -93,16 +98,29 @@ type MatchRulePayload = RoomCodePayload & {
 };
 
 type TypingPayload = RoomCodePayload & {
-  progressIndex: number;
-  correctCharacters: number;
-  totalTypedCharacters: number;
-  mistakes: number;
+  input: string;
+  sequence: number;
 };
 
 type PersistedRoomSnapshot = {
+  schemaVersion?: number;
   room: RoomState;
   playerSessions?: Record<string, string>;
   disconnectedAt?: Record<string, number>;
+  internal?: {
+    round?: number;
+    promptHistory?: string[];
+    createdAt?: number;
+    lastActivityAt?: number;
+    finishedAt?: number;
+    typingState?: Record<string, PersistedPlayerTypingState>;
+  };
+};
+
+type PersistedPlayerTypingState = {
+  typingProgressIndex?: number;
+  pendingInput?: string;
+  lastInputSequence?: number;
 };
 
 type RoomAuthorityEnv = {
@@ -117,6 +135,9 @@ type InternalPlayer = PlayerState & {
   socketId: string;
   sessionId: string;
   disconnectedAt?: number;
+  typingProgressIndex: number;
+  pendingInput: string;
+  lastInputSequence: number;
 };
 
 type InternalRoom = {
@@ -134,6 +155,7 @@ type InternalRoom = {
   players: Map<string, InternalPlayer>;
   createdAt: number;
   lastActivityAt: number;
+  finishedAt?: number;
   round: number;
 };
 
@@ -154,14 +176,26 @@ type MatchResultStorageRecord = Parameters<NonNullable<RoomEngineHooks["recordMa
 
 const OPEN_STATE = 1;
 const ROOM_STORAGE_KEY = "room";
+const RETENTION_ALARM_STORAGE_KEY = "retention-alarm-at";
+const ROOM_SNAPSHOT_SCHEMA_VERSION = 2;
 const GUEST_SESSION_STORAGE_PREFIX = "guest-session:";
 const MATCH_RESULT_STORAGE_PREFIX = "match-result:";
 const BOT_TICK_MS = 500;
-const ROOM_TTL_MS = 60_000;
+const WAITING_IDLE_TTL_MS = 60_000;
+const ABANDONED_ROOM_TTL_MS = 60_000;
+const FINISHED_RESULT_RETENTION_MS = 5 * 60_000;
 const DISCONNECT_GRACE_MS = 30_000;
 const ROOM_PERSIST_DEBOUNCE_MS = 1_000;
 const MAINTENANCE_ALARM_FALLBACK_MS = 5_000;
 const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
+const MAX_WEB_SOCKET_MESSAGE_BYTES = 16 * 1024;
+const MAX_TYPING_INPUT_CHARS = 16;
+const MAX_MESSAGE_ID_LENGTH = 80;
+const MAX_IDENTIFIER_LENGTH = 96;
+const MAX_ROOM_SOCKETS = 16;
+const UNJOINED_SOCKET_IDLE_MS = 30_000;
+const GUEST_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const MATCH_RESULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_PLAYERS = 2;
 const COUNTDOWN_MS = 3_000;
 const HP_BATTLE_HP_PER_PROMPT_CHAR = 5;
@@ -180,15 +214,17 @@ const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistake
 export class RoomAuthorityDurableObject {
   private readonly sockets = new Map<string, CloudflareSocketLike>();
   private readonly socketStates = new Map<string, SocketState>();
+  private readonly unjoinedSocketTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly playerSessions = new Map<string, string>();
   private readonly timers: GatewayTimers = {};
   private readonly roomCreateIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
   private readonly roomCreateGuestLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 10 });
   private readonly roomJoinIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 100 });
   private readonly roomJoinGuestLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
-  private readonly progressLimiter = new RateLimiter({ windowMs: 1000, max: 30 });
+  private readonly progressLimiter = new RateLimiter({ windowMs: 1000, max: 120 });
   private readonly hooks: RoomEngineHooks;
   private maintenanceFallbackTimer: ReturnType<typeof setTimeout> | undefined;
+  private retentionAlarmAt: number | null | undefined;
   private roomCode: string | null = null;
   private room: InternalRoom | null = null;
   readonly ready: Promise<void>;
@@ -280,13 +316,19 @@ export class RoomAuthorityDurableObject {
     }
 
     this.applyPersistedRoomSnapshot(snapshot);
-    this.broadcastRoomState(snapshot.room);
-    await this.persistRoom(snapshot.room.roomCode);
+    const restoredRoom = this.room;
+
+    if (!restoredRoom) {
+      return new Response("Invalid room state", { status: 400 });
+    }
+
+    this.broadcastRoomState(restoredRoom);
+    await this.persistRoom(restoredRoom.roomCode);
     await this.scheduleMaintenanceAlarm();
 
     return Response.json({
       ok: true,
-      roomCode: snapshot.room.roomCode,
+      roomCode: restoredRoom.roomCode,
       connectedSockets: this.sockets.size
     });
   }
@@ -317,6 +359,12 @@ export class RoomAuthorityDurableObject {
     const socketId = crypto.randomUUID();
     const roomCode = options.roomCode ? normalizeRoomCode(options.roomCode) : null;
 
+    if (this.sockets.size >= MAX_ROOM_SOCKETS) {
+      socket.accept();
+      socket.close(1013, "Room connection limit exceeded.");
+      return socketId;
+    }
+
     if (roomCode) {
       this.ensureRoomCode(roomCode);
     }
@@ -337,11 +385,18 @@ export class RoomAuthorityDurableObject {
       void this.handleSocketClose(socketId);
     });
 
+    this.scheduleUnjoinedSocketTimeout(socketId);
+
     return socketId;
   }
 
   private async handleSocketMessage(socketId: string, rawMessage: unknown): Promise<void> {
     if (typeof rawMessage !== "string") {
+      return;
+    }
+
+    if (byteLength(rawMessage) > MAX_WEB_SOCKET_MESSAGE_BYTES) {
+      this.closeSocket(socketId, 1009, "Message too large.");
       return;
     }
 
@@ -754,7 +809,11 @@ export class RoomAuthorityDurableObject {
   private broadcastToAll<TType extends CloudflareServerEventType>(
     message: CloudflareServerEventEnvelope<TType>
   ): void {
-    for (const socketId of [...this.sockets.keys()]) {
+    for (const [socketId, socketState] of this.socketStates.entries()) {
+      if (!socketState.playerId) {
+        continue;
+      }
+
       this.sendMessage(socketId, message);
     }
   }
@@ -802,6 +861,7 @@ export class RoomAuthorityDurableObject {
 
     if (playerId) {
       socketState.playerId = playerId;
+      this.clearUnjoinedSocketTimeout(socketId);
     }
 
     if (this.roomCode) {
@@ -820,12 +880,50 @@ export class RoomAuthorityDurableObject {
     delete socketState.playerId;
     delete socketState.roomCode;
     this.socketStates.set(socketId, socketState);
+    this.scheduleUnjoinedSocketTimeout(socketId);
   }
 
   private detachSocket(socketId: string): void {
     this.detachSocketFromRoom(socketId);
+    this.clearUnjoinedSocketTimeout(socketId);
     this.sockets.delete(socketId);
     this.socketStates.delete(socketId);
+  }
+
+  private closeSocket(socketId: string, code = 1000, reason = "closed"): void {
+    const socket = this.sockets.get(socketId);
+    this.detachSocket(socketId);
+
+    if (socket?.readyState === OPEN_STATE) {
+      try {
+        socket.close(code, reason);
+      } catch {
+        // The socket is already being removed; close failures do not affect room state.
+      }
+    }
+  }
+
+  private scheduleUnjoinedSocketTimeout(socketId: string): void {
+    this.clearUnjoinedSocketTimeout(socketId);
+    this.unjoinedSocketTimers.set(
+      socketId,
+      setTimeout(() => {
+        const socketState = this.socketStates.get(socketId);
+        if (socketState && !socketState.playerId) {
+          this.closeSocket(socketId, 1008, "Join required.");
+        }
+      }, UNJOINED_SOCKET_IDLE_MS)
+    );
+  }
+
+  private clearUnjoinedSocketTimeout(socketId: string): void {
+    const timer = this.unjoinedSocketTimers.get(socketId);
+    if (!timer) {
+      return;
+    }
+
+    clearTimeout(timer);
+    this.unjoinedSocketTimers.delete(socketId);
   }
 
   private async persistRoom(roomCode: string): Promise<void> {
@@ -861,6 +959,8 @@ export class RoomAuthorityDurableObject {
         createdAt: existing?.createdAt ?? now,
         lastSeenAt: now
       });
+      await this.refreshRetentionAlarmAt();
+      await this.scheduleMaintenanceAlarm();
     } catch {
       // Guest-session persistence is best-effort and must not interrupt active rooms.
     }
@@ -878,6 +978,8 @@ export class RoomAuthorityDurableObject {
         roomCode,
         createdAt: new Date().toISOString()
       });
+      await this.refreshRetentionAlarmAt();
+      await this.scheduleMaintenanceAlarm();
     } catch {
       // Result persistence is best-effort; gameplay completion must still be emitted.
     }
@@ -885,17 +987,33 @@ export class RoomAuthorityDurableObject {
 
   private createPersistedRoomSnapshot(room: InternalRoom): PersistedRoomSnapshot {
     const disconnectedAt: Record<string, number> = {};
+    const typingState: Record<string, PersistedPlayerTypingState> = {};
 
     for (const [playerId, player] of room.players.entries()) {
       if (player.disconnectedAt !== undefined) {
         disconnectedAt[playerId] = player.disconnectedAt;
       }
+
+      typingState[playerId] = {
+        typingProgressIndex: player.typingProgressIndex,
+        pendingInput: player.pendingInput,
+        lastInputSequence: player.lastInputSequence
+      };
     }
 
     return {
+      schemaVersion: ROOM_SNAPSHOT_SCHEMA_VERSION,
       room: toPublicRoom(room),
       playerSessions: Object.fromEntries(this.playerSessions.entries()),
-      disconnectedAt
+      disconnectedAt,
+      internal: {
+        round: room.round,
+        promptHistory: [...room.promptHistory],
+        createdAt: room.createdAt,
+        lastActivityAt: room.lastActivityAt,
+        ...(room.finishedAt !== undefined ? { finishedAt: room.finishedAt } : {}),
+        typingState
+      }
     };
   }
 
@@ -927,7 +1045,7 @@ export class RoomAuthorityDurableObject {
   private applyPersistedRoomSnapshot(snapshot: PersistedRoomSnapshot): void {
     const playerSessions = snapshot.playerSessions ?? {};
     const disconnectedAt = snapshot.disconnectedAt ?? {};
-    const room = createRoomStateFromSnapshot(snapshot.room, playerSessions, disconnectedAt);
+    const room = createRoomStateFromSnapshot(snapshot.room, playerSessions, disconnectedAt, snapshot.internal);
 
     this.room = room;
     this.roomCode = room.roomCode;
@@ -1062,11 +1180,7 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    if (
-      (this.room.status === "waiting" && Date.now() - this.room.lastActivityAt > ROOM_TTL_MS) ||
-      (this.room.status === "finished" && Date.now() - this.room.lastActivityAt > ROOM_TTL_MS) ||
-      ([...this.room.players.values()].every((player) => !player.connected) && Date.now() - this.room.lastActivityAt > ROOM_TTL_MS)
-    ) {
+    if (shouldExpireRoom(this.room, Date.now())) {
       this.room = null;
       this.clearRoomTimers();
       await this.persistRoom(this.roomCode ?? "UNKNOWN");
@@ -1088,7 +1202,8 @@ export class RoomAuthorityDurableObject {
         const elapsed = Date.now() - player.disconnectedAt;
         if (elapsed > DISCONNECT_GRACE_MS && !player.forfeited) {
           player.finishedAt = Date.now();
-          player.finishTimeMs = Infinity;
+          delete player.finishTimeMs;
+          player.finishStatus = "forfeited";
           player.forfeited = true;
           changed = true;
         }
@@ -1136,19 +1251,65 @@ export class RoomAuthorityDurableObject {
     await this.cleanupStaleRoom();
     await this.handleForfeits();
     await this.handleTimeAttackExpirations();
+    await this.cleanupRetentionRecords();
   }
 
-  private getNextMaintenanceAlarmAt(): number | null {
-    if (!this.room) {
-      return null;
-    }
+  private async cleanupRetentionRecords(): Promise<void> {
+    const now = Date.now();
+    await this.cleanupRecordsByPrefix<GuestSessionStorageRecord>(
+      GUEST_SESSION_STORAGE_PREFIX,
+      (record) => Date.parse(record.lastSeenAt) + GUEST_SESSION_RETENTION_MS < now
+    );
+    await this.cleanupRecordsByPrefix<MatchResultStorageRecord>(
+      MATCH_RESULT_STORAGE_PREFIX,
+      (record) => Date.parse(record.createdAt) + MATCH_RESULT_RETENTION_MS < now
+    );
+    await this.refreshRetentionAlarmAt();
+  }
 
+  private async cleanupRecordsByPrefix<T>(prefix: string, shouldDelete: (record: T) => boolean): Promise<void> {
+    try {
+      const records = await this.state.storage.list<T>({ prefix });
+      await Promise.all(
+        [...records.entries()]
+          .filter(([, record]) => shouldDelete(record))
+          .map(([key]) => this.state.storage.delete(key))
+      );
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "retention_cleanup_failed",
+        prefix,
+        error: error instanceof Error ? error.message : String(error)
+      }));
+    }
+  }
+
+  private async getNextMaintenanceAlarmAt(): Promise<number | null> {
     const now = Date.now();
     let nextAlarmAt: number | null = null;
 
-    if (this.room.status === "waiting" || this.room.status === "finished") {
-      const deadline = this.room.lastActivityAt + ROOM_TTL_MS;
-      nextAlarmAt = deadline > now ? deadline : now;
+    const addDeadline = (deadline: number): void => {
+      if (!Number.isFinite(deadline)) {
+        return;
+      }
+      const candidate = Math.max(deadline, now);
+      if (nextAlarmAt === null || candidate < nextAlarmAt) {
+        nextAlarmAt = candidate;
+      }
+    };
+
+    const retentionAlarmAt = await this.getRetentionAlarmAt();
+    if (retentionAlarmAt !== null) {
+      addDeadline(retentionAlarmAt);
+    }
+
+    if (!this.room) {
+      return nextAlarmAt;
+    }
+
+    const expirationDeadline = getRoomExpirationDeadline(this.room);
+    if (expirationDeadline !== null) {
+      addDeadline(expirationDeadline);
     }
 
     if (this.room.status === "playing") {
@@ -1158,24 +1319,69 @@ export class RoomAuthorityDurableObject {
         }
 
         const deadline = player.disconnectedAt + DISCONNECT_GRACE_MS;
-        if (nextAlarmAt === null || deadline < nextAlarmAt) {
-          nextAlarmAt = deadline;
-        }
+        addDeadline(deadline);
       }
 
       if (this.room.matchRule === "timeAttack" && this.room.matchEndsAt !== undefined) {
         const deadline = this.room.matchEndsAt;
-        if (nextAlarmAt === null || deadline < nextAlarmAt) {
-          nextAlarmAt = deadline;
-        }
+        addDeadline(deadline);
       }
     }
 
     return nextAlarmAt;
   }
 
+  private async getRetentionAlarmAt(): Promise<number | null> {
+    if (this.retentionAlarmAt !== undefined) {
+      return this.retentionAlarmAt;
+    }
+
+    try {
+      const storedDeadline = await this.state.storage.get<number>(RETENTION_ALARM_STORAGE_KEY);
+      if (typeof storedDeadline === "number" && Number.isFinite(storedDeadline)) {
+        this.retentionAlarmAt = storedDeadline;
+        return storedDeadline;
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "retention_alarm_read_failed",
+        error: error instanceof Error ? error.message : String(error)
+      }));
+      return null;
+    }
+
+    await this.refreshRetentionAlarmAt();
+    return this.retentionAlarmAt ?? null;
+  }
+
+  private async refreshRetentionAlarmAt(): Promise<void> {
+    try {
+      const [guestSessions, matchResults] = await Promise.all([
+        this.state.storage.list<GuestSessionStorageRecord>({ prefix: GUEST_SESSION_STORAGE_PREFIX }),
+        this.state.storage.list<MatchResultStorageRecord>({ prefix: MATCH_RESULT_STORAGE_PREFIX })
+      ]);
+      const deadlines = [
+        ...[...guestSessions.values()].map((record) => Date.parse(record.lastSeenAt) + GUEST_SESSION_RETENTION_MS),
+        ...[...matchResults.values()].map((record) => Date.parse(record.createdAt) + MATCH_RESULT_RETENTION_MS)
+      ].filter(Number.isFinite);
+      const nextDeadline = deadlines.length > 0 ? Math.min(...deadlines) : null;
+
+      this.retentionAlarmAt = nextDeadline;
+      if (nextDeadline === null) {
+        await this.state.storage.delete(RETENTION_ALARM_STORAGE_KEY);
+      } else {
+        await this.state.storage.put(RETENTION_ALARM_STORAGE_KEY, nextDeadline);
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "retention_alarm_refresh_failed",
+        error: error instanceof Error ? error.message : String(error)
+      }));
+    }
+  }
+
   private async scheduleMaintenanceAlarm(): Promise<void> {
-    const nextAlarmAt = this.getNextMaintenanceAlarmAt();
+    const nextAlarmAt = await this.getNextMaintenanceAlarmAt();
 
     try {
       if (nextAlarmAt === null) {
@@ -1374,8 +1580,9 @@ export class RoomAuthorityDurableObject {
       delete existing.disconnectedAt;
       existing.nickname = normalizeNickname(input.nickname);
       existing.deviceKind = input.deviceKind ?? existing.deviceKind ?? "desktop";
+      resetPlayerInputSession(existing);
       if (previousSocketId && previousSocketId !== input.socketId) {
-        this.socketStates.delete(previousSocketId);
+        this.closeSocket(previousSocketId, 4000, "Rejoined from another socket.");
       }
       this.socketStates.set(input.socketId, {
         socketId: input.socketId,
@@ -1470,6 +1677,10 @@ export class RoomAuthorityDurableObject {
     }
 
     context.room.botDifficulty = difficulty;
+    const bot = context.room.players.get(BOT_PLAYER_ID);
+    if (bot) {
+      bot.nickname = formatBotNickname(difficulty);
+    }
     context.room.lastActivityAt = Date.now();
     return { room: toPublicRoom(context.room) };
   }
@@ -1506,6 +1717,11 @@ export class RoomAuthorityDurableObject {
 
     if (context.room.status !== "waiting") {
       return { error: "この試合はすでに開始しています。" };
+    }
+
+    const humanPlayers = [...context.room.players.values()].filter((player) => !player.isBot);
+    if (humanPlayers.length > 1 && !humanPlayers.every((player) => player.ready)) {
+      return { error: "参加者全員が準備完了になるまで開始できません。" };
     }
 
     if (context.room.players.size < MAX_PLAYERS) {
@@ -1553,7 +1769,9 @@ export class RoomAuthorityDurableObject {
       return null;
     }
 
-    applyProgress(context.player, context.room, payload);
+    if (!applyTypingInput(context.player, context.room, payload)) {
+      return null;
+    }
     context.room.lastActivityAt = Date.now();
 
     const result = this.maybeFinalizeRoom(context.room);
@@ -1574,7 +1792,9 @@ export class RoomAuthorityDurableObject {
       return null;
     }
 
-    applyProgress(context.player, context.room, payload);
+    if (!applyTypingInput(context.player, context.room, payload)) {
+      return null;
+    }
     context.room.lastActivityAt = Date.now();
 
     const promptLength = getTypingLength(context.room, context.player);
@@ -1582,6 +1802,7 @@ export class RoomAuthorityDurableObject {
       const now = Date.now();
       context.player.finishedAt = now;
       context.player.finishTimeMs = now - (context.room.serverStartAt ?? now);
+      context.player.finishStatus = "finished";
     }
 
     const result = this.maybeFinalizeRoom(context.room);
@@ -1647,12 +1868,8 @@ export class RoomAuthorityDurableObject {
     room.lastActivityAt = Date.now();
 
     if (record.playerId === room.hostPlayerId) {
-      const activePlayers = [...room.players.values()].filter((p) => p.connected || p.isBot);
-      if (activePlayers.length === 0) {
-        return toPublicRoom(room);
-      }
-
-      const nextHost = activePlayers.find((p) => !p.isBot) || activePlayers[0];
+      const nextHost = [...room.players.values()].find((p) => p.connected && !p.isBot)
+        ?? [...room.players.values()].find((p) => !p.isBot);
       if (nextHost) {
         room.hostPlayerId = nextHost.id;
       }
@@ -1691,7 +1908,8 @@ export class RoomAuthorityDurableObject {
     }
 
     if (record.playerId === room.hostPlayerId) {
-      const nextHost = [...room.players.values()].find((p) => !p.isBot) ?? [...room.players.values()][0];
+      const nextHost = [...room.players.values()].find((p) => p.connected && !p.isBot)
+        ?? [...room.players.values()].find((p) => !p.isBot);
       if (nextHost) {
         room.hostPlayerId = nextHost.id;
       }
@@ -1734,18 +1952,13 @@ export class RoomAuthorityDurableObject {
     const speed = Math.max(1, settings.charsPerTick + variance);
     const charsToAdd = isMistake ? 0 : speed;
 
-    applyProgress(bot, this.room, {
-      roomCode: this.room.roomCode,
-      progressIndex: bot.progressIndex + charsToAdd,
-      correctCharacters: bot.correctCharacters + charsToAdd,
-      totalTypedCharacters: bot.totalTypedCharacters + speed,
-      mistakes: bot.mistakes + (isMistake ? speed : 0)
-    });
+    applyBotProgress(bot, this.room, charsToAdd, speed, isMistake);
 
     const promptLength = getTypingLength(this.room, bot);
     if (bot.progressIndex >= promptLength) {
       bot.finishedAt = Date.now();
       bot.finishTimeMs = bot.finishedAt - (this.room.serverStartAt ?? bot.finishedAt);
+      bot.finishStatus = "finished";
     }
 
     const result = this.maybeFinalizeRoom(this.room);
@@ -1819,7 +2032,13 @@ function parseClientMessage(rawMessage: string): ParsedClientMessage | null {
     return null;
   }
 
-  if (!isRecord(parsed) || typeof parsed.id !== "string" || typeof parsed.type !== "string") {
+  if (
+    !isRecord(parsed) ||
+    typeof parsed.id !== "string" ||
+    parsed.id.length === 0 ||
+    parsed.id.length > MAX_MESSAGE_ID_LENGTH ||
+    typeof parsed.type !== "string"
+  ) {
     return null;
   }
 
@@ -1858,9 +2077,9 @@ function parseCreateRoomPayload(payload: unknown): CreateRoomPayload | null {
     return null;
   }
 
-  const nickname = readString(payload.nickname);
-  const guestId = readString(payload.guestId);
-  const sessionId = readString(payload.sessionId);
+  const nickname = readNickname(payload.nickname);
+  const guestId = readIdentifier(payload.guestId);
+  const sessionId = readIdentifier(payload.sessionId);
   const deviceKind = parseDeviceKind(payload.deviceKind);
 
   if (!nickname || !guestId || !sessionId) {
@@ -1963,32 +2182,53 @@ function parseTypingPayload(payload: unknown): TypingPayload | null {
   }
 
   const roomCode = readRoomCode(payload.roomCode);
-  if (
-    !roomCode ||
-    typeof payload.progressIndex !== "number" ||
-    typeof payload.correctCharacters !== "number" ||
-    typeof payload.totalTypedCharacters !== "number" ||
-    typeof payload.mistakes !== "number"
-  ) {
+  const input = typeof payload.input === "string" ? payload.input : null;
+  const sequence = typeof payload.sequence === "number" ? payload.sequence : null;
+
+  if (!roomCode || input === null || sequence === null || !Number.isSafeInteger(sequence) || sequence < 1) {
+    return null;
+  }
+
+  if (Array.from(input).length > MAX_TYPING_INPUT_CHARS || byteLength(input) > MAX_WEB_SOCKET_MESSAGE_BYTES) {
     return null;
   }
 
   return {
     roomCode,
-    progressIndex: payload.progressIndex,
-    correctCharacters: payload.correctCharacters,
-    totalTypedCharacters: payload.totalTypedCharacters,
-    mistakes: payload.mistakes
+    input,
+    sequence
   };
 }
 
 function readRoomCode(value: unknown): string | null {
   const roomCode = readString(value);
-  return roomCode ? normalizeRoomCode(roomCode) : null;
+  if (!roomCode || !isValidRoomCode(roomCode)) {
+    return null;
+  }
+
+  return normalizeRoomCode(roomCode);
 }
 
 function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readIdentifier(value: unknown): string | null {
+  const text = readString(value);
+  if (!text || text.length > MAX_IDENTIFIER_LENGTH || !/^[A-Za-z0-9_-]+$/.test(text)) {
+    return null;
+  }
+
+  return text;
+}
+
+function readNickname(value: unknown): string | null {
+  const text = readString(value);
+  if (!text || validateNickname(text)) {
+    return null;
+  }
+
+  return text;
 }
 
 function parseDeviceKind(value: unknown): DeviceKind | null {
@@ -2068,6 +2308,9 @@ function createPlayer(
     mistakes: 0,
     maxStreak: 0,
     currentStreak: 0,
+    typingProgressIndex: 0,
+    pendingInput: "",
+    lastInputSequence: 0,
     wpm: 0,
     accuracy: 100
   };
@@ -2078,8 +2321,7 @@ function addBotPlayer(room: InternalRoom): void {
     return;
   }
 
-  const difficultyLabel = room.botDifficulty.charAt(0).toUpperCase() + room.botDifficulty.slice(1);
-  const nickname = `${BOT_NICKNAME} (${difficultyLabel})`;
+  const nickname = formatBotNickname(room.botDifficulty);
 
   room.players.set(BOT_PLAYER_ID, {
     id: BOT_PLAYER_ID,
@@ -2097,9 +2339,17 @@ function addBotPlayer(room: InternalRoom): void {
     mistakes: 0,
     maxStreak: 0,
     currentStreak: 0,
+    typingProgressIndex: 0,
+    pendingInput: "",
+    lastInputSequence: 0,
     wpm: 0,
     accuracy: 100
   });
+}
+
+function formatBotNickname(difficulty: BotDifficulty): string {
+  const difficultyLabel = difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
+  return `${BOT_NICKNAME} (${difficultyLabel})`;
 }
 
 function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
@@ -2122,7 +2372,7 @@ function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
 }
 
 function resetPlayers(room: InternalRoom): void {
-  const promptLength = room.prompt?.text.length ?? 0;
+  const promptLength = room.prompt ? getPromptCanonicalLength(room.prompt) : 0;
   const maxHp = room.matchRule === "hpBattle" ? Math.max(HP_BATTLE_MIN_HP, promptLength * HP_BATTLE_HP_PER_PROMPT_CHAR) : undefined;
 
   for (const player of room.players.values()) {
@@ -2133,6 +2383,9 @@ function resetPlayers(room: InternalRoom): void {
     player.mistakes = 0;
     player.maxStreak = 0;
     player.currentStreak = 0;
+    player.typingProgressIndex = 0;
+    player.pendingInput = "";
+    player.lastInputSequence = 0;
     player.wpm = 0;
     player.accuracy = 100;
     if (maxHp !== undefined) {
@@ -2143,86 +2396,109 @@ function resetPlayers(room: InternalRoom): void {
       delete player.hp;
     }
     delete player.forfeited;
+    delete player.finishStatus;
     delete player.disconnectedAt;
     delete player.finishedAt;
     delete player.finishTimeMs;
   }
 }
 
-function getTypingLength(room: InternalRoom, player: InternalPlayer): number {
-  const prompt = room.prompt ?? pickPrompt(room.promptCategory, Date.now() + room.round);
-  return (player.deviceKind === "mobile" ? prompt.typing.hiragana : prompt.typing.romaji).length;
+function resetPlayerInputSession(player: InternalPlayer): void {
+  player.lastInputSequence = 0;
 }
 
-function applyProgress(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): void {
+function getTypingLength(room: InternalRoom, player: InternalPlayer | PlayerState): number {
+  void player;
+  const prompt = room.prompt ?? pickPrompt(room.promptCategory, Date.now() + room.round);
+  return getPromptCanonicalLength(prompt);
+}
+
+function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): boolean {
+  if (!isValidTypingProgressPayload(payload) || payload.sequence !== player.lastInputSequence + 1) {
+    return false;
+  }
+
+  player.lastInputSequence = payload.sequence;
+
+  if (!payload.input) {
+    return true;
+  }
+
   const promptLength = getTypingLength(room, player);
   const previousProgressIndex = player.progressIndex;
-  const previousCorrectCharacters = player.correctCharacters;
   const previousMistakes = player.mistakes;
-  const nextIndex = clamp(payload.progressIndex, player.progressIndex, promptLength);
-
-  const totalTypedCharacters = Math.max(payload.totalTypedCharacters, player.totalTypedCharacters);
-  const correctCharacters = Math.max(payload.correctCharacters, player.correctCharacters);
-  const mistakes = Math.max(payload.mistakes, player.mistakes);
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
+  let progressDelta = 0;
 
-  const isCorrect = correctCharacters > player.correctCharacters;
-  if (isCorrect) {
-    player.currentStreak += 1;
-    player.maxStreak = Math.max(player.maxStreak, player.currentStreak);
+  if (player.deviceKind === "mobile") {
+    for (const typedChar of Array.from(payload.input)) {
+      const before = createProgressState(player);
+      const after = advanceProgress(before, room.prompt?.typing.hiragana[player.progressIndex], typedChar);
+      applyProgressState(player, after);
+      progressDelta += Math.max(after.progressIndex - before.progressIndex, 0);
+    }
   } else {
-    player.currentStreak = 0;
-  }
+    const plan = buildRomajiTypingPlan(room.prompt?.typing.hiragana ?? "");
 
-  player.progressIndex = nextIndex;
-  player.correctCharacters = correctCharacters;
-  player.totalTypedCharacters = totalTypedCharacters;
-  player.mistakes = mistakes;
-  player.wpm = calculateWpm(correctCharacters, now - startedAt);
-  player.accuracy = calculateAccuracy(correctCharacters, totalTypedCharacters);
+    for (const typedChar of Array.from(payload.input)) {
+      const before = createProgressState(player, player.typingProgressIndex);
+      const beforeUnitIndex = getRomajiTypingUnitIndex(plan, before.progressIndex);
+      const after = advanceRomajiProgress(before, plan, typedChar);
+      const completedUnit = after.progressIndex > before.progressIndex ? plan.units[beforeUnitIndex] : undefined;
 
-  if (room.matchRule !== "hpBattle") {
-    if (player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
-      player.finishedAt = now;
-      player.finishTimeMs = now - startedAt;
-    }
-    return;
-  }
+      applyProgressState(player, after);
+      player.typingProgressIndex = after.progressIndex;
 
-  const correctDelta = Math.max(correctCharacters - previousCorrectCharacters, 0);
-  const mistakeDelta = Math.max(mistakes - previousMistakes, 0);
-
-  if (correctDelta > 0) {
-    for (const opponent of room.players.values()) {
-      if (
-        opponent.id === player.id ||
-        opponent.hp === undefined ||
-        opponent.progressIndex >= getTypingLength(room, opponent) ||
-        opponent.hp <= 0
-      ) {
-        continue;
+      if (completedUnit) {
+        const canonicalDelta = Array.from(completedUnit.hiragana).length;
+        player.progressIndex = clamp(player.progressIndex + canonicalDelta, 0, promptLength);
+        progressDelta += canonicalDelta;
       }
-
-      applyHpDamage(opponent, correctDelta * HP_BATTLE_ATTACK_DAMAGE, room, now);
     }
   }
 
-  if (mistakeDelta > 0) {
-    applyHpDamage(player, mistakeDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
+  player.progressIndex = clamp(player.progressIndex, 0, promptLength);
+  player.wpm = calculateWpm(player.correctCharacters, now - startedAt);
+  player.accuracy = calculateAccuracy(player.correctCharacters, player.totalTypedCharacters);
+
+  if (room.matchRule === "hpBattle") {
+    const mistakeDelta = Math.max(player.mistakes - previousMistakes, 0);
+
+    if (progressDelta > 0) {
+      for (const opponent of room.players.values()) {
+        if (
+          opponent.id === player.id ||
+          opponent.hp === undefined ||
+          opponent.progressIndex >= getTypingLength(room, opponent) ||
+          opponent.hp <= 0
+        ) {
+          continue;
+        }
+
+        applyHpDamage(opponent, progressDelta * HP_BATTLE_ATTACK_DAMAGE, room, now);
+      }
+    }
+
+    if (mistakeDelta > 0) {
+      applyHpDamage(player, mistakeDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
+    }
   }
 
   if (player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
     player.finishedAt = now;
     player.finishTimeMs = now - startedAt;
+    player.finishStatus = "finished";
   }
+
+  return true;
 }
 
 function areHumansFinished(room: InternalRoom): boolean {
   return [...room.players.values()]
     .filter((p) => !p.isBot)
     .every((p) => {
-      if (p.forfeited) {
+      if (p.finishStatus === "forfeited" || p.finishStatus === "eliminated") {
         return true;
       }
 
@@ -2238,24 +2514,79 @@ function finalizeUnfinishedBots(room: InternalRoom): void {
   for (const bot of [...room.players.values()].filter((p) => p.isBot)) {
     if (bot.progressIndex < getTypingLength(room, bot)) {
       bot.finishedAt = Date.now();
-      bot.finishTimeMs = Infinity;
+      delete bot.finishTimeMs;
+      bot.finishStatus = "unfinished";
     }
   }
+}
+
+function applyBotProgress(
+  bot: InternalPlayer,
+  room: InternalRoom,
+  charsToAdd: number,
+  totalTypedDelta: number,
+  isMistake: boolean
+): void {
+  const promptLength = getTypingLength(room, bot);
+  const now = Date.now();
+  const startedAt = room.serverStartAt ?? now;
+  const progressDelta = Math.min(charsToAdd, Math.max(promptLength - bot.progressIndex, 0));
+
+  bot.totalTypedCharacters += totalTypedDelta;
+
+  if (isMistake) {
+    bot.mistakes += totalTypedDelta;
+    bot.currentStreak = 0;
+  } else if (progressDelta > 0) {
+    bot.progressIndex += progressDelta;
+    bot.correctCharacters += progressDelta;
+    bot.currentStreak += progressDelta;
+    bot.maxStreak = Math.max(bot.maxStreak, bot.currentStreak);
+  }
+
+  bot.wpm = calculateWpm(bot.progressIndex, now - startedAt);
+  bot.accuracy = calculateAccuracy(bot.correctCharacters, bot.totalTypedCharacters);
 }
 
 function ensureConnectedHost(room: InternalRoom): void {
   const currentHost = room.players.get(room.hostPlayerId);
 
-  if (currentHost?.connected || currentHost?.isBot) {
+  if (currentHost?.connected && !currentHost.isBot) {
     return;
   }
 
   const nextHost = [...room.players.values()].find((player) => player.connected && !player.isBot)
-    ?? [...room.players.values()].find((player) => player.connected || player.isBot);
+    ?? [...room.players.values()].find((player) => !player.isBot);
 
   if (nextHost) {
     room.hostPlayerId = nextHost.id;
   }
+}
+
+function shouldExpireRoom(room: InternalRoom, now: number): boolean {
+  const deadline = getRoomExpirationDeadline(room);
+  return deadline !== null && now >= deadline;
+}
+
+function getRoomExpirationDeadline(room: InternalRoom): number | null {
+  const hasConnectedHuman = [...room.players.values()].some((player) => player.connected && !player.isBot);
+  const allHumansOffline = [...room.players.values()]
+    .filter((player) => !player.isBot)
+    .every((player) => !player.connected);
+
+  if (room.status === "waiting") {
+    return allHumansOffline ? room.lastActivityAt + WAITING_IDLE_TTL_MS : null;
+  }
+
+  if (room.status === "finished") {
+    return hasConnectedHuman ? null : (room.finishedAt ?? room.lastActivityAt) + FINISHED_RESULT_RETENTION_MS;
+  }
+
+  if (allHumansOffline) {
+    return room.lastActivityAt + ABANDONED_ROOM_TTL_MS;
+  }
+
+  return null;
 }
 
 function syncMatchRuleState(room: InternalRoom): void {
@@ -2276,12 +2607,14 @@ function applyHpDamage(player: InternalPlayer, damage: number, room: InternalRoo
 
   if (nextHp === 0) {
     player.finishedAt = now;
-    player.finishTimeMs = now - (room.serverStartAt ?? now);
+    delete player.finishTimeMs;
+    player.finishStatus = "eliminated";
   }
 }
 
 function finalizeRoom(room: InternalRoom): MatchResult {
   room.status = "finished";
+  room.finishedAt = Date.now();
   const result = toMatchResult(room);
   room.result = result;
 
@@ -2341,6 +2674,9 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     isHost: player.id === hostPlayerId,
     isBot: player.isBot,
     progressIndex: player.progressIndex,
+    ...(player.deviceKind === "desktop"
+      ? { typingProgressIndex: player.typingProgressIndex, pendingInput: player.pendingInput }
+      : {}),
     correctCharacters: player.correctCharacters,
     totalTypedCharacters: player.totalTypedCharacters,
     mistakes: player.mistakes,
@@ -2367,11 +2703,45 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     publicPlayer.finishedAt = player.finishedAt;
   }
 
-  if (player.finishTimeMs !== undefined) {
+  if (player.finishTimeMs !== undefined && Number.isFinite(player.finishTimeMs)) {
     publicPlayer.finishTimeMs = player.finishTimeMs;
   }
 
+  if (player.finishStatus !== undefined) {
+    publicPlayer.finishStatus = player.finishStatus;
+  }
+
   return publicPlayer;
+}
+
+function createProgressState(player: InternalPlayer, progressIndex = player.progressIndex) {
+  return {
+    ...createEmptyProgress(),
+    progressIndex,
+    correctCharacters: player.correctCharacters,
+    totalTypedCharacters: player.totalTypedCharacters,
+    mistakes: player.mistakes,
+    currentStreak: player.currentStreak,
+    maxStreak: player.maxStreak,
+    pendingInput: player.pendingInput
+  };
+}
+
+function applyProgressState(player: InternalPlayer, progress: ReturnType<typeof createProgressState>): void {
+  player.correctCharacters = progress.correctCharacters;
+  player.totalTypedCharacters = progress.totalTypedCharacters;
+  player.mistakes = progress.mistakes;
+  player.currentStreak = progress.currentStreak;
+  player.maxStreak = progress.maxStreak;
+  player.pendingInput = progress.pendingInput;
+
+  if (player.deviceKind === "mobile") {
+    player.progressIndex = progress.progressIndex;
+  }
+}
+
+function getPromptCanonicalLength(prompt: Prompt): number {
+  return Array.from(prompt.typing.hiragana).length;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -2380,26 +2750,26 @@ function clamp(value: number, min: number, max: number): number {
 
 function isValidTypingProgressPayload(payload: TypingProgress): boolean {
   return (
-    Number.isInteger(payload.progressIndex) &&
-    payload.progressIndex >= 0 &&
-    Number.isInteger(payload.correctCharacters) &&
-    payload.correctCharacters >= 0 &&
-    Number.isInteger(payload.totalTypedCharacters) &&
-    payload.totalTypedCharacters >= 0 &&
-    Number.isInteger(payload.mistakes) &&
-    payload.mistakes >= 0 &&
-    payload.correctCharacters <= payload.totalTypedCharacters &&
-    payload.mistakes <= payload.totalTypedCharacters &&
-    payload.progressIndex <= payload.totalTypedCharacters
+    Number.isSafeInteger(payload.sequence) &&
+    payload.sequence >= 1 &&
+    typeof payload.input === "string" &&
+    Array.from(payload.input).length <= MAX_TYPING_INPUT_CHARS &&
+    byteLength(payload.input) <= MAX_WEB_SOCKET_MESSAGE_BYTES
   );
+}
+
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
 }
 
 function createRoomStateFromSnapshot(
   room: RoomState,
   playerSessions: Record<string, string> = {},
-  disconnectedAt: Record<string, number> = {}
+  disconnectedAt: Record<string, number> = {},
+  internal: PersistedRoomSnapshot["internal"] = {}
 ): InternalRoom {
   const normalizedRoomCode = normalizeRoomCode(room.roomCode);
+  const typingState = internal?.typingState ?? {};
   const internalRoom: InternalRoom = {
     roomCode: normalizedRoomCode,
     hostPlayerId: room.hostPlayerId,
@@ -2407,7 +2777,7 @@ function createRoomStateFromSnapshot(
     matchRule: room.matchRule,
     botDifficulty: room.botDifficulty,
     promptCategory: room.promptCategory,
-    promptHistory: room.prompt ? [room.prompt.id] : [],
+    promptHistory: internal?.promptHistory ?? (room.prompt ? [room.prompt.id] : []),
     players: new Map(
       room.players.map((player) => [
         player.id,
@@ -2418,33 +2788,108 @@ function createRoomStateFromSnapshot(
           isHost: player.id === room.hostPlayerId,
           connected: false,
           ready: false,
+          typingProgressIndex: typingState[player.id]?.typingProgressIndex ?? 0,
+          pendingInput: typingState[player.id]?.pendingInput ?? "",
+          lastInputSequence: typingState[player.id]?.lastInputSequence ?? 0,
           ...(disconnectedAt[player.id] !== undefined ? { disconnectedAt: disconnectedAt[player.id] } : {})
         } as InternalPlayer
       ])
     ),
-    createdAt: Date.now(),
-    lastActivityAt: Date.now(),
-    round: 1,
+    createdAt: internal?.createdAt ?? Date.now(),
+    lastActivityAt: internal?.lastActivityAt ?? Date.now(),
+    round: internal?.round ?? 1,
     ...(room.prompt ? { prompt: room.prompt } : {}),
     ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
     ...(room.matchEndsAt !== undefined ? { matchEndsAt: room.matchEndsAt } : {}),
+    ...(internal?.finishedAt !== undefined ? { finishedAt: internal.finishedAt } : {}),
     ...(room.result ? { result: room.result } : {})
   };
 
+  ensureConnectedHost(internalRoom);
   return internalRoom;
 }
 
 function parsePersistedRoomSnapshotFromValue(value: unknown): PersistedRoomSnapshot | null {
-  if (!value || typeof value !== "object") {
+  if (!isRecord(value)) {
     return null;
   }
 
+  const rawRoom = "room" in value ? value.room : value;
+  if (!isRecord(rawRoom) || typeof rawRoom.roomCode !== "string" || !isValidRoomCode(rawRoom.roomCode)) {
+    return null;
+  }
+
+  const room = rawRoom as RoomState;
   const snapshot = value as PersistedRoomSnapshot;
-  if (!snapshot.room || typeof snapshot.room.roomCode !== "string") {
-    return null;
+
+  const internal = parseSnapshotInternal(snapshot.internal);
+  return {
+    schemaVersion: typeof snapshot.schemaVersion === "number" ? snapshot.schemaVersion : 1,
+    room,
+    playerSessions: parseStringRecord(snapshot.playerSessions),
+    disconnectedAt: parseNumberRecord(snapshot.disconnectedAt),
+    ...(internal ? { internal } : {})
+  };
+}
+
+function parseStringRecord(value: unknown): Record<string, string> {
+  if (!isRecord(value)) {
+    return {};
   }
 
-  return snapshot;
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  );
+}
+
+function parseNumberRecord(value: unknown): Record<string, number> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]))
+  );
+}
+
+function parseSnapshotInternal(value: unknown): PersistedRoomSnapshot["internal"] {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const typingState: Record<string, PersistedPlayerTypingState> = {};
+  if (isRecord(value.typingState)) {
+    for (const [playerId, state] of Object.entries(value.typingState)) {
+      if (!isRecord(state)) {
+        continue;
+      }
+
+      typingState[playerId] = {
+        ...(typeof state.typingProgressIndex === "number" && Number.isFinite(state.typingProgressIndex)
+          ? { typingProgressIndex: state.typingProgressIndex }
+          : {}),
+        ...(typeof state.pendingInput === "string" ? { pendingInput: state.pendingInput } : {}),
+        ...(typeof state.lastInputSequence === "number" && Number.isSafeInteger(state.lastInputSequence)
+          ? { lastInputSequence: state.lastInputSequence }
+          : {})
+      };
+    }
+  }
+
+  return {
+    ...(typeof value.round === "number" && Number.isSafeInteger(value.round) && value.round > 0
+      ? { round: value.round }
+      : {}),
+    ...(Array.isArray(value.promptHistory) && value.promptHistory.every((entry) => typeof entry === "string")
+      ? { promptHistory: value.promptHistory }
+      : {}),
+    ...(typeof value.createdAt === "number" && Number.isFinite(value.createdAt) ? { createdAt: value.createdAt } : {}),
+    ...(typeof value.lastActivityAt === "number" && Number.isFinite(value.lastActivityAt)
+      ? { lastActivityAt: value.lastActivityAt }
+      : {}),
+    ...(typeof value.finishedAt === "number" && Number.isFinite(value.finishedAt) ? { finishedAt: value.finishedAt } : {}),
+    ...(Object.keys(typingState).length > 0 ? { typingState } : {})
+  };
 }
 
 function readClientIp(headers: Headers): string {

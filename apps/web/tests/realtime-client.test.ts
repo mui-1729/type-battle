@@ -143,7 +143,7 @@ class BridgeClientSocket {
   static OPEN = 1;
   static instances: BridgeClientSocket[] = [];
   static gateway: {
-    attachSocket(socket: WebSocket): string;
+    attachSocket(socket: WebSocket, options?: { roomCode?: string }): string;
   } | null = null;
 
   readonly url: string;
@@ -162,7 +162,8 @@ class BridgeClientSocket {
 
     this.server = new BridgeServerSocket();
     this.server.setClient(this);
-    BridgeClientSocket.gateway.attachSocket(this.server as unknown as WebSocket);
+    const roomCode = /\/rooms\/([^/]+)\/socket/.exec(url)?.[1];
+    BridgeClientSocket.gateway.attachSocket(this.server as unknown as WebSocket, roomCode ? { roomCode } : undefined);
   }
 
   addEventListener(type: string, handler: (event: { data?: unknown }) => void): void {
@@ -290,38 +291,21 @@ describe("realtime client", () => {
     firstSocket.open();
 
     expect(connectHandler).toHaveBeenCalledTimes(1);
-    expect(firstSocket.sent).toHaveLength(2);
+    expect(firstSocket.sent).toHaveLength(1);
+    expect(secondAck).toHaveBeenCalledWith({
+      ok: false,
+      error: "Realtime connection is not ready."
+    });
 
     const firstMessage = JSON.parse(firstSocket.sent[0] ?? "{}") as {
       id: string;
       type: string;
       payload: unknown;
     };
-    const secondMessage = JSON.parse(firstSocket.sent[1] ?? "{}") as {
-      id: string;
-      type: string;
-      payload: unknown;
-    };
-
     expect(firstMessage).toMatchObject({
       type: "client:room:create",
       payload: { nickname: "Alice", guestId: "guest-1", sessionId: "session-1", deviceKind: "desktop" }
     });
-    expect(secondMessage).toMatchObject({
-      type: "client:match:start",
-      payload: { roomCode: "ROOM1" }
-    });
-
-    firstSocket.receive(
-      JSON.stringify({
-        type: "server:ack",
-        id: "ack-2",
-        replyTo: secondMessage.id,
-        command: "client:match:start",
-        payload: { ok: true, data: { accepted: true } }
-      })
-    );
-    expect(secondAck).toHaveBeenCalledWith({ ok: true, data: { accepted: true } });
     expect(firstAck).not.toHaveBeenCalled();
 
     const roomState = {
@@ -360,7 +344,7 @@ describe("realtime client", () => {
 
     socket.emit("room:leave", { roomCode: "ROOM1" });
 
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_300);
 
     const secondSocket = MockWebSocket.instances[1]!;
     expect(secondSocket).toBeDefined();
@@ -368,18 +352,14 @@ describe("realtime client", () => {
     secondSocket.open();
 
     expect(connectHandler).toHaveBeenCalledTimes(2);
-    expect(secondSocket.sent).toHaveLength(1);
-    expect(JSON.parse(secondSocket.sent[0] ?? "{}")).toMatchObject({
-      type: "client:room:leave",
-      payload: { roomCode: "ROOM1" }
-    });
+    expect(secondSocket.sent).toHaveLength(0);
   });
 
-  it("bridges the Cloudflare adapter to the worker gateway and returns acks", async () => {
-    const { GatewayDurableObject: RoomDurableObject } = await import("../../cloudflare-worker/src/worker");
+  it("bridges the Cloudflare adapter to the room authority and returns acks", async () => {
+    const { RoomAuthorityDurableObject } = await import("../../cloudflare-worker/src/worker");
 
     const storage = new FakeStorage();
-    const gateway = new RoomDurableObject(
+    const gateway = new RoomAuthorityDurableObject(
       new FakeDurableObjectState(storage) as unknown as DurableObjectState
     );
 
@@ -395,7 +375,7 @@ describe("realtime client", () => {
     const setDifficultyAck = vi.fn();
     const setRuleAck = vi.fn();
 
-    const socket = createRealtimeSocket({ transport: "cloudflare", url: "ws://localhost:8787" });
+    const socket = createRealtimeSocket({ transport: "cloudflare", url: "ws://localhost:8787/rooms/AB23CD/socket" });
     const clientSocket = BridgeClientSocket.instances[0];
 
     expect(clientSocket).toBeDefined();
@@ -417,6 +397,8 @@ describe("realtime client", () => {
       createAck
     );
     clientSocket.open();
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(connectHandler).toHaveBeenCalledTimes(1);
     expect(createAck).toHaveBeenCalledWith(
@@ -425,7 +407,7 @@ describe("realtime client", () => {
         data: expect.objectContaining({
           roomCode: expect.any(String),
           room: expect.objectContaining({
-            roomCode: expect.any(String),
+            roomCode: "AB23CD",
             status: "waiting"
           })
         })

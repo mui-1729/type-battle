@@ -6,6 +6,8 @@ export type MatchRule = "race" | "timeAttack" | "hpBattle";
 
 export type DeviceKind = "mobile" | "desktop";
 
+export type PlayerFinishStatus = "finished" | "forfeited" | "eliminated" | "unfinished";
+
 export type PlayerState = {
   id: string;
   nickname: string;
@@ -14,6 +16,8 @@ export type PlayerState = {
   isHost: boolean;
   isBot: boolean;
   progressIndex: number;
+  typingProgressIndex?: number;
+  pendingInput?: string;
   correctCharacters: number;
   totalTypedCharacters: number;
   mistakes: number;
@@ -26,6 +30,7 @@ export type PlayerState = {
   accuracy: number;
   finishedAt?: number;
   finishTimeMs?: number;
+  finishStatus?: PlayerFinishStatus;
   forfeited?: boolean | undefined;
 };
 
@@ -73,10 +78,8 @@ export type MatchResult = {
 
 export type TypingProgress = {
   roomCode: string;
-  progressIndex: number;
-  correctCharacters: number;
-  totalTypedCharacters: number;
-  mistakes: number;
+  input: string;
+  sequence: number;
 };
 
 export type TypingFinish = TypingProgress;

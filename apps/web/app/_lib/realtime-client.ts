@@ -57,6 +57,22 @@ const CLOUDFLARE_SERVER_EVENT_TO_APP_EVENT: Record<CloudflareServerEventName, ke
 };
 
 const RECONNECT_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 15_000;
+const ACK_TIMEOUT_MS = 10_000;
+const MAX_OUTBOUND_QUEUE_MESSAGES = 20;
+const MAX_OUTBOUND_QUEUE_BYTES = 32 * 1024;
+
+type PendingAck = {
+  callback: (response: AckResponse<unknown>) => void;
+  timeout: ReturnType<typeof setTimeout>;
+};
+
+type QueuedMessage = {
+  id: string;
+  event: CloudflareClientEventName;
+  serialized: string;
+  bytes: number;
+};
 
 export function createRealtimeSocket(config: { transport: RealtimeTransport; url: string }): RealtimeSocket {
   void config.transport;
@@ -85,10 +101,11 @@ export function getDefaultRealtimeUrl(transport: RealtimeTransport, location: Lo
 
 function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
   const listeners = new Map<string, Set<AnyListener>>();
-  const pendingAcks = new Map<string, (response: AckResponse<unknown>) => void>();
-  const outboundMessages: string[] = [];
+  const pendingAcks = new Map<string, PendingAck>();
+  const outboundMessages: QueuedMessage[] = [];
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectAttempts = 0;
   let manuallyClosed = false;
 
   const notify = <K extends RealtimeEventName>(event: K, ...args: Parameters<RealtimeEventMap[K]>) => {
@@ -112,17 +129,39 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
       const message = outboundMessages.shift();
 
       if (message) {
-        socket.send(message);
+        socket.send(message.serialized);
       }
     }
   };
 
   const failPendingAcks = (message: string) => {
-    for (const ack of pendingAcks.values()) {
-      ack({ ok: false, error: message });
+    for (const [id, ack] of pendingAcks.entries()) {
+      clearTimeout(ack.timeout);
+      ack.callback({ ok: false, error: message });
+      removeQueuedMessage(id);
     }
 
     pendingAcks.clear();
+  };
+
+  const removeQueuedMessage = (id: string) => {
+    const index = outboundMessages.findIndex((message) => message.id === id);
+    if (index >= 0) {
+      outboundMessages.splice(index, 1);
+    }
+  };
+
+  const addPendingAck = (id: string, ack: (response: AckResponse<unknown>) => void) => {
+    const timeout = setTimeout(() => {
+      pendingAcks.delete(id);
+      removeQueuedMessage(id);
+      ack({ ok: false, error: "Realtime request timed out." });
+    }, ACK_TIMEOUT_MS);
+
+    pendingAcks.set(id, {
+      callback: ack,
+      timeout
+    });
   };
 
   const scheduleReconnect = () => {
@@ -130,13 +169,17 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
       return;
     }
 
+    const baseDelay = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_DELAY_MS * 2 ** reconnectAttempts);
+    const jitter = Math.floor(Math.random() * 250);
+    reconnectAttempts += 1;
+
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
 
       if (!manuallyClosed) {
         connect();
       }
-    }, RECONNECT_DELAY_MS);
+    }, baseDelay + jitter);
   };
 
   const handleMessage = (event: MessageEvent) => {
@@ -169,7 +212,8 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
       const ack = pendingAcks.get(replyTo);
 
       if (ack && ackPayload) {
-        ack(ackPayload);
+        clearTimeout(ack.timeout);
+        ack.callback(ackPayload);
         pendingAcks.delete(replyTo);
       }
 
@@ -193,8 +237,9 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
   const connect = () => {
     socket = new WebSocket(url);
     socket.addEventListener("open", () => {
-      flushOutboundMessages();
+      reconnectAttempts = 0;
       notify("connect");
+      flushOutboundMessages();
     });
     socket.addEventListener("message", handleMessage);
     socket.addEventListener("close", () => {
@@ -244,7 +289,7 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
       const id = globalThis.crypto?.randomUUID?.() ?? `message_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
       if (ack) {
-        pendingAcks.set(id, ack);
+        addPendingAck(id, ack);
       }
 
       const message: CloudflareClientMessage = {
@@ -259,7 +304,40 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
         return;
       }
 
-      outboundMessages.push(serializedMessage);
+      if (!isReplayableWhenDisconnected(wireEvent)) {
+        if (ack) {
+          const pending = pendingAcks.get(id);
+          if (pending) {
+            clearTimeout(pending.timeout);
+            pendingAcks.delete(id);
+          }
+          ack({ ok: false, error: "Realtime connection is not ready." });
+        }
+        return;
+      }
+
+      const queuedMessage: QueuedMessage = {
+        id,
+        event: wireEvent,
+        serialized: serializedMessage,
+        bytes: serializedMessage.length
+      };
+      outboundMessages.push(queuedMessage);
+
+      while (
+        outboundMessages.length > MAX_OUTBOUND_QUEUE_MESSAGES ||
+        outboundMessages.reduce((total, message) => total + message.bytes, 0) > MAX_OUTBOUND_QUEUE_BYTES
+      ) {
+        const dropped = outboundMessages.shift();
+        if (dropped) {
+          const pending = pendingAcks.get(dropped.id);
+          if (pending) {
+            clearTimeout(pending.timeout);
+            pending.callback({ ok: false, error: "Realtime outbound queue overflowed." });
+            pendingAcks.delete(dropped.id);
+          }
+        }
+      }
     },
     disconnect() {
       manuallyClosed = true;
@@ -270,7 +348,7 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
       }
 
       outboundMessages.length = 0;
-      pendingAcks.clear();
+      failPendingAcks("Realtime connection closed.");
 
       if (socket) {
         socket.close();
@@ -278,4 +356,13 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
       }
     }
   };
+}
+
+function isReplayableWhenDisconnected(event: CloudflareClientEventName): boolean {
+  return (
+    event === "client:room:create" ||
+    event === "client:room:join" ||
+    event === "client:practice:start" ||
+    event === "client:practice:dailyStart"
+  );
 }

@@ -19,8 +19,14 @@ export default {
       return Response.json({
         ok: true,
         service: "type-battle-cloudflare-worker",
+        check: "liveness",
         timestamp: new Date().toISOString()
       });
+    }
+
+    if (url.pathname === "/ready" || url.pathname === "/metrics") {
+      const gateway = env.GATEWAY.getByName("gateway");
+      return gateway.fetch(new Request(`https://type-battle.internal${url.pathname}`));
     }
 
     if (url.pathname === GATEWAY_ROOM_RATE_LIMIT_PATH) {
@@ -33,8 +39,8 @@ export default {
       return new Response("Invalid room code", { status: 400 });
     }
 
-    if (route?.action === "state" && (request.method === "POST" || request.method === "PUT")) {
-      if (!isAuthorizedStateWrite(request, env)) {
+    if (route?.action === "state") {
+      if (!isAuthorizedRoomStateAccess(request, env)) {
         return new Response("Forbidden", { status: 403 });
       }
     }
@@ -49,7 +55,7 @@ export default {
 
 export { GatewayDurableObject, GatewayDurableObject as RoomDurableObject, RoomAuthorityDurableObject };
 
-function isAuthorizedStateWrite(request: Request, env: Env): boolean {
+function isAuthorizedRoomStateAccess(request: Request, env: Env): boolean {
   if (!env.ROOM_STATE_WRITE_TOKEN) {
     return false;
   }

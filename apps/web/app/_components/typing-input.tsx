@@ -1,5 +1,5 @@
 import type { DeviceKind } from "@type-battle/shared";
-import type { ChangeEvent, CompositionEvent, RefObject } from "react";
+import type { ChangeEvent, ClipboardEvent, CompositionEvent, RefObject } from "react";
 
 type TypingInputProps = {
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -21,6 +21,10 @@ export function TypingInput({ inputRef, disabled, deviceKind, onTextInput }: Typ
     consumeInput(event.currentTarget, onTextInput);
   };
 
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    event.preventDefault();
+  };
+
   return (
     <textarea
       ref={inputRef}
@@ -34,6 +38,7 @@ export function TypingInput({ inputRef, disabled, deviceKind, onTextInput }: Typ
       readOnly={deviceKind !== "mobile"}
       onChange={handleChange}
       onCompositionEnd={handleCompositionEnd}
+      onPaste={handlePaste}
       placeholder="ここに入力"
       lang={deviceKind === "mobile" ? "ja" : "en"}
       rows={1}

@@ -1,13 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RoomState } from "@type-battle/shared";
-import {
-  createRoom,
-  getRoom,
-  markPlaying,
-  resetRoomEngineState,
-  rooms,
-  startMatch
-} from "@type-battle/shared/room-engine";
+import { buildRomajiTypingPlan, type RoomState } from "@type-battle/shared";
+import { resetRoomEngineState } from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
 import worker, { RoomAuthorityDurableObject, RoomDurableObject } from "../src/worker.js";
 import { GATEWAY_ROOM_RATE_LIMIT_PATH } from "../src/realtime-gateway.js";
@@ -233,6 +226,29 @@ function findLastAck(
     .find((message) => message.type === "server:ack" && message.command === command);
 }
 
+function sendTypingInput(socket: FakeSocket, roomCode: string, input: string): void {
+  const chunks = input.match(/.{1,8}/g) ?? [];
+
+  chunks.forEach((chunk, index) => {
+    socket.receive(
+      JSON.stringify({
+        id: `msg-typing-${index + 1}`,
+        type: index === chunks.length - 1 ? "client:typing:finish" : "client:typing:progress",
+        payload: {
+          roomCode,
+          input: chunk,
+          sequence: index + 1
+        }
+      })
+    );
+  });
+}
+
+function getCountdownRoom(socket: FakeSocket): RoomState {
+  const message = parseMessages(socket).find((entry) => entry.type === "server:match:countdown");
+  return (message?.payload as { room?: RoomState } | undefined)?.room as RoomState;
+}
+
 async function flushAsyncWork(): Promise<void> {
   for (let index = 0; index < 50; index += 1) {
     await Promise.resolve();
@@ -279,10 +295,9 @@ afterEach(async () => {
 });
 
 describe("cloudflare gateway", () => {
-  it("creates rooms, emits envelopes, and starts matches over one websocket", async () => {
-    const storage = new FakeStorage();
+  it("rejects room lifecycle commands on the root websocket", async () => {
     const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
     );
     const socket = new FakeSocket();
 
@@ -291,7 +306,7 @@ describe("cloudflare gateway", () => {
 
     socket.receive(
       JSON.stringify({
-        id: "msg-create",
+        id: "msg-root-create",
         type: "client:room:create",
         payload: {
           nickname: "Alice",
@@ -301,821 +316,97 @@ describe("cloudflare gateway", () => {
       })
     );
 
-    const firstTwoMessages = parseMessages(socket).slice(0, 2);
-    expect(firstTwoMessages[0]).toMatchObject({
-      type: "server:ack",
-      command: "client:room:create",
-      payload: {
-        ok: true,
-        data: {
-          roomCode: expect.any(String),
-          playerId: expect.any(String),
-          room: expect.objectContaining({
-            roomCode: expect.any(String),
-            status: "waiting"
-          })
-        }
-      }
-    });
-    expect(firstTwoMessages[1]).toMatchObject({
-      type: "server:room:state",
-      payload: expect.objectContaining({
-        roomCode: expect.any(String),
-        status: "waiting"
-      })
-    });
-
-    const roomCode = String((firstTwoMessages[0]?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
-    expect(roomCode).toMatch(/^[A-Z0-9]{6}$/);
-    await flushAsyncWork();
-    expect(storage.values.has(`room:${roomCode}`)).toBe(true);
-    expect(storage.values.get(`guest-session:${roomCode}:guest-alice`)).toMatchObject({
-      sessionId: "session-alice",
-      guestId: "guest-alice",
-      nickname: "Alice",
-      roomCode,
-      createdAt: expect.any(String),
-      lastSeenAt: expect.any(String)
-    });
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-start",
-        type: "client:match:start",
-        payload: {
-          roomCode
-        }
-      })
-    );
-
-    const messagesAfterStart = parseMessages(socket).slice(2);
-    expect(messagesAfterStart[0]).toMatchObject({
-      type: "server:ack",
-      command: "client:match:start",
-      payload: {
-        ok: true,
-        data: expect.objectContaining({
-          roomCode,
-          status: "countdown"
-        })
-      }
-    });
-    expect(messagesAfterStart[1]).toMatchObject({
-      type: "server:match:countdown",
-      payload: {
-        room: expect.objectContaining({
-          roomCode,
-          status: "countdown"
-        }),
-        serverStartAt: expect.any(Number)
-      }
-    });
-  });
-
-  it("persists match results and keeps gameplay alive when result persistence fails", async () => {
-    const storage = new FakeStorage();
-    const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-    const socket = new FakeSocket();
-
-    await gateway.ready;
-    gateway.attachSocket(socket as unknown as WebSocket);
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-create-result",
-        type: "client:room:create",
-        payload: {
-          nickname: "Alice",
-          guestId: "guest-alice-result",
-          sessionId: "session-alice-result"
-        }
-      })
-    );
-
-    const createAck = findLastAck(socket, "client:room:create");
-    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-start-result",
-        type: "client:match:start",
-        payload: {
-          roomCode
-        }
-      })
-    );
-    markPlaying(roomCode);
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-finish-result",
-        type: "client:typing:finish",
-        payload: {
-          roomCode,
-          progressIndex: 10_000,
-          correctCharacters: 10_000,
-          totalTypedCharacters: 10_000,
-          mistakes: 0
-        }
-      })
-    );
-
-    await flushAsyncWork();
-
-    expect(storage.values.get(`match-result:${roomCode}:1`)).toMatchObject({
-      roomCode,
-      round: 1,
-      prompt: expect.objectContaining({
-        id: expect.any(String)
-      }),
-      result: expect.objectContaining({
-        roomCode
-      }),
-      createdAt: expect.any(String)
-    });
-
-    const failingStorage = new FakeStorage();
-    failingStorage.failPutPrefixes.add("match-result:");
-    const failingGateway = new RoomDurableObject(
-      new FakeDurableObjectState(failingStorage) as unknown as DurableObjectState
-    );
-    const failingSocket = new FakeSocket();
-
-    resetRoomEngineState();
-    await failingGateway.ready;
-    failingGateway.attachSocket(failingSocket as unknown as WebSocket);
-
-    failingSocket.receive(
-      JSON.stringify({
-        id: "msg-create-failing-result",
-        type: "client:room:create",
-        payload: {
-          nickname: "Bob",
-          guestId: "guest-bob-result",
-          sessionId: "session-bob-result"
-        }
-      })
-    );
-
-    const failingCreateAck = findLastAck(failingSocket, "client:room:create");
-    const failingRoomCode = String((failingCreateAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
-    failingSocket.receive(
-      JSON.stringify({
-        id: "msg-start-failing-result",
-        type: "client:match:start",
-        payload: {
-          roomCode: failingRoomCode
-        }
-      })
-    );
-    markPlaying(failingRoomCode);
-    failingSocket.receive(
-      JSON.stringify({
-        id: "msg-finish-failing-result",
-        type: "client:typing:finish",
-        payload: {
-          roomCode: failingRoomCode,
-          progressIndex: 10_000,
-          correctCharacters: 10_000,
-          totalTypedCharacters: 10_000,
-          mistakes: 0
-        }
-      })
-    );
-
-    await flushAsyncWork();
-
-    expect(getRoom(failingRoomCode)?.status).toBe("finished");
-    expect(parseMessages(failingSocket).some((message) => message.type === "server:match:result")).toBe(true);
-  });
-
-  it("rejects malformed payloads and applies room rate limits", async () => {
-    const storage = new FakeStorage();
-    const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-    const creatorSocket = new FakeSocket();
-    const joinerSocket = new FakeSocket();
-
-    await gateway.ready;
-    gateway.attachSocket(creatorSocket as unknown as WebSocket, {
-      clientIp: "127.0.0.1"
-    });
-    gateway.attachSocket(joinerSocket as unknown as WebSocket, {
-      clientIp: "127.0.0.1"
-    });
-
-    creatorSocket.receive(
-      JSON.stringify({
-        id: "msg-invalid",
-        type: "client:room:create",
-        payload: {
-          nickname: 123,
-          guestId: "guest-invalid",
-          sessionId: "session-invalid"
-        }
-      })
-    );
-
-    expect(findLastAck(creatorSocket, "client:room:create")).toMatchObject({
+    expect(findLastAck(socket, "client:room:create")).toMatchObject({
       type: "server:ack",
       command: "client:room:create",
       payload: {
         ok: false,
-        error: "リクエストの形式が正しくありません。"
-      }
-    });
-
-    let roomCode = "";
-    for (let index = 0; index < 10; index += 1) {
-      creatorSocket.receive(
-        JSON.stringify({
-          id: `msg-create-${index}`,
-          type: "client:room:create",
-          payload: {
-            nickname: `Alice ${index}`,
-            guestId: "guest-create-limit",
-            sessionId: "session-create-limit"
-          }
-        })
-      );
-
-      const message = findLastAck(creatorSocket, "client:room:create");
-      expect(message).toMatchObject({
-        type: "server:ack",
-        command: "client:room:create",
-        payload: {
-          ok: true
-        }
-      });
-
-      if (!roomCode) {
-        roomCode = String((message?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
-      }
-    }
-
-    creatorSocket.receive(
-      JSON.stringify({
-        id: "msg-create-over-limit",
-        type: "client:room:create",
-        payload: {
-          nickname: "Alice over",
-          guestId: "guest-create-limit",
-          sessionId: "session-create-limit"
-        }
-      })
-    );
-
-    expect(findLastAck(creatorSocket, "client:room:create")).toMatchObject({
-      type: "server:ack",
-      command: "client:room:create",
-      payload: {
-        ok: false,
-        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
-      }
-    });
-
-    expect(roomCode).toMatch(/^[A-Z0-9]{6}$/);
-
-    const initialMessageCount = joinerSocket.messages.length;
-    for (let index = 0; index < 30; index += 1) {
-      joinerSocket.receive(
-        JSON.stringify({
-          id: `msg-join-${index}`,
-          type: "client:room:join",
-          payload: {
-            roomCode,
-            nickname: `Bob ${index}`,
-            guestId: "guest-join-limit",
-            sessionId: "session-join-limit"
-          }
-        })
-      );
-    }
-
-    expect(findLastAck(joinerSocket, "client:room:join")).toMatchObject({
-      type: "server:ack",
-      command: "client:room:join",
-      payload: {
-        ok: true
-      }
-    });
-
-    joinerSocket.receive(
-      JSON.stringify({
-        id: "msg-join-over-limit",
-        type: "client:room:join",
-        payload: {
-          roomCode,
-          nickname: "Bob over",
-          guestId: "guest-join-limit",
-          sessionId: "session-join-limit"
-        }
-      })
-    );
-
-    expect(findLastAck(joinerSocket, "client:room:join")).toMatchObject({
-      type: "server:ack",
-      command: "client:room:join",
-      payload: {
-        ok: false,
-        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
-      }
-    });
-    expect(joinerSocket.messages.length - initialMessageCount).toBeGreaterThanOrEqual(30);
-  });
-
-  it("drops over-limit typing progress updates without crashing", async () => {
-    const storage = new FakeStorage();
-    const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-    const socket = new FakeSocket();
-
-    await gateway.ready;
-    gateway.attachSocket(socket as unknown as WebSocket, {
-      clientIp: "127.0.0.1"
-    });
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-create-progress",
-        type: "client:room:create",
-        payload: {
-          nickname: "Alice",
-          guestId: "guest-progress",
-          sessionId: "session-progress"
-        }
-      })
-    );
-
-    const createAck = findLastAck(socket, "client:room:create");
-    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
-    expect(roomCode).toMatch(/^[A-Z0-9]{6}$/);
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-start-progress",
-        type: "client:match:start",
-        payload: {
-          roomCode
-        }
-      })
-    );
-
-    markPlaying(roomCode);
-    const messageCountBeforeProgress = socket.messages.length;
-
-    for (let index = 0; index < 31; index += 1) {
-      socket.receive(
-        JSON.stringify({
-          id: `msg-progress-${index}`,
-          type: "client:typing:progress",
-          payload: {
-            roomCode,
-            progressIndex: 1,
-            correctCharacters: 1,
-            totalTypedCharacters: 1,
-            mistakes: 0
-          }
-        })
-      );
-    }
-
-    await Promise.resolve();
-
-    expect(socket.messages.length - messageCountBeforeProgress).toBe(30);
-  });
-
-  it("rejects wrong-session rejoins and invalidates the previous socket after a successful rejoin", async () => {
-    const storage = new FakeStorage();
-    const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-    const originalSocket = new FakeSocket();
-    const wrongSessionSocket = new FakeSocket();
-    const rejoinSocket = new FakeSocket();
-
-    await gateway.ready;
-    gateway.attachSocket(originalSocket as unknown as WebSocket);
-    gateway.attachSocket(wrongSessionSocket as unknown as WebSocket);
-    gateway.attachSocket(rejoinSocket as unknown as WebSocket);
-
-    originalSocket.receive(
-      JSON.stringify({
-        id: "msg-create",
-        type: "client:room:create",
-        payload: {
-          nickname: "Alice",
-          guestId: "guest-alice-rejoin",
-          sessionId: "session-alice"
-        }
-      })
-    );
-
-    const createAck = findLastAck(originalSocket, "client:room:create");
-    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
-
-    wrongSessionSocket.receive(
-      JSON.stringify({
-        id: "msg-join-wrong",
-        type: "client:room:join",
-        payload: {
-          roomCode,
-          nickname: "Alice",
-          guestId: "guest-alice-rejoin",
-          sessionId: "session-intruder"
-        }
-      })
-    );
-
-    expect(findLastAck(wrongSessionSocket, "client:room:join")).toMatchObject({
-      type: "server:ack",
-      command: "client:room:join",
-      payload: {
-        ok: false,
-        error: expect.stringContaining("別のセッション")
-      }
-    });
-
-    rejoinSocket.receive(
-      JSON.stringify({
-        id: "msg-join-right",
-        type: "client:room:join",
-        payload: {
-          roomCode,
-          nickname: "Alice",
-          guestId: "guest-alice-rejoin",
-          sessionId: "session-alice"
-        }
-      })
-    );
-
-    expect(findLastAck(rejoinSocket, "client:room:join")).toMatchObject({
-      type: "server:ack",
-      command: "client:room:join",
-      payload: {
-        ok: true,
-        data: {
-          playerId: "guest-alice-rejoin"
-        }
-      }
-    });
-
-    rejoinSocket.receive(
-      JSON.stringify({
-        id: "msg-ready-new",
-        type: "client:player:ready",
-        payload: {
-          roomCode,
-          ready: true
-        }
-      })
-    );
-
-    await Promise.resolve();
-    expect(getRoom(roomCode)?.players.find((player) => player.id === "guest-alice-rejoin")?.ready).toBe(true);
-  });
-
-  it("schedules an alarm and forfeits a disconnected player after durable object eviction", async () => {
-    const storage = new FakeStorage();
-    const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-    const socket = new FakeSocket();
-
-    await gateway.ready;
-    gateway.attachSocket(socket as unknown as WebSocket);
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-create",
-        type: "client:room:create",
-        payload: {
-          nickname: "Alice",
-          guestId: "guest-alice-forfeit",
-          sessionId: "session-alice"
-        }
-      })
-    );
-
-    const createAck = findLastAck(socket, "client:room:create");
-    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-start",
-        type: "client:match:start",
-        payload: {
-          roomCode
-        }
-      })
-    );
-
-    markPlaying(roomCode);
-    socket.close();
-    await Promise.resolve();
-
-    const storageKey = `room:${roomCode}`;
-    const snapshot = storage.values.get(storageKey) as
-      | { room?: RoomState; disconnectedAt?: Record<string, number> }
-      | undefined;
-
-    expect(snapshot?.room?.roomCode).toBe(roomCode);
-
-    if (snapshot?.room && snapshot.disconnectedAt) {
-      snapshot.disconnectedAt["guest-alice-forfeit"] = Date.now() - 40_000;
-      storage.values.set(storageKey, snapshot);
-    }
-
-    const restoredGateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-
-    await restoredGateway.ready;
-    expect(storage.alarmAt).not.toBeNull();
-    expect(rooms.get(roomCode)?.players.get("guest-alice-forfeit")?.disconnectedAt).toBeDefined();
-
-    await restoredGateway.alarm();
-
-    const updatedRoom = getRoom(roomCode);
-    expect(updatedRoom?.status).toBe("finished");
-    expect(updatedRoom?.players.find((player) => player.id === "guest-alice-forfeit")?.forfeited).toBe(true);
-  });
-
-  it("restores human players as disconnected until the same session rejoins", async () => {
-    const storage = new FakeStorage();
-    const activeRoom: RoomState = {
-      ...baseRoom,
-      roomCode: "RS1234",
-      hostPlayerId: "guest-alice-restore",
-      status: "playing",
-      players: [
-        {
-          id: "guest-alice-restore",
-          nickname: "Alice",
-          connected: true,
-          ready: true,
-          isHost: true,
-          isBot: false,
-          deviceKind: "desktop",
-          progressIndex: 0,
-          correctCharacters: 0,
-          totalTypedCharacters: 0,
-          mistakes: 0,
-          wpm: 0,
-          accuracy: 100,
-          currentStreak: 0,
-          maxStreak: 0
-        }
-      ]
-    };
-
-    storage.values.set("room:RS1234", {
-      room: activeRoom,
-      playerSessions: {
-        "guest-alice-restore": "session-alice-restore"
-      },
-      disconnectedAt: {}
-    });
-
-    const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-    const socket = new FakeSocket();
-
-    await gateway.ready;
-
-    const restoredPlayer = rooms.get("RS1234")?.players.get("guest-alice-restore");
-    expect(restoredPlayer).toMatchObject({
-      connected: false,
-      ready: false,
-      disconnectedAt: expect.any(Number)
-    });
-
-    gateway.attachSocket(socket as unknown as WebSocket);
-    socket.receive(
-      JSON.stringify({
-        id: "msg-rejoin-restored",
-        type: "client:room:join",
-        payload: {
-          roomCode: "RS1234",
-          nickname: "Alice",
-          guestId: "guest-alice-restore",
-          sessionId: "session-alice-restore"
-        }
-      })
-    );
-
-    expect(findLastAck(socket, "client:room:join")).toMatchObject({
-      type: "server:ack",
-      payload: {
-        ok: true
-      }
-    });
-    expect(getRoom("RS1234")?.players.find((player) => player.id === "guest-alice-restore")).toMatchObject({
-      connected: true
-    });
-    expect(rooms.get("RS1234")?.players.get("guest-alice-restore")?.disconnectedAt).toBeUndefined();
-  });
-
-  it("runs maintenance from a bounded fallback when alarm registration fails", async () => {
-    vi.useFakeTimers();
-    const storage = new FakeStorage();
-    storage.failAlarmWrites = true;
-    const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-    const socket = new FakeSocket();
-
-    await gateway.ready;
-    gateway.attachSocket(socket as unknown as WebSocket);
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-create-fallback",
-        type: "client:room:create",
-        payload: {
-          nickname: "Alice",
-          guestId: "guest-alice-fallback",
-          sessionId: "session-alice-fallback"
-        }
-      })
-    );
-
-    const createAck = findLastAck(socket, "client:room:create");
-    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
-    socket.receive(
-      JSON.stringify({
-        id: "msg-start-fallback",
-        type: "client:match:start",
-        payload: {
-          roomCode
-        }
-      })
-    );
-
-    markPlaying(roomCode);
-    socket.close();
-    await Promise.resolve();
-
-    const player = rooms.get(roomCode)?.players.get("guest-alice-fallback");
-    if (player) {
-      player.disconnectedAt = Date.now() - 40_000;
-    }
-
-    await vi.advanceTimersByTimeAsync(5_000);
-
-    const updatedRoom = getRoom(roomCode);
-    expect(updatedRoom?.status).toBe("finished");
-    expect(updatedRoom?.players.find((player) => player.id === "guest-alice-fallback")?.forfeited).toBe(true);
-  });
-
-  it("rejects invalid typing metric values", async () => {
-    const storage = new FakeStorage();
-    const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
-    );
-    const socket = new FakeSocket();
-
-    await gateway.ready;
-    gateway.attachSocket(socket as unknown as WebSocket);
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-create",
-        type: "client:room:create",
-        payload: {
-          nickname: "Alice",
-          guestId: "guest-alice-typing",
-          sessionId: "session-alice"
-        }
-      })
-    );
-
-    const createAck = findLastAck(socket, "client:room:create");
-    const roomCode = String((createAck?.payload as { data?: { roomCode?: string } })?.data?.roomCode ?? "");
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-start",
-        type: "client:match:start",
-        payload: {
-          roomCode
-        }
-      })
-    );
-
-    markPlaying(roomCode);
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-progress-negative",
-        type: "client:typing:progress",
-        payload: {
-          roomCode,
-          progressIndex: -1,
-          correctCharacters: 0,
-          totalTypedCharacters: 0,
-          mistakes: 0
-        }
-      })
-    );
-
-    expect(parseMessages(socket).at(-1)).toMatchObject({
-      type: "server:error",
-      payload: {
-        message: "リクエストの形式が正しくありません。"
-      }
-    });
-
-    socket.receive(
-      JSON.stringify({
-        id: "msg-progress-invalid",
-        type: "client:typing:progress",
-        payload: {
-          roomCode,
-          progressIndex: 1,
-          correctCharacters: 3,
-          totalTypedCharacters: 2,
-          mistakes: 0
-        }
-      })
-    );
-
-    expect(parseMessages(socket).at(-1)).toMatchObject({
-      type: "server:error",
-      payload: {
-        message: "リクエストの形式が正しくありません。"
+        error: "Room commands must use /rooms/:roomCode/socket."
       }
     });
   });
 
-  it("restores persisted room snapshots for state reads", async () => {
-    const storage = new FakeStorage();
-    storage.values.set("room:AB23CD", baseRoom);
-
+  it("closes idle gateway sockets and rejects connections over the limit", async () => {
     const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const idleSocket = new FakeSocket();
+
+    await gateway.ready;
+    gateway.attachSocket(idleSocket as unknown as WebSocket);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(idleSocket.readyState).toBe(3);
+
+    const sockets = Array.from({ length: 256 }, () => new FakeSocket());
+    sockets.forEach((socket) => gateway.attachSocket(socket as unknown as WebSocket));
+    const rejectedSocket = new FakeSocket();
+    gateway.attachSocket(rejectedSocket as unknown as WebSocket);
+
+    expect(rejectedSocket.accepted).toBe(true);
+    expect(rejectedSocket.readyState).toBe(3);
+  });
+
+  it("reports readiness from durable object storage", async () => {
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
     );
 
     await gateway.ready;
-
-    const response = await gateway.fetch(new Request("https://example.com/rooms/ab23cd/state"));
+    const response = await gateway.fetch(new Request("https://example.com/ready"));
 
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body).toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       ok: true,
-      room: expect.objectContaining({
-        roomCode: "AB23CD"
-      })
+      check: "readiness"
     });
   });
 
-  it("restores countdown timers and bot progress after a restart", async () => {
-    const storage = new FakeStorage();
-    const created = createRoom({
-      nickname: "Alice",
-      guestId: "guest-alice-restart",
-      socketId: "socket-alice-restart"
-    });
-
-    const started = startMatch("socket-alice-restart", created.room.roomCode);
-
-    expect("error" in started).toBe(false);
-    if ("error" in started) {
-      return;
-    }
-
-    storage.values.set(`room:${created.room.roomCode}`, started.room);
-
+  it("does not expose room state from the root gateway durable object", async () => {
     const gateway = new RoomDurableObject(
-      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
     );
 
-    vi.useFakeTimers();
-    vi.spyOn(Math, "random").mockReturnValue(0.5);
-    try {
-      await gateway.ready;
-      expect(getRoom(created.room.roomCode)?.status).toBe("countdown");
+    await gateway.ready;
+    const response = await gateway.fetch(new Request("https://example.com/rooms/ab23cd/state"));
 
-      await vi.advanceTimersByTimeAsync(3_000);
-      expect(getRoom(created.room.roomCode)?.status).toBe("playing");
-
-      await vi.advanceTimersByTimeAsync(500);
-      const restoredRoom = getRoom(created.room.roomCode);
-
-      expect(restoredRoom?.players.some((player) => player.isBot && player.progressIndex > 0)).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(response.status).toBe(410);
+    await expect(response.text()).resolves.toBe("Room state is handled by room authority.");
   });
 });
 
 describe("room authority", () => {
+  it("does not broadcast room state to sockets before they join", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const unjoinedSocket = new FakeSocket();
+    const joinedSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(unjoinedSocket as unknown as WebSocket, {
+      roomCode: "AB23CD"
+    });
+    roomAuthority.attachSocket(joinedSocket as unknown as WebSocket, {
+      roomCode: "AB23CD"
+    });
+
+    joinedSocket.receive(
+      JSON.stringify({
+        id: "msg-create-private-broadcast",
+        type: "client:room:create",
+        payload: {
+          nickname: "Alice",
+          guestId: "guest-alice-private",
+          sessionId: "session-alice-private"
+        }
+      })
+    );
+    await flushAsyncWork();
+
+    expect(parseMessages(unjoinedSocket)).toEqual([]);
+    expect(parseMessages(joinedSocket).some((message) => message.type === "server:room:state")).toBe(true);
+  });
+
   it("persists guest sessions and match results for room-scoped sockets", async () => {
     const storage = new FakeStorage();
     const roomAuthority = new RoomAuthorityDurableObject(
@@ -1160,6 +451,7 @@ describe("room authority", () => {
       createdAt: expect.any(String),
       lastSeenAt: expect.any(String)
     });
+    expect(storage.values.get("retention-alarm-at")).toEqual(expect.any(Number));
 
     socket.receive(
       JSON.stringify({
@@ -1172,19 +464,7 @@ describe("room authority", () => {
     );
     await vi.advanceTimersByTimeAsync(3_000);
 
-    socket.receive(
-      JSON.stringify({
-        id: "msg-finish-room-authority",
-        type: "client:typing:finish",
-        payload: {
-          roomCode: "AB23CD",
-          progressIndex: 10_000,
-          correctCharacters: 10_000,
-          totalTypedCharacters: 10_000,
-          mistakes: 0
-        }
-      })
-    );
+    sendTypingInput(socket, "AB23CD", getCountdownRoom(socket).prompt?.typing.romaji ?? "");
     await flushAsyncWork();
 
     expect(storage.values.get("match-result:AB23CD:1")).toMatchObject({
@@ -1198,6 +478,75 @@ describe("room authority", () => {
       }),
       createdAt: expect.any(String)
     });
+  });
+
+  it("preserves partial romaji input and its statistics when a player reconnects", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const firstSocket = new FakeSocket();
+    const rejoinedSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(firstSocket as unknown as WebSocket, { roomCode: "RJ34KL" });
+    firstSocket.receive(JSON.stringify({
+      id: "msg-create-rejoin-progress",
+      type: "client:room:create",
+      payload: { nickname: "Alice", guestId: "guest-rejoin-progress", sessionId: "session-rejoin-progress", deviceKind: "desktop" }
+    }));
+    await flushAsyncWork();
+    firstSocket.receive(JSON.stringify({
+      id: "msg-category-rejoin-progress",
+      type: "client:room:setPromptCategory",
+      payload: { roomCode: "RJ34KL", category: "short" }
+    }));
+    firstSocket.receive(JSON.stringify({
+      id: "msg-start-rejoin-progress",
+      type: "client:match:start",
+      payload: { roomCode: "RJ34KL" }
+    }));
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    const prompt = getCountdownRoom(firstSocket).prompt!;
+    const plan = buildRomajiTypingPlan(prompt.typing.hiragana);
+    const partialUnitIndex = plan.units.findIndex((unit) => unit.guide.length > 1);
+    expect(partialUnitIndex).toBeGreaterThanOrEqual(0);
+    const partialInput = `${plan.units.slice(0, partialUnitIndex).map((unit) => unit.guide).join("")}${plan.units[partialUnitIndex]!.guide[0]}`;
+
+    firstSocket.receive(JSON.stringify({
+      id: "msg-progress-rejoin-progress",
+      type: "client:typing:progress",
+      payload: { roomCode: "RJ34KL", input: partialInput, sequence: 1 }
+    }));
+    await flushAsyncWork();
+
+    roomAuthority.attachSocket(rejoinedSocket as unknown as WebSocket, { roomCode: "RJ34KL" });
+    rejoinedSocket.receive(JSON.stringify({
+      id: "msg-join-rejoin-progress",
+      type: "client:room:join",
+      payload: { roomCode: "RJ34KL", nickname: "Alice", guestId: "guest-rejoin-progress", sessionId: "session-rejoin-progress", deviceKind: "desktop" }
+    }));
+    await flushAsyncWork();
+
+    const rejoinAck = findLastAck(rejoinedSocket, "client:room:join") as { payload?: { data?: { room?: RoomState } } };
+    const player = rejoinAck.payload?.data?.room?.players.find((entry) => entry.id === "guest-rejoin-progress");
+    const completedGuideLength = plan.units
+      .slice(0, partialUnitIndex)
+      .reduce((length, unit) => length + unit.guide.length, 0);
+    expect(player).toMatchObject({
+      typingProgressIndex: completedGuideLength,
+      pendingInput: plan.units[partialUnitIndex]!.guide[0],
+      correctCharacters: partialInput.length,
+      totalTypedCharacters: partialInput.length
+    });
+
+    const remainingInput = `${plan.units[partialUnitIndex]!.guide.slice(1)}${plan.units
+      .slice(partialUnitIndex + 1)
+      .map((unit) => unit.guide)
+      .join("")}`;
+    sendTypingInput(rejoinedSocket, "RJ34KL", remainingInput);
+    await flushAsyncWork();
+    expect(parseMessages(rejoinedSocket).some((message) => message.type === "server:match:result")).toBe(true);
   });
 
   it("marks players disconnected before detaching socket state", async () => {
@@ -1248,6 +597,30 @@ describe("room authority", () => {
     });
     expect(snapshot?.disconnectedAt?.["guest-alice-disconnect"]).toEqual(expect.any(Number));
     expect(storage.alarmAt).not.toBeNull();
+  });
+
+  it("closes a socket that remains after leaving a room", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(socket as unknown as WebSocket, { roomCode: "LV56MN" });
+    socket.receive(JSON.stringify({
+      id: "msg-create-leave-timeout",
+      type: "client:room:create",
+      payload: { nickname: "Alice", guestId: "guest-leave-timeout", sessionId: "session-leave-timeout" }
+    }));
+    await flushAsyncWork();
+    socket.receive(JSON.stringify({
+      id: "msg-leave-timeout",
+      type: "client:room:leave",
+      payload: { roomCode: "LV56MN" }
+    }));
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(socket.readyState).toBe(3);
   });
 
   it("uses the gateway rate limiter across different room authorities", async () => {
@@ -1379,6 +752,19 @@ describe("worker handler", () => {
     expect(env.ROOMS.stub.lastRequest?.method).toBe("PUT");
     expect(env.ROOMS.stub.lastRequest?.url).toBe("https://example.com/rooms/ab23cd/state");
     expect(env.GATEWAY.getByNameCalls).toEqual([]);
+  });
+
+  it("rejects unauthenticated public room state reads", async () => {
+    const env = createEnv();
+    const response = await worker.fetch(
+      new Request("https://example.com/rooms/AB23CD/state", {
+        method: "GET"
+      }),
+      env as unknown as Env
+    );
+
+    expect(response.status).toBe(403);
+    expect(env.ROOMS.getByNameCalls).toEqual([]);
   });
 
   it("rejects invalid room route codes before durable object lookup", async () => {

@@ -38,7 +38,7 @@ MVP では次を優先します。
 
 ## 現在の実装状態
 
-詳細は [current-implementation.md](current-implementation.md) にまとめる。
+詳細は [current-implementation.md](current-implementation.md) にまとめる。このファイルを実装状態の正本とし、他の docs は重複した完了/未完了判定を増やさず、必要に応じてここへリンクする。
 
 実装済み:
 
@@ -46,7 +46,7 @@ MVP では次を優先します。
 - COM 対戦
 - COM difficulty selector
 - reload rejoin
-- waiting room TTL
+- activity 基準の waiting / abandoned / finished TTL
 - host transfer
 - rematch
 - prompt category
@@ -58,20 +58,22 @@ MVP では次を優先します。
 - player settings modal / localStorage / theme / input guide / font size / reduced motion / sound wiring
 - private beta feedback issue flow
 - guest session
-- Cloudflare Durable Object storage persistence
+- room-scoped Cloudflare Durable Object storage persistence
+- server authoritative typing validation
+- Cloudflare Worker deploy workflow
 - structured logging
 - room create / join / typing progress の軽量 rate limit
 - Cloudflare Worker E2E
 
 部分実装:
 
-- web deployment / Vercel wiring
+- production environment / secret の実設定は GitHub と Cloudflare 側で行う
 
 ## 次に仕様化・実装する機能
 
 Private beta 前に優先する機能は次です。
 
-1. web deployment / Vercel wiring
+1. production environment / Cloudflare secret / rollback 手順の運用確認
 
 Public beta 以降に検討する主な機能は次です。
 

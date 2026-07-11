@@ -1,0 +1,85 @@
+name: Deploy Cloudflare Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "CI-passed commit SHA to deploy"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deploy:
+    name: Deploy Worker
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      COMMIT_SHA: ${{ inputs.commit_sha }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
+    steps:
+      - name: Validate commit SHA
+        run: |
+          if ! printf '%s' "$COMMIT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "commit_sha must be a full 40-character SHA"
+            exit 1
+          fi
+
+      - name: Verify CI success for commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          success_count="$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow ci.yml \
+            --commit "$COMMIT_SHA" \
+            --json conclusion,status \
+            --jq 'map(select(.status == "completed" and .conclusion == "success")) | length')"
+          if [ "$success_count" -lt 1 ]; then
+            echo "No successful completed CI run found for $COMMIT_SHA"
+            exit 1
+          fi
+
+      - name: Checkout verified commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.commit_sha }}
+          fetch-depth: 0
+
+      - name: Verify commit is merged to main
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$COMMIT_SHA" origin/main; then
+            echo "commit_sha must be contained in main before production deployment"
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared package
+        run: npm run build --workspace @type-battle/shared
+
+      - name: Typecheck worker
+        run: npm run typecheck --workspace @type-battle/cloudflare-worker
+
+      - name: Test worker
+        run: npm run test --workspace @type-battle/cloudflare-worker
+
+      - name: Deploy worker
+        run: npm run deploy --workspace @type-battle/cloudflare-worker
+
+      - name: Smoke test deployed worker
+        run: node apps/cloudflare-worker/scripts/smoke-worker.mjs

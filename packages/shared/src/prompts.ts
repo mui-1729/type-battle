@@ -378,14 +378,18 @@ export function pickPrompt(
 export type DailyChallengeInfo = {
   challengeKey: string;
   seed: number;
+  timezone: "Asia/Tokyo";
+  nextChallengeAt: number;
 };
 
 export function getDailyChallengeInfo(date = new Date()): DailyChallengeInfo {
-  const challengeKey = date.toISOString().slice(0, 10);
+  const challengeKey = formatTokyoDateKey(date);
 
   return {
     challengeKey,
-    seed: hashString(challengeKey)
+    seed: hashString(challengeKey),
+    timezone: "Asia/Tokyo",
+    nextChallengeAt: getNextTokyoMidnight(date).getTime()
   };
 }
 
@@ -407,6 +411,26 @@ function hashString(value: string): number {
   }
 
   return hash >>> 0;
+}
+
+function formatTokyoDateKey(date: Date): string {
+  const tokyoDate = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  return tokyoDate.toISOString().slice(0, 10);
+}
+
+function getNextTokyoMidnight(date: Date): Date {
+  const tokyoDate = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  const nextTokyoMidnightUtc = Date.UTC(
+    tokyoDate.getUTCFullYear(),
+    tokyoDate.getUTCMonth(),
+    tokyoDate.getUTCDate() + 1,
+    0,
+    0,
+    0,
+    0
+  );
+
+  return new Date(nextTokyoMidnightUtc - 9 * 60 * 60 * 1000);
 }
 
 function hasControlCharacters(value: string): boolean {

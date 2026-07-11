@@ -24,10 +24,8 @@ describe("cloudflare events", () => {
     type: "client:typing:finish",
     payload: {
       roomCode: "ABC123",
-      progressIndex: 4,
-      correctCharacters: 4,
-      totalTypedCharacters: 4,
-      mistakes: 0
+      input: "test",
+      sequence: 1
     }
   } satisfies CloudflareClientMessage;
 

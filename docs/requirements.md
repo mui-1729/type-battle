@@ -55,6 +55,7 @@
 - デプロイ先で Web UI と Cloudflare realtime backend が動く。
 - エラー、切断、試合開始、試合終了をログで追える。
 - room 作成、join、typing event に軽い rate limit がある。
+- WebSocket message、identifier、room socket 数、未参加 socket idle に上限がある。
 - room が無制限に残り続けない。
 - reload / short disconnect から復帰できる。
 - prompt category を選べる。
@@ -82,9 +83,12 @@
 - player settings の sound / countdown sound 再生を wiring する。
 - private beta feedback issue flow を用意する。
 - Cloudflare Durable Object storage に guest session と match result を保存する。
+- guest session と match result の retention cleanup がある。
 - guest session を実装する。
-- structured logging、軽量 rate limit、health endpoint を実装する。
+- server authoritative typing validation を実装する。
+- structured logging、軽量 rate limit、liveness `/health`、readiness `/ready`、gateway `/metrics` を実装する。
 - Cloudflare Worker の health / WebSocket flow を E2E で確認する。
+- Cloudflare Worker deploy workflow で CI 成功済み commit を deploy できる。
 - branch protection を有効化する。
 
 ### まだ足りない要件

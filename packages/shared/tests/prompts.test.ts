@@ -171,7 +171,9 @@ describe("prompts", () => {
 
     expect(getDailyChallengeInfo(date)).toEqual({
       challengeKey: "2026-07-01",
-      seed: expect.any(Number)
+      seed: expect.any(Number),
+      timezone: "Asia/Tokyo",
+      nextChallengeAt: Date.parse("2026-07-01T15:00:00.000Z")
     });
 
     const firstDailyPrompt = pickDailyChallengePrompt(date);
