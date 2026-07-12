@@ -209,8 +209,7 @@ button:disabled {
 }
 
 .topBar {
-  position: sticky;
-  top: 16px;
+  position: relative;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -836,6 +835,7 @@ textarea::placeholder {
   border-radius: 22px;
   background: var(--surface-soft);
   box-shadow: var(--shadow-sm);
+  contain: layout paint;
   pointer-events: none;
   user-select: none;
 }
@@ -954,6 +954,7 @@ textarea::placeholder {
 .battleStagePlayerLabel {
   display: grid;
   width: 100%;
+  min-width: 0;
   justify-items: center;
   line-height: 1.15;
 }
@@ -968,10 +969,15 @@ textarea::placeholder {
 }
 
 .battleStagePlayerLabel span {
+  display: block;
+  max-width: 100%;
   min-height: 12px;
+  overflow: hidden;
   color: var(--muted);
   font-size: 10px;
   font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .battleStagePlayerMover[data-side="left"] {
@@ -1384,6 +1390,17 @@ textarea::placeholder {
   display: none;
 }
 
+.reduced-motion .battleStageMover {
+  transition: none !important;
+  will-change: auto;
+}
+
+.reduced-motion .battleStage *,
+.reduced-motion .battleStage *::before,
+.reduced-motion .battleStage *::after {
+  animation: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .battleStageMover,
   .battleStage *,
@@ -1397,6 +1414,17 @@ textarea::placeholder {
 
   .battleStageDefeatEffect {
     display: none;
+  }
+
+  .battleStageMover {
+    transition: none !important;
+    will-change: auto;
+  }
+
+  .battleStage *,
+  .battleStage *::before,
+  .battleStage *::after {
+    animation: none !important;
   }
 }
 
@@ -1734,9 +1762,13 @@ textarea::placeholder {
     font-size: 26px;
   }
 
-  .statsGrid,
   .rivalGrid {
     grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .statsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
   }
 
@@ -1746,6 +1778,10 @@ textarea::placeholder {
 
   .matchSurface {
     padding: 18px;
+  }
+
+  .battleStage {
+    height: 184px;
   }
 
   .promptBox {
@@ -1803,6 +1839,83 @@ textarea::placeholder {
   .resultPanel,
   .modalContent {
     border-radius: 20px;
+  }
+
+  .matchSurface {
+    gap: 14px;
+    padding: 14px;
+  }
+
+  .battleStage {
+    grid-template-rows: 31px minmax(0, 1fr);
+    height: 172px;
+    border-radius: 18px;
+  }
+
+  .battleStageHeader {
+    gap: 7px;
+    padding: 5px 9px 0;
+  }
+
+  .battleStageMode {
+    padding: 3px 7px;
+    font-size: 10px;
+  }
+
+  .battleStageSummary {
+    font-size: 10px;
+  }
+
+  .battleStagePlayerInner {
+    bottom: 16px;
+    width: 84px;
+  }
+
+  .battleStagePlayerLabel strong {
+    font-size: 11px;
+  }
+
+  .battleStagePlayerLabel span {
+    font-size: 9px;
+  }
+
+  .stickFigure {
+    width: 40px;
+    height: 56px;
+  }
+
+  .battleStageCargoInner {
+    bottom: 18px;
+  }
+
+  .cargoObject {
+    width: 48px;
+    height: 44px;
+  }
+
+  .hpPushStageScene .cargoObject {
+    width: 52px;
+    height: 46px;
+  }
+
+  .battleStageWall {
+    bottom: 16px;
+    width: 11px;
+    height: 62px;
+  }
+
+  .battleStageGround {
+    right: 10px;
+    bottom: 15px;
+    left: 10px;
+  }
+
+  .battleStageWallLeft {
+    left: 6px;
+  }
+
+  .battleStageWallRight {
+    right: 6px;
   }
 
   .joinRow,

@@ -35,3 +35,48 @@ test("completes practice with mobile Japanese textarea input", async ({ page }) 
   await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(page.locator(".resultPanel").getByText("もう一度練習")).toBeVisible();
 });
+
+test("keeps the COM battle stage inside a 390px mobile viewport", async ({ page }) => {
+  await page.goto("/");
+  const nickname = "MobilePlayerLong18";
+  await page.getByLabel("ニックネーム").fill(nickname);
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+  await page.getByRole("button", { name: /^HPバトル/ }).click();
+  await page.getByRole("button", { name: "COM と開始" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const stage = page.getByTestId("battle-stage");
+  const textarea = page.getByLabel("入力欄");
+  await expect(stage).toHaveAttribute("data-mode", "hpBattle");
+  await expect(stage.locator('.battleStagePlayerMover[data-side="left"] strong')).toHaveAttribute("title", nickname);
+  await expect(textarea).toBeFocused();
+
+  const viewport = await page.evaluate(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth
+  }));
+  expect(viewport).toEqual({ width: 390, height: 844, clientWidth: 390, scrollWidth: 390 });
+
+  const stageBox = await stage.boundingBox();
+  expect(stageBox).not.toBeNull();
+  expect(stageBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect((stageBox?.x ?? 0) + (stageBox?.width ?? 0)).toBeLessThanOrEqual(390);
+
+  const guide = (await page.getByLabel("入力ガイド").innerText()).replace(/\s+/g, "");
+  const firstCharacter = guide.slice(0, 1);
+  await textarea.evaluate((element, value) => {
+    const input = element as HTMLTextAreaElement;
+    input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+    input.value = value;
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, isComposing: true }));
+    input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: value }));
+  }, firstCharacter);
+
+  await expect.poll(async () => Number(await stage.locator(".hpPushStageScene").getAttribute("data-cargo-position")))
+    .toBeGreaterThan(50);
+  await expect(textarea).toBeFocused();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
+    .toBe(true);
+});

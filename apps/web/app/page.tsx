@@ -321,10 +321,10 @@ export default function HomePage() {
             return;
           }
 
+          resetTyping();
           setPlayerId(response.data.playerId);
           setRoom(response.data.room);
           setResult(response.data.room.result ?? null);
-          resetTyping();
         }
       );
     });
@@ -702,7 +702,19 @@ export default function HomePage() {
       return;
     }
 
-    typingInputRef.current?.focus();
+    const input = typingInputRef.current;
+    if (!input) {
+      return;
+    }
+
+    const usesStackedLayout = window.matchMedia("(max-width: 1080px)").matches;
+    input.focus({ preventScroll: true });
+
+    if (usesStackedLayout) {
+      const matchSurface = input.closest(".matchSurface");
+      const focusRegion = matchSurface?.querySelector(".battleStage, .promptBox");
+      focusRegion?.scrollIntoView({ block: "start", inline: "nearest", behavior: "auto" });
+    }
   }, [acceptingTextInput, activeTypingText]);
 
   const emitProgress = useCallback(
@@ -1304,39 +1316,6 @@ export default function HomePage() {
                     room ? (result ? "result" : room.status) : practiceResult ? "result" : "playing"
                   }
                 />
-                <div className="statsGrid">
-                  <Stat
-                    label="WPM"
-                    value={
-                      isRoomPlaying || isPracticePlaying ? activeWpm : activeResultPlayer?.wpm ?? 0
-                    }
-                  />
-                  <Stat
-                    label="ACC"
-                    value={`${
-                      isRoomPlaying || isPracticePlaying
-                        ? activeAccuracy
-                        : activeResultPlayer?.accuracy ?? 100
-                    }%`}
-                  />
-                  <Stat
-                    label="MISS"
-                    value={
-                      isRoomPlaying || isPracticePlaying
-                        ? activeProgress.mistakes
-                        : activeResultPlayer?.mistakes ?? 0
-                    }
-                  />
-                  {isTimeAttackPlaying ? <Stat label="残り" value={`${activeTimeAttackRemainingSeconds}s`} /> : null}
-                  {((currentPlayer?.maxHp ?? activeResultPlayer?.maxHp) !== undefined) ? (
-                    <Stat
-                      label="HP"
-                      value={`${
-                        isRoomPlaying || isPracticePlaying ? currentPlayer?.hp ?? 0 : activeResultPlayer?.hp ?? 0
-                      }/${currentPlayer?.maxHp ?? activeResultPlayer?.maxHp ?? 0}`}
-                    />
-                  ) : null}
-                </div>
               </div>
 
               {room?.status === "countdown" ? (
@@ -1389,6 +1368,38 @@ export default function HomePage() {
                   ))}
                 </div>
               ) : null}
+
+              <section className="statsGrid" aria-label="補助記録">
+                <Stat
+                  label="WPM"
+                  value={isRoomPlaying || isPracticePlaying ? activeWpm : activeResultPlayer?.wpm ?? 0}
+                />
+                <Stat
+                  label="ACC"
+                  value={`${
+                    isRoomPlaying || isPracticePlaying
+                      ? activeAccuracy
+                      : activeResultPlayer?.accuracy ?? 100
+                  }%`}
+                />
+                <Stat
+                  label="MISS"
+                  value={
+                    isRoomPlaying || isPracticePlaying
+                      ? activeProgress.mistakes
+                      : activeResultPlayer?.mistakes ?? 0
+                  }
+                />
+                {isTimeAttackPlaying ? <Stat label="残り" value={`${activeTimeAttackRemainingSeconds}s`} /> : null}
+                {((currentPlayer?.maxHp ?? activeResultPlayer?.maxHp) !== undefined) ? (
+                  <Stat
+                    label="HP"
+                    value={`${
+                      isRoomPlaying || isPracticePlaying ? currentPlayer?.hp ?? 0 : activeResultPlayer?.hp ?? 0
+                    }/${currentPlayer?.maxHp ?? activeResultPlayer?.maxHp ?? 0}`}
+                  />
+                ) : null}
+              </section>
 
               {activeResult ? (
                 <ResultPanel

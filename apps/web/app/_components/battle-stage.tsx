@@ -59,8 +59,11 @@ export const BattleStage = memo(function BattleStage({
   return (
     <section
       className="battleStage"
+      data-testid="battle-stage"
+      data-room-code={view.roomCode}
       data-mode={view.mode}
       data-phase={view.phase}
+      data-winner-id={view.winnerId ?? "none"}
       data-result-animation={animateResult ? "active" : "idle"}
       aria-label="バトルステージ"
     >

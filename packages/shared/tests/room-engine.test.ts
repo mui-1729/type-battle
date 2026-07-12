@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   advanceBot,
   createRoom,
+  finishTyping,
   getRoom,
   joinRoom,
   leaveBySocket,
@@ -57,6 +58,41 @@ describe("room engine config", () => {
     }
 
     expect(started.room.matchEndsAt).toBe(started.room.serverStartAt! + 5_000);
+  });
+
+  it("keeps the match rule on the immutable match result", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_result_rule",
+      socketId: "socket_alice_result_rule"
+    });
+    const rule = setMatchRule("socket_alice_result_rule", created.room.roomCode, "timeAttack");
+    expect("error" in rule).toBe(false);
+    const started = startMatch("socket_alice_result_rule", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    if ("error" in started) {
+      return;
+    }
+
+    markPlaying(created.room.roomCode);
+    const chunks = (started.room.prompt?.typing.romaji ?? "").match(/.{1,8}/g) ?? [];
+    let finished: ReturnType<typeof finishTyping> = null;
+    chunks.forEach((input, index) => {
+      const payload = {
+        roomCode: created.room.roomCode,
+        input,
+        sequence: index + 1
+      };
+      finished = index === chunks.length - 1
+        ? finishTyping("socket_alice_result_rule", payload)
+        : updateProgress("socket_alice_result_rule", payload);
+    });
+
+    expect(finished).toMatchObject({
+      roomCode: created.room.roomCode,
+      matchRule: "timeAttack"
+    });
+    expect(finished && "maxPlayers" in finished).toBe(false);
   });
 
   it("ignores invalid prompts when selecting a room prompt", () => {

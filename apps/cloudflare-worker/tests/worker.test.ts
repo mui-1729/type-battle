@@ -474,7 +474,8 @@ describe("room authority", () => {
         id: expect.any(String)
       }),
       result: expect.objectContaining({
-        roomCode: "AB23CD"
+        roomCode: "AB23CD",
+        matchRule: "race"
       }),
       createdAt: expect.any(String)
     });

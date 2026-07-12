@@ -3,6 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
+  workers: 1,
   reporter: "list",
   webServer: [
     {
@@ -31,7 +32,10 @@ export default defineConfig({
     {
       name: "mobile-chromium",
       testMatch: /mobile-.*\.spec\.ts/,
-      use: { ...devices["Pixel 5"] }
+      use: {
+        ...devices["Pixel 5"],
+        viewport: { width: 390, height: 844 }
+      }
     }
   ]
 });

@@ -355,6 +355,36 @@ describe("realtime client", () => {
     expect(secondSocket.sent).toHaveLength(0);
   });
 
+  it("removes an ack before its callback can replace the connection", async () => {
+    const { createRealtimeSocket } = await import("../app/_lib/realtime-client");
+    const socket = createRealtimeSocket({ transport: "cloudflare", url: "ws://localhost:8787" });
+    const clientSocket = MockWebSocket.instances[0]!;
+    const ack = vi.fn(() => socket.disconnect());
+
+    clientSocket.open();
+    socket.emit(
+      "room:join",
+      {
+        roomCode: "OLD001",
+        nickname: "Alice",
+        guestId: "guest-old-room",
+        sessionId: "session-old-room",
+        deviceKind: "desktop"
+      },
+      ack
+    );
+    const request = JSON.parse(clientSocket.sent[0] ?? "{}") as { id?: string };
+
+    expect(() => clientSocket.receive(JSON.stringify({
+      id: "ack-old-room",
+      replyTo: request.id,
+      type: "server:ack",
+      payload: { ok: false, error: "Room not found." }
+    }))).not.toThrow();
+    expect(ack).toHaveBeenCalledTimes(1);
+    expect(ack).toHaveBeenCalledWith({ ok: false, error: "Room not found." });
+  });
+
   it("bridges the Cloudflare adapter to the room authority and returns acks", async () => {
     const { RoomAuthorityDurableObject } = await import("../../cloudflare-worker/src/worker");
 
