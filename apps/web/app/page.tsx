@@ -30,6 +30,7 @@ import type {
   TypingProgress
 } from "@type-battle/shared";
 import { GameHeader } from "./_components/game-header";
+import { BattleStage } from "./_components/battle-stage";
 import { PlayerSettingsModal } from "./_components/player-settings-modal";
 import { ProgressBlock } from "./_components/progress-block";
 import { ResultPanel } from "./_components/result-panel";
@@ -190,6 +191,9 @@ export default function HomePage() {
   const activeResultPlayer =
     room?.players.find((player) => player.id === playerId) ?? activePracticePlayer ?? null;
   const isTimeAttackPlaying = Boolean(isRoomPlaying && room?.matchRule === "timeAttack");
+  const isTimeAttackExpired = Boolean(
+    isTimeAttackPlaying && room?.matchEndsAt && matchTimerMs <= 0 && Date.now() >= room.matchEndsAt
+  );
   const activeTimeAttackRemainingSeconds = Math.max(matchTimerMs / 1000, 0).toFixed(1);
   const canStart =
     room?.status === "waiting" &&
@@ -317,10 +321,10 @@ export default function HomePage() {
             return;
           }
 
+          resetTyping();
           setPlayerId(response.data.playerId);
           setRoom(response.data.room);
           setResult(response.data.room.result ?? null);
-          resetTyping();
         }
       );
     });
@@ -698,7 +702,19 @@ export default function HomePage() {
       return;
     }
 
-    typingInputRef.current?.focus();
+    const input = typingInputRef.current;
+    if (!input) {
+      return;
+    }
+
+    const usesStackedLayout = window.matchMedia("(max-width: 1080px)").matches;
+    input.focus({ preventScroll: true });
+
+    if (usesStackedLayout) {
+      const matchSurface = input.closest(".matchSurface");
+      const focusRegion = matchSurface?.querySelector(".battleStage, .promptBox");
+      focusRegion?.scrollIntoView({ block: "start", inline: "nearest", behavior: "auto" });
+    }
   }, [acceptingTextInput, activeTypingText]);
 
   const emitProgress = useCallback(
@@ -1300,43 +1316,19 @@ export default function HomePage() {
                     room ? (result ? "result" : room.status) : practiceResult ? "result" : "playing"
                   }
                 />
-                <div className="statsGrid">
-                  <Stat
-                    label="WPM"
-                    value={
-                      isRoomPlaying || isPracticePlaying ? activeWpm : activeResultPlayer?.wpm ?? 0
-                    }
-                  />
-                  <Stat
-                    label="ACC"
-                    value={`${
-                      isRoomPlaying || isPracticePlaying
-                        ? activeAccuracy
-                        : activeResultPlayer?.accuracy ?? 100
-                    }%`}
-                  />
-                  <Stat
-                    label="MISS"
-                    value={
-                      isRoomPlaying || isPracticePlaying
-                        ? activeProgress.mistakes
-                        : activeResultPlayer?.mistakes ?? 0
-                    }
-                  />
-                  {isTimeAttackPlaying ? <Stat label="残り" value={`${activeTimeAttackRemainingSeconds}s`} /> : null}
-                  {((currentPlayer?.maxHp ?? activeResultPlayer?.maxHp) !== undefined) ? (
-                    <Stat
-                      label="HP"
-                      value={`${
-                        isRoomPlaying || isPracticePlaying ? currentPlayer?.hp ?? 0 : activeResultPlayer?.hp ?? 0
-                      }/${currentPlayer?.maxHp ?? activeResultPlayer?.maxHp ?? 0}`}
-                    />
-                  ) : null}
-                </div>
               </div>
 
               {room?.status === "countdown" ? (
                 <div className="countdown">{Math.max(1, Math.ceil(countdownMs / 1000))}</div>
+              ) : null}
+
+              {room ? (
+                <BattleStage
+                  room={room}
+                  result={result}
+                  localPlayerId={playerId}
+                  timeAttackExpired={isTimeAttackExpired}
+                />
               ) : null}
 
               {activePromptText ? (
@@ -1377,13 +1369,45 @@ export default function HomePage() {
                 </div>
               ) : null}
 
+              <section className="statsGrid" aria-label="補助記録">
+                <Stat
+                  label="WPM"
+                  value={isRoomPlaying || isPracticePlaying ? activeWpm : activeResultPlayer?.wpm ?? 0}
+                />
+                <Stat
+                  label="ACC"
+                  value={`${
+                    isRoomPlaying || isPracticePlaying
+                      ? activeAccuracy
+                      : activeResultPlayer?.accuracy ?? 100
+                  }%`}
+                />
+                <Stat
+                  label="MISS"
+                  value={
+                    isRoomPlaying || isPracticePlaying
+                      ? activeProgress.mistakes
+                      : activeResultPlayer?.mistakes ?? 0
+                  }
+                />
+                {isTimeAttackPlaying ? <Stat label="残り" value={`${activeTimeAttackRemainingSeconds}s`} /> : null}
+                {((currentPlayer?.maxHp ?? activeResultPlayer?.maxHp) !== undefined) ? (
+                  <Stat
+                    label="HP"
+                    value={`${
+                      isRoomPlaying || isPracticePlaying ? currentPlayer?.hp ?? 0 : activeResultPlayer?.hp ?? 0
+                    }/${currentPlayer?.maxHp ?? activeResultPlayer?.maxHp ?? 0}`}
+                  />
+                ) : null}
+              </section>
+
               {activeResult ? (
                 <ResultPanel
                   result={activeResult}
                   isRoomResult={Boolean(room)}
                   onRetry={room ? rematch : retryPractice}
                   practiceMode={activePracticeMode}
-                  {...(room?.matchRule ? { matchRule: room.matchRule } : {})}
+                  {...(room ? { matchRule: activeResult.matchRule ?? room.matchRule } : {})}
                 />
               ) : null}
             </>

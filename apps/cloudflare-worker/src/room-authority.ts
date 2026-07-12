@@ -2626,6 +2626,7 @@ function toMatchResult(room: InternalRoom): MatchResult {
   return {
     roomCode: room.roomCode,
     prompt,
+    matchRule: room.matchRule,
     players: rankPlayers(toPublicPlayers(room), (player) => getTypingLength(room, room.players.get(player.id)!), room.matchRule)
   };
 }

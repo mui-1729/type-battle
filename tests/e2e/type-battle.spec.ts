@@ -54,6 +54,10 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await host.getByRole("button", { name: "開始" }).click();
   await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
   await expect(guest.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expect(host.locator('.battleStagePlayerMover[data-side="left"] strong')).toHaveText("Alice");
+  await expect(host.locator('.battleStagePlayerMover[data-side="right"] strong')).toHaveText("Bob");
+  await expect(guest.locator('.battleStagePlayerMover[data-side="left"] strong')).toHaveText("Bob");
+  await expect(guest.locator('.battleStagePlayerMover[data-side="right"] strong')).toHaveText("Alice");
 
   const hostGuide = await readInputGuide(host);
   const guestGuide = await readInputGuide(guest);
@@ -93,7 +97,9 @@ test("rejoins the room after reload", async ({ browser }) => {
   await hostContext.close();
 });
 
-test("starts a match against COM when alone", async ({ browser }) => {
+test("plays all three stage modes against COM and resets between rematches", async ({ browser }) => {
+  test.setTimeout(60_000);
+
   const hostContext = await browser.newContext();
   const host = await hostContext.newPage();
 
@@ -101,16 +107,65 @@ test("starts a match against COM when alone", async ({ browser }) => {
   await host.getByLabel("ニックネーム").fill("Alice");
   await host.getByRole("button", { name: "ルームを作成" }).click();
   await expect(host.getByRole("button", { name: "COM と開始" })).toBeEnabled();
-  await host.getByRole("button", { name: "むずかしい" }).click();
 
-  await host.getByRole("button", { name: "COM と開始" }).click();
-  await expect(host.getByLabel("ルーム操作").getByText("COM (Hard)", { exact: true })).toBeVisible();
-  await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  const modes = [
+    { key: "race", label: "レース" },
+    { key: "timeAttack", label: "タイムアタック" },
+    { key: "hpBattle", label: "HPバトル" }
+  ] as const;
 
-  await typeInputGuide(host, await readInputGuide(host));
+  for (const [index, mode] of modes.entries()) {
+    if (index > 0) {
+      await host.getByRole("button", { name: new RegExp(`^${mode.label}`) }).click();
+      await expect(host.getByTestId("battle-stage")).toHaveAttribute("data-mode", mode.key);
+    }
 
-  await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 8_000 });
-  await expect(host.locator(".resultPanel").getByText("COM (Hard)", { exact: true })).toBeVisible();
+    await host.locator(".lobbyActions .primaryButton").click();
+    await expect(host.getByLabel("ルーム操作").getByText("COM (Normal)", { exact: true })).toBeVisible();
+    await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+    const stage = host.getByTestId("battle-stage");
+    const localPlayer = stage.locator('.battleStagePlayerMover[data-side="left"]');
+    const input = host.getByLabel("入力欄");
+    await expect(stage).toHaveAttribute("data-mode", mode.key);
+    await expect(stage).toHaveAttribute("data-phase", "playing");
+    await expect(localPlayer.locator("strong")).toHaveText("Alice");
+    await expect(stage.locator('.battleStagePlayerMover[data-side="right"] span').first()).toContainText("COM");
+    await expect(input).toBeFocused();
+
+    const guide = await readInputGuide(host);
+    const splitIndex = Math.max(2, Math.floor(guide.length / 2));
+    await input.pressSequentially(guide.slice(0, splitIndex), { delay: 2 });
+    await expect.poll(async () => Number(await localPlayer.getAttribute("data-progress"))).toBeGreaterThan(0);
+    await expect(input).toBeFocused();
+
+    if (mode.key === "hpBattle") {
+      await expect.poll(async () => Number(await stage.locator(".hpPushStageScene").getAttribute("data-cargo-position")))
+        .toBeGreaterThan(50);
+    } else {
+      await expect.poll(async () => Number(await localPlayer.getAttribute("data-position"))).toBeGreaterThan(14);
+    }
+
+    await input.pressSequentially(guide.slice(splitIndex), { delay: 2 });
+    await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 8_000 });
+    await expect(stage).toHaveAttribute("data-phase", "result");
+    await expect(stage).not.toHaveAttribute("data-winner-id", "none");
+    await expect(host.locator(".resultPanel").getByText("COM (Normal)", { exact: true })).toBeVisible();
+
+    if (index < modes.length - 1) {
+      await host.getByRole("button", { name: "再戦する" }).click();
+      await expect(stage).toHaveAttribute("data-phase", "waiting");
+      await expect(stage).toHaveAttribute("data-winner-id", "none");
+      await expect(stage).toHaveAttribute("data-result-animation", "idle");
+      await expect(stage.locator('.battleStagePlayerMover[data-side="left"]')).toHaveAttribute("data-progress", "0.000");
+    }
+  }
+
+  await host.reload();
+  await expect(host.locator(".connection")).toHaveClass(/isOnline/);
+  await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 10_000 });
+  await expect(host.getByTestId("battle-stage")).toHaveAttribute("data-phase", "result");
+  await expect(host.getByTestId("battle-stage")).toHaveAttribute("data-result-animation", "idle");
 
   await hostContext.close();
 });
@@ -146,10 +201,20 @@ test("forfeits the match after long disconnect", async ({ browser }) => {
   // Should immediately show reconnecting
   await expect(host.locator(".statusTag.isDisconnected")).toBeVisible();
   await expect(host.locator(".rivalBar").getByText("再接続中...")).toBeVisible();
+  await expect(host.getByTestId("battle-stage").locator('.battleStagePlayerMover[data-side="right"]')).toHaveAttribute(
+    "data-player-status",
+    "reconnecting"
+  );
+  await expect(host.getByTestId("battle-stage")).toContainText("再接続中");
 
   // Wait for forfeit. Local runs can reuse an existing realtime server with the default 30s grace period.
   await expect(host.locator(".statusTag.isForfeited")).toBeVisible({ timeout: 40_000 });
   await expect(host.locator(".rivalBar").getByText("棄権")).toBeVisible();
+  await expect(host.getByTestId("battle-stage").locator('.battleStagePlayerMover[data-side="right"]')).toHaveAttribute(
+    "data-player-status",
+    "forfeited"
+  );
+  await expect(host.getByTestId("battle-stage")).toContainText("棄権");
 
   await hostContext.close();
 });
@@ -163,6 +228,7 @@ test("completes a practice session", async ({ browser }) => {
   await expect(page.locator(".connection")).toHaveClass(/isOnline/);
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expect(page.getByTestId("battle-stage")).toHaveCount(0);
 
   await typeInputGuide(page, await readInputGuide(page));
 
@@ -170,6 +236,39 @@ test("completes a practice session", async ({ browser }) => {
   await expect(page.locator(".resultPanel").getByText("もう一度練習")).toBeVisible();
 
   await context.close();
+});
+
+test("disables stage motion for the player setting and OS preference", async ({ browser }) => {
+  for (const source of ["setting", "os"] as const) {
+    const context = await browser.newContext(source === "os" ? { reducedMotion: "reduce" } : {});
+    const page = await context.newPage();
+    await page.goto("/");
+
+    if (source === "setting") {
+      await page.getByTitle("設定を開く").click();
+      await page.getByLabel("アニメーションを減らす").check();
+      await page.getByRole("button", { name: "設定を反映" }).click();
+      await expect(page.locator("html")).toHaveClass(/reduced-motion/);
+    }
+
+    await page.getByLabel("ニックネーム").fill(source === "setting" ? "Reduced" : "SystemReduced");
+    await page.getByRole("button", { name: "ルームを作成" }).click();
+    await page.getByRole("button", { name: "COM と開始" }).click();
+    await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+    const motion = await page.locator('.battleStagePlayerMover[data-side="left"]').evaluate((element) => {
+      const moverStyle = getComputedStyle(element);
+      const figureBody = element.querySelector(".stickFigureBody");
+      return {
+        transitionDuration: moverStyle.transitionDuration,
+        animationName: figureBody ? getComputedStyle(figureBody).animationName : "missing"
+      };
+    });
+    expect(motion.transitionDuration).toBe("0s");
+    expect(motion.animationName).toBe("none");
+
+    await context.close();
+  }
 });
 
 test("saves and restores player settings from localStorage", async ({ browser }) => {

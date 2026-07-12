@@ -135,13 +135,14 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
   };
 
   const failPendingAcks = (message: string) => {
-    for (const [id, ack] of pendingAcks.entries()) {
-      clearTimeout(ack.timeout);
-      ack.callback({ ok: false, error: message });
-      removeQueuedMessage(id);
-    }
-
+    const pendingEntries = [...pendingAcks.entries()];
     pendingAcks.clear();
+
+    for (const [id, ack] of pendingEntries) {
+      clearTimeout(ack.timeout);
+      removeQueuedMessage(id);
+      ack.callback({ ok: false, error: message });
+    }
   };
 
   const removeQueuedMessage = (id: string) => {
@@ -213,8 +214,9 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
 
       if (ack && ackPayload) {
         clearTimeout(ack.timeout);
-        ack.callback(ackPayload);
         pendingAcks.delete(replyTo);
+        removeQueuedMessage(replyTo);
+        ack.callback(ackPayload);
       }
 
       return;
@@ -333,8 +335,8 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
           const pending = pendingAcks.get(dropped.id);
           if (pending) {
             clearTimeout(pending.timeout);
-            pending.callback({ ok: false, error: "Realtime outbound queue overflowed." });
             pendingAcks.delete(dropped.id);
+            pending.callback({ ok: false, error: "Realtime outbound queue overflowed." });
           }
         }
       }

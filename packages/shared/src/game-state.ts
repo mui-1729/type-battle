@@ -73,6 +73,7 @@ export type PlayerResult = PlayerState & {
 export type MatchResult = {
   roomCode: string;
   prompt: Prompt;
+  matchRule?: MatchRule;
   players: PlayerResult[];
 };
 
