@@ -880,7 +880,7 @@ textarea::placeholder {
 }
 
 .raceStageScene,
-.battleStagePreview {
+.hpPushStageScene {
   position: absolute;
   inset: 0;
 }
@@ -1056,6 +1056,30 @@ textarea::placeholder {
   transform: rotate(18deg);
 }
 
+.stickFigure[data-pose="push"] .stickFigureBody {
+  transform: rotate(-7deg) translateX(2px);
+}
+
+.stickFigure[data-pose="push"] .stickFigureArmFront {
+  transform: rotate(-24deg) scaleY(1.08);
+}
+
+.stickFigure[data-pose="push"] .stickFigureArmBack {
+  transform: rotate(26deg) scaleY(1.04);
+}
+
+.hpPushStageScene .battleStagePlayerMover[data-advantage="leading"] .stickFigureBody {
+  transform: rotate(-10deg) translateX(3px);
+}
+
+.hpPushStageScene .battleStagePlayerMover[data-advantage="trailing"] .stickFigureBody {
+  transform: rotate(3deg) translateX(-2px);
+}
+
+.hpPushStageScene .battleStagePlayerMover[data-advantage="trailing"] .battleStagePlayerLabel span {
+  color: var(--warning);
+}
+
 .stickFigure[data-pose="win"] .stickFigureBody {
   transform: translateY(-2px);
 }
@@ -1192,6 +1216,130 @@ textarea::placeholder {
   }
 }
 
+.hpPushStageScene .cargoObject {
+  width: 62px;
+  height: 54px;
+}
+
+.hpPushStageScene .battleStagePlayerMover[data-eliminated="true"] .stickFigure {
+  opacity: 0.2;
+}
+
+.battleStageDefeatMover {
+  z-index: 5;
+}
+
+.battleStageDefeatEffect {
+  position: absolute;
+  bottom: 47px;
+  left: 50%;
+  width: 62px;
+  height: 42px;
+  opacity: 0;
+  transform: translateX(-50%);
+}
+
+.battleStageDefeatEffect span {
+  position: absolute;
+  top: 18px;
+  left: 27px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface-strong);
+}
+
+.battleStageDefeatEffect span:nth-child(2),
+.battleStageDefeatEffect span:nth-child(4) {
+  width: 12px;
+  height: 3px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.battleStage[data-result-animation="active"] .hpPushStageScene .battleStagePlayerMover[data-outcome="winner"] .battleStagePlayerInner {
+  animation: battleStageWinnerPop 760ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.battleStage[data-result-animation="active"] .hpPushStageScene .battleStagePlayerMover[data-eliminated="true"] .battleStagePlayerInner {
+  animation: hpStageFlatten 720ms ease-in forwards;
+}
+
+.battleStage[data-result-animation="active"] .hpPushStageScene .battleStageDefeatEffect {
+  animation: hpStagePuff 720ms 160ms ease-out;
+}
+
+.battleStage[data-result-animation="active"] .hpPushStageScene .battleStageDefeatEffect span:nth-child(1) {
+  --puff-x: -24px;
+  --puff-y: -19px;
+}
+
+.battleStage[data-result-animation="active"] .hpPushStageScene .battleStageDefeatEffect span:nth-child(2) {
+  --puff-x: 25px;
+  --puff-y: -15px;
+}
+
+.battleStage[data-result-animation="active"] .hpPushStageScene .battleStageDefeatEffect span:nth-child(3) {
+  --puff-x: -18px;
+  --puff-y: 10px;
+}
+
+.battleStage[data-result-animation="active"] .hpPushStageScene .battleStageDefeatEffect span:nth-child(4) {
+  --puff-x: 23px;
+  --puff-y: 12px;
+}
+
+.battleStage[data-result-animation="active"] .hpPushStageScene .battleStageDefeatEffect span:nth-child(5) {
+  --puff-x: 2px;
+  --puff-y: -28px;
+}
+
+.battleStage[data-result-animation="active"] .hpPushStageScene .battleStageDefeatEffect span {
+  animation: hpStagePuffPiece 620ms 180ms ease-out forwards;
+}
+
+@keyframes hpStageFlatten {
+  0%,
+  58% {
+    opacity: 1;
+    transform: translateX(-50%) scaleY(1);
+  }
+  76% {
+    opacity: 0.72;
+    transform: translateX(-50%) translateY(15px) scaleY(0.22) scaleX(1.12);
+  }
+  100% {
+    opacity: 0.08;
+    transform: translateX(-50%) translateY(17px) scaleY(0.12) scaleX(1.18);
+  }
+}
+
+@keyframes hpStagePuff {
+  0% {
+    opacity: 0;
+  }
+  18%,
+  62% {
+    opacity: 0.92;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes hpStagePuffPiece {
+  from {
+    opacity: 0.9;
+    transform: translate(0, 0) scale(0.7);
+  }
+  to {
+    opacity: 0;
+    transform: translate(var(--puff-x), var(--puff-y)) scale(1.15);
+  }
+}
+
 .cargoTape {
   position: absolute;
   top: 0;
@@ -1232,6 +1380,10 @@ textarea::placeholder {
   animation-iteration-count: 1 !important;
 }
 
+.reduced-motion .battleStageDefeatEffect {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .battleStageMover,
   .battleStage *,
@@ -1241,6 +1393,10 @@ textarea::placeholder {
     transition-duration: 0.001ms !important;
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
+  }
+
+  .battleStageDefeatEffect {
+    display: none;
   }
 }
 

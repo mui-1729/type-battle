@@ -7,6 +7,8 @@ type StagePlayerProps = {
   position: number;
   pose: StickFigurePose;
   outcome?: "neutral" | "winner" | "loser";
+  advantage?: "leading" | "trailing" | "even" | "unknown";
+  eliminated?: boolean;
   actionLabel?: string;
 };
 
@@ -19,6 +21,8 @@ export function StagePlayer({
   position,
   pose,
   outcome = "neutral",
+  advantage = "even",
+  eliminated = false,
   actionLabel
 }: StagePlayerProps) {
   return (
@@ -29,6 +33,8 @@ export function StagePlayer({
       data-position={position.toFixed(1)}
       data-progress={player.progressRatio.toFixed(3)}
       data-outcome={outcome}
+      data-advantage={advantage}
+      data-eliminated={eliminated ? "true" : "false"}
       data-player-status={player.status}
       style={getMoverStyle(position)}
     >

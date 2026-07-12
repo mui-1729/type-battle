@@ -2,11 +2,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { MatchResult, PlayerState, RoomState } from "@type-battle/shared";
+import { HpPushStage } from "../app/_components/hp-push-stage";
 import { RaceStage } from "../app/_components/race-stage";
 import {
   BATTLE_STAGE_COORDINATES,
   assignBattleSides,
   createBattleStageViewModel,
+  getHpAdvantage,
   getResultAnimationTransition,
   toCargoPosition,
   toProgressRatio,
@@ -58,6 +60,18 @@ describe("battle stage coordinate transforms", () => {
     expect(toCargoPosition(50, 0, 50, 100)).toBe(BATTLE_STAGE_COORDINATES.cargoCenter);
     expect(toCargoPosition(50, undefined, 50, 100)).toBe(BATTLE_STAGE_COORDINATES.cargoCenter);
     expect(toCargoPosition(Number.NaN, 100, 50, 100)).toBe(BATTLE_STAGE_COORDINATES.cargoCenter);
+  });
+
+  it("clamps HP below zero and above max before calculating pressure", () => {
+    expect(toCargoPosition(150, 100, -20, 100)).toBe(BATTLE_STAGE_COORDINATES.cargoMax);
+    expect(toCargoPosition(-20, 100, 150, 100)).toBe(BATTLE_STAGE_COORDINATES.cargoMin);
+  });
+
+  it("reports HP advantage without treating invalid values as a winner", () => {
+    expect(getHpAdvantage(50, 100, 25, 50)).toBe("even");
+    expect(getHpAdvantage(100, 100, 50, 100)).toBe("left");
+    expect(getHpAdvantage(25, 100, 100, 100)).toBe("right");
+    expect(getHpAdvantage(50, 0, 50, 100)).toBe("unknown");
   });
 });
 
@@ -200,6 +214,114 @@ describe("race and time attack presentation", () => {
   });
 });
 
+describe("HP push presentation", () => {
+  it("keeps equal HP centered and labels both players as even", () => {
+    const room = createRoom({
+      matchRule: "hpBattle",
+      players: [
+        { ...leftPlayer, hp: 50, maxHp: 100 },
+        { ...rightPlayer, hp: 25, maxHp: 50 }
+      ]
+    });
+    const view = createBattleStageViewModel(room, null, leftPlayer.id);
+    const markup = renderToStaticMarkup(React.createElement(HpPushStage, { view }));
+
+    expect(markup).toContain('data-hp-advantage="even"');
+    expect(markup).toContain('data-cargo-position="50.0"');
+    expect(markup).toContain('data-advantage="even"');
+    expect(markup).toContain("互角");
+  });
+
+  it("moves cargo toward the lower-HP COM using only received HP", () => {
+    const room = createRoom({
+      matchRule: "hpBattle",
+      players: [
+        { ...leftPlayer, hp: 100, maxHp: 100 },
+        { ...rightPlayer, hp: 25, maxHp: 100 }
+      ]
+    });
+    const view = createBattleStageViewModel(room, null, leftPlayer.id);
+    const markup = renderToStaticMarkup(React.createElement(HpPushStage, { view }));
+
+    expect(markup).toContain('data-hp-advantage="left"');
+    expect(markup).toContain('data-cargo-position="72.5"');
+    expect(markup).toContain("COM・押し戻され中");
+  });
+
+  it("does not start an elimination effect for HP zero before a server result", () => {
+    const room = createRoom({
+      matchRule: "hpBattle",
+      players: [
+        { ...leftPlayer, hp: 0, maxHp: 100 },
+        { ...rightPlayer, hp: 100, maxHp: 100 }
+      ]
+    });
+    const view = createBattleStageViewModel(room, null, leftPlayer.id);
+    const markup = renderToStaticMarkup(React.createElement(HpPushStage, { view }));
+
+    expect(markup).toContain('data-cargo-position="20.0"');
+    expect(markup).toContain('data-result-ready="false"');
+    expect(markup).not.toContain('data-eliminated="true"');
+    expect(markup).not.toContain("battleStageDefeatEffect");
+  });
+
+  it("enables the abstract defeat effect only for a confirmed eliminated loser", () => {
+    const room = createRoom({
+      status: "finished",
+      matchRule: "hpBattle",
+      players: [
+        { ...leftPlayer, hp: 0, maxHp: 100, finishStatus: "eliminated" },
+        { ...rightPlayer, hp: 100, maxHp: 100, finishStatus: "finished" }
+      ]
+    });
+    const result = createHpResult({ loserFinishStatus: "eliminated", loserHp: 0 });
+    const view = createBattleStageViewModel(room, result, leftPlayer.id);
+    const markup = renderToStaticMarkup(React.createElement(HpPushStage, { view }));
+
+    expect(markup).toContain('data-stage-state="elimination-result"');
+    expect(markup).toContain('data-player-id="player-b" data-side="left" data-position="11.0"');
+    expect(markup).toContain('data-eliminated="true"');
+    expect(markup).toContain("battleStageDefeatEffect");
+    expect(markup).toContain("敗北");
+  });
+
+  it("does not crush a completed or forfeited loser", () => {
+    const room = createRoom({ status: "finished", matchRule: "hpBattle" });
+    const finishedView = createBattleStageViewModel(
+      room,
+      createHpResult({ loserFinishStatus: "finished", loserHp: 0 }),
+      leftPlayer.id
+    );
+    const forfeitedView = createBattleStageViewModel(
+      room,
+      createHpResult({ loserFinishStatus: "forfeited", loserHp: 0 }),
+      leftPlayer.id
+    );
+    const finishedMarkup = renderToStaticMarkup(React.createElement(HpPushStage, { view: finishedView }));
+    const forfeitedMarkup = renderToStaticMarkup(React.createElement(HpPushStage, { view: forfeitedView }));
+
+    expect(finishedMarkup).not.toContain('data-eliminated="true"');
+    expect(finishedMarkup).not.toContain("battleStageDefeatEffect");
+    expect(forfeitedMarkup).not.toContain('data-eliminated="true"');
+    expect(forfeitedMarkup).not.toContain("battleStageDefeatEffect");
+    expect(forfeitedMarkup).toContain("棄権");
+  });
+
+  it("does not turn a disconnected unfinished player into an elimination", () => {
+    const room = createRoom({ status: "finished", matchRule: "hpBattle" });
+    const result = createHpResult({ loserFinishStatus: "unfinished", loserHp: 0 });
+    const disconnectedLoser = result.players.find((player) => player.id === leftPlayer.id);
+    if (disconnectedLoser) {
+      disconnectedLoser.connected = false;
+    }
+    const view = createBattleStageViewModel(room, result, leftPlayer.id);
+    const markup = renderToStaticMarkup(React.createElement(HpPushStage, { view }));
+
+    expect(markup).not.toContain('data-eliminated="true"');
+    expect(markup).not.toContain("battleStageDefeatEffect");
+  });
+});
+
 function createPlayer(overrides: Partial<PlayerState> = {}): PlayerState {
   return {
     id: "player",
@@ -246,6 +368,41 @@ function createResult(winnerId: string): MatchResult {
     players: [
       { ...winner, rank: 1, maxStreak: 10, finishGap: 0, finishStatus: "finished" },
       { ...loser, rank: 2, maxStreak: 4, finishGap: 200, finishStatus: "finished" }
+    ]
+  };
+}
+
+function createHpResult({
+  loserFinishStatus,
+  loserHp
+}: {
+  loserFinishStatus: "finished" | "forfeited" | "eliminated" | "unfinished";
+  loserHp: number;
+}): MatchResult {
+  return {
+    roomCode: "ROOM01",
+    prompt,
+    matchRule: "hpBattle",
+    players: [
+      {
+        ...rightPlayer,
+        hp: 100,
+        maxHp: 100,
+        rank: 1,
+        maxStreak: 10,
+        finishGap: 0,
+        finishStatus: "finished"
+      },
+      {
+        ...leftPlayer,
+        hp: loserHp,
+        maxHp: 100,
+        rank: 2,
+        maxStreak: 4,
+        finishGap: 200,
+        finishStatus: loserFinishStatus,
+        ...(loserFinishStatus === "forfeited" ? { forfeited: true } : {})
+      }
     ]
   };
 }

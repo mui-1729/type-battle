@@ -45,6 +45,8 @@ export type BattleStageViewModel = {
 
 export type ResultAnimationTransition = "stable" | "enter" | "reset";
 
+export type HpAdvantage = "left" | "right" | "even" | "unknown";
+
 export const BATTLE_STAGE_COORDINATES = {
   leftStart: 14,
   leftCargo: 43,
@@ -118,6 +120,27 @@ export function toCargoPosition(
     BATTLE_STAGE_COORDINATES.cargoMin,
     BATTLE_STAGE_COORDINATES.cargoMax
   );
+}
+
+export function getHpAdvantage(
+  leftHp: number | undefined,
+  leftMaxHp: number | undefined,
+  rightHp: number | undefined,
+  rightMaxHp: number | undefined
+): HpAdvantage {
+  const leftRatio = toHpRatio(leftHp, leftMaxHp);
+  const rightRatio = toHpRatio(rightHp, rightMaxHp);
+
+  if (leftRatio === null || rightRatio === null) {
+    return "unknown";
+  }
+
+  const pressure = leftRatio - rightRatio;
+  if (Math.abs(pressure) < 0.001) {
+    return "even";
+  }
+
+  return pressure > 0 ? "left" : "right";
 }
 
 export function assignBattleSides(

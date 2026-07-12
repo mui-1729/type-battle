@@ -4,14 +4,13 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { MatchResult, RoomState } from "@type-battle/shared";
 import {
   createBattleStageViewModel,
+  getHpAdvantage,
   getResultAnimationTransition,
-  toRacePosition,
   type BattleStageViewModel
 } from "../_lib/battle-stage";
 import { MATCH_RULE_DETAILS } from "../_lib/ui-labels";
-import { CargoObject } from "./cargo-object";
+import { HpPushStage } from "./hp-push-stage";
 import { RaceStage } from "./race-stage";
-import { StagePlayer, getMoverStyle } from "./stage-player";
 
 type BattleStageProps = {
   room: RoomState;
@@ -78,7 +77,7 @@ export const BattleStage = memo(function BattleStage({
         <span className="battleStageGround" aria-hidden="true" />
 
         {view.mode === "hpBattle" ? (
-          <StagePreview view={view} />
+          <HpPushStage view={view} />
         ) : (
           <RaceStage view={view} timeAttackExpired={hasTimeExpired} />
         )}
@@ -90,26 +89,6 @@ export const BattleStage = memo(function BattleStage({
     </section>
   );
 });
-
-function StagePreview({ view }: { view: BattleStageViewModel }) {
-  return (
-    <div className="battleStagePreview">
-      {view.players.map((player) => (
-        <StagePlayer
-          key={player.id}
-          player={player}
-          position={toRacePosition(0, player.side)}
-          pose={view.phase === "playing" ? "ready" : "idle"}
-        />
-      ))}
-      <div className="battleStageMover battleStageCargoMover" style={getMoverStyle(50)} data-position="50">
-        <div className="battleStageCargoInner">
-          <CargoObject />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function getStageSummary(view: BattleStageViewModel, timeAttackExpired = false): string {
   if (!view.rightPlayer) {
@@ -127,6 +106,23 @@ function getStageSummary(view: BattleStageViewModel, timeAttackExpired = false):
 
   if (timeAttackExpired) {
     return "時間切れ・サーバー結果を確認中";
+  }
+
+  if (view.mode === "hpBattle" && view.phase === "playing") {
+    const advantage = getHpAdvantage(
+      view.leftPlayer?.hp,
+      view.leftPlayer?.maxHp,
+      view.rightPlayer?.hp,
+      view.rightPlayer?.maxHp
+    );
+
+    if (advantage === "left") {
+      return `${view.leftPlayer?.nickname ?? "左プレイヤー"} が優勢`;
+    }
+    if (advantage === "right") {
+      return `${view.rightPlayer?.nickname ?? "右プレイヤー"} が優勢`;
+    }
+    return advantage === "even" ? "互角・荷物は中央" : "HP情報を確認中";
   }
 
   if (view.phase === "countdown") {
