@@ -1,7 +1,7 @@
 import { memo } from "react";
 import type { BattlePlayerStatus, BattleSide } from "../_lib/battle-stage";
 
-export type StickFigurePose = "idle" | "ready" | "run" | "push" | "win" | "lose";
+export type StickFigurePose = "idle" | "ready" | "run" | "reach" | "tired" | "push" | "win" | "lose";
 
 type StickFigureProps = {
   side: BattleSide;

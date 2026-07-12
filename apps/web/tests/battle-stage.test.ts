@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { MatchResult, PlayerState, RoomState } from "@type-battle/shared";
+import { RaceStage } from "../app/_components/race-stage";
 import {
   BATTLE_STAGE_COORDINATES,
   assignBattleSides,
@@ -9,6 +12,9 @@ import {
   toProgressRatio,
   toRacePosition
 } from "../app/_lib/battle-stage";
+
+beforeAll(() => vi.stubGlobal("React", React));
+afterAll(() => vi.unstubAllGlobals());
 
 const prompt = {
   id: "prompt-1",
@@ -131,6 +137,69 @@ describe("battle stage view model", () => {
   });
 });
 
+describe("race and time attack presentation", () => {
+  it("keeps completed players in separate lanes without claiming cargo before a result", () => {
+    const room = createRoom({
+      players: [
+        { ...leftPlayer, progressIndex: 10 },
+        { ...rightPlayer, progressIndex: 10 }
+      ]
+    });
+    const view = createBattleStageViewModel(room, null, leftPlayer.id);
+    const markup = renderToStaticMarkup(React.createElement(RaceStage, { view, timeAttackExpired: false }));
+
+    expect(markup).toContain('data-stage-state="goal-wait"');
+    expect(markup).toContain('data-result-ready="false"');
+    expect(markup).toContain('data-position="43.0"');
+    expect(markup).toContain('data-position="57.0"');
+    expect(markup).toContain('data-claimed-by="none"');
+    expect(markup).not.toContain('data-outcome="winner"');
+  });
+
+  it("marks only the server-ranked winner and claims cargo after the result", () => {
+    const room = createRoom({ status: "finished" });
+    const leftWinnerView = createBattleStageViewModel(room, createResult(leftPlayer.id), leftPlayer.id);
+    const rightWinnerView = createBattleStageViewModel(room, createResult(rightPlayer.id), leftPlayer.id);
+    const leftMarkup = renderToStaticMarkup(React.createElement(RaceStage, {
+      view: leftWinnerView,
+      timeAttackExpired: false
+    }));
+    const rightMarkup = renderToStaticMarkup(React.createElement(RaceStage, {
+      view: rightWinnerView,
+      timeAttackExpired: false
+    }));
+
+    expect(leftMarkup).toContain('data-result-ready="true"');
+    expect(leftMarkup).toContain('data-claimed-by="left"');
+    expect(leftMarkup).toContain('data-player-id="player-b" data-side="left" data-position="43.0"');
+    expect(leftMarkup).toContain('data-outcome="winner"');
+    expect(rightMarkup).toContain('data-claimed-by="right"');
+    expect(rightMarkup).toContain('data-player-id="player-a" data-side="right" data-position="57.0"');
+  });
+
+  it("shows a stopped time attack state until the server result arrives", () => {
+    const room = createRoom({ matchRule: "timeAttack" });
+    const view = createBattleStageViewModel(room, null, leftPlayer.id);
+    const markup = renderToStaticMarkup(React.createElement(RaceStage, { view, timeAttackExpired: true }));
+
+    expect(markup).toContain('data-stage-state="time-expired"');
+    expect(markup).toContain('data-time-expired="true"');
+    expect(markup).toContain('data-pose="tired"');
+    expect(markup).toContain("判定待ち");
+    expect(markup).not.toContain('data-outcome="winner"');
+  });
+
+  it("does not render losing outcomes during the finished-state result gap", () => {
+    const room = createRoom({ status: "finished" });
+    const view = createBattleStageViewModel(room, null, leftPlayer.id);
+    const markup = renderToStaticMarkup(React.createElement(RaceStage, { view, timeAttackExpired: false }));
+
+    expect(markup).toContain('data-stage-state="result-pending"');
+    expect(markup).toContain('data-outcome="neutral"');
+    expect(markup).not.toContain('data-outcome="loser"');
+  });
+});
+
 function createPlayer(overrides: Partial<PlayerState> = {}): PlayerState {
   return {
     id: "player",
@@ -163,5 +232,20 @@ function createRoom(overrides: Partial<RoomState> = {}): RoomState {
     players: [leftPlayer, rightPlayer],
     maxPlayers: 2,
     ...overrides
+  };
+}
+
+function createResult(winnerId: string): MatchResult {
+  const winner = winnerId === leftPlayer.id ? leftPlayer : rightPlayer;
+  const loser = winnerId === leftPlayer.id ? rightPlayer : leftPlayer;
+
+  return {
+    roomCode: "ROOM01",
+    prompt,
+    matchRule: "race",
+    players: [
+      { ...winner, rank: 1, maxStreak: 10, finishGap: 0, finishStatus: "finished" },
+      { ...loser, rank: 2, maxStreak: 4, finishGap: 200, finishStatus: "finished" }
+    ]
   };
 }

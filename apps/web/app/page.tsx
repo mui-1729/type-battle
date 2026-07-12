@@ -191,6 +191,9 @@ export default function HomePage() {
   const activeResultPlayer =
     room?.players.find((player) => player.id === playerId) ?? activePracticePlayer ?? null;
   const isTimeAttackPlaying = Boolean(isRoomPlaying && room?.matchRule === "timeAttack");
+  const isTimeAttackExpired = Boolean(
+    isTimeAttackPlaying && room?.matchEndsAt && matchTimerMs <= 0 && Date.now() >= room.matchEndsAt
+  );
   const activeTimeAttackRemainingSeconds = Math.max(matchTimerMs / 1000, 0).toFixed(1);
   const canStart =
     room?.status === "waiting" &&
@@ -1341,7 +1344,12 @@ export default function HomePage() {
               ) : null}
 
               {room ? (
-                <BattleStage room={room} result={result} localPlayerId={playerId} />
+                <BattleStage
+                  room={room}
+                  result={result}
+                  localPlayerId={playerId}
+                  timeAttackExpired={isTimeAttackExpired}
+                />
               ) : null}
 
               {activePromptText ? (

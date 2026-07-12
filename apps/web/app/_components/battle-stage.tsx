@@ -1,29 +1,31 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { MatchResult, RoomState } from "@type-battle/shared";
 import {
   createBattleStageViewModel,
   getResultAnimationTransition,
   toRacePosition,
-  type BattleStagePlayer,
   type BattleStageViewModel
 } from "../_lib/battle-stage";
 import { MATCH_RULE_DETAILS } from "../_lib/ui-labels";
 import { CargoObject } from "./cargo-object";
-import { StickFigure, type StickFigurePose } from "./stick-figure";
+import { RaceStage } from "./race-stage";
+import { StagePlayer, getMoverStyle } from "./stage-player";
 
 type BattleStageProps = {
   room: RoomState;
   result: MatchResult | null;
   localPlayerId: string;
+  timeAttackExpired?: boolean;
 };
 
-type StageMoverStyle = CSSProperties & {
-  "--stage-offset": string;
-};
-
-export const BattleStage = memo(function BattleStage({ room, result, localPlayerId }: BattleStageProps) {
+export const BattleStage = memo(function BattleStage({
+  room,
+  result,
+  localPlayerId,
+  timeAttackExpired = false
+}: BattleStageProps) {
   const view = useMemo(
     () => createBattleStageViewModel(room, result, localPlayerId),
     [localPlayerId, result, room]
@@ -52,7 +54,8 @@ export const BattleStage = memo(function BattleStage({ room, result, localPlayer
     return () => window.clearTimeout(timer);
   }, [resultKey]);
 
-  const summary = getStageSummary(view);
+  const hasTimeExpired = view.mode === "timeAttack" && view.phase === "playing" && timeAttackExpired;
+  const summary = getStageSummary(view, hasTimeExpired);
 
   return (
     <section
@@ -74,85 +77,56 @@ export const BattleStage = memo(function BattleStage({ room, result, localPlayer
         <span className="battleStageWall battleStageWallRight" aria-hidden="true" />
         <span className="battleStageGround" aria-hidden="true" />
 
-        {view.players.map((player) => (
-          <StagePlayer key={player.id} player={player} phase={view.phase} />
-        ))}
-
-        <div
-          className="battleStageMover battleStageCargoMover"
-          style={getMoverStyle(50)}
-          data-position="50"
-        >
-          <div className="battleStageCargoInner">
-            <CargoObject />
-          </div>
-        </div>
+        {view.mode === "hpBattle" ? (
+          <StagePreview view={view} />
+        ) : (
+          <RaceStage view={view} timeAttackExpired={hasTimeExpired} />
+        )}
       </div>
 
       <p className="srOnly" role="status" aria-live="polite">
-        {getStageAnnouncement(view)}
+        {getStageAnnouncement(view, hasTimeExpired)}
       </p>
     </section>
   );
 });
 
-function StagePlayer({
-  player,
-  phase
-}: {
-  player: BattleStagePlayer;
-  phase: BattleStageViewModel["phase"];
-}) {
-  const position = toRacePosition(0, player.side);
-  const pose: StickFigurePose = phase === "playing" ? "ready" : "idle";
-
+function StagePreview({ view }: { view: BattleStageViewModel }) {
   return (
-    <div
-      className="battleStageMover battleStagePlayerMover"
-      data-player-id={player.id}
-      data-side={player.side}
-      data-position={position.toFixed(1)}
-      style={getMoverStyle(position)}
-    >
-      <div className="battleStagePlayerInner">
-        <div className="battleStagePlayerLabel">
-          <strong title={player.nickname}>{player.nickname}</strong>
-          <span>{getPlayerSupplement(player)}</span>
+    <div className="battleStagePreview">
+      {view.players.map((player) => (
+        <StagePlayer
+          key={player.id}
+          player={player}
+          position={toRacePosition(0, player.side)}
+          pose={view.phase === "playing" ? "ready" : "idle"}
+        />
+      ))}
+      <div className="battleStageMover battleStageCargoMover" style={getMoverStyle(50)} data-position="50">
+        <div className="battleStageCargoInner">
+          <CargoObject />
         </div>
-        <StickFigure side={player.side} pose={pose} status={player.status} />
       </div>
     </div>
   );
 }
 
-function getMoverStyle(position: number): StageMoverStyle {
-  return { "--stage-offset": `${position - 50}%` };
-}
-
-function getPlayerSupplement(player: BattleStagePlayer): string {
-  if (player.status === "reconnecting") {
-    return "再接続中";
-  }
-  if (player.status === "forfeited") {
-    return "棄権";
-  }
-  if (player.status === "eliminated") {
-    return "敗北";
-  }
-  if (player.isBot) {
-    return "COM";
-  }
-  return player.isLocal ? "あなた" : player.side === "left" ? "左" : "右";
-}
-
-function getStageSummary(view: BattleStageViewModel): string {
+function getStageSummary(view: BattleStageViewModel, timeAttackExpired = false): string {
   if (!view.rightPlayer) {
     return "対戦相手を待っています";
   }
 
   if (view.phase === "result") {
     const winner = view.players.find((player) => player.id === view.winnerId);
-    return winner ? `${winner.nickname} の勝利` : "結果を確認しています";
+    return winner
+      ? view.mode === "timeAttack"
+        ? `サーバー結果: ${winner.nickname} の勝利`
+        : `${winner.nickname} の勝利`
+      : "結果を確認しています";
+  }
+
+  if (timeAttackExpired) {
+    return "時間切れ・サーバー結果を確認中";
   }
 
   if (view.phase === "countdown") {
@@ -166,7 +140,7 @@ function getStageSummary(view: BattleStageViewModel): string {
   return "開始を待っています";
 }
 
-function getStageAnnouncement(view: BattleStageViewModel): string {
+function getStageAnnouncement(view: BattleStageViewModel, timeAttackExpired = false): string {
   const interruptedPlayers = view.players.filter((player) =>
     player.status === "reconnecting" || player.status === "forfeited"
   );
@@ -178,7 +152,11 @@ function getStageAnnouncement(view: BattleStageViewModel): string {
   }
 
   if (view.phase === "result") {
-    return getStageSummary(view);
+    return getStageSummary(view, timeAttackExpired);
+  }
+
+  if (timeAttackExpired) {
+    return "時間切れです。サーバー結果を確認しています";
   }
 
   return "";

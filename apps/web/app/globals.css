@@ -879,6 +879,12 @@ textarea::placeholder {
     var(--surface-strong);
 }
 
+.raceStageScene,
+.battleStagePreview {
+  position: absolute;
+  inset: 0;
+}
+
 .battleStageGround {
   position: absolute;
   right: 14px;
@@ -1000,6 +1006,84 @@ textarea::placeholder {
   transform: scaleX(-1);
 }
 
+.stickFigureBody,
+.stickFigureArm,
+.stickFigureLeg {
+  transform-box: fill-box;
+}
+
+.stickFigureBody {
+  transform-origin: center bottom;
+}
+
+.stickFigureArm,
+.stickFigureLeg {
+  transform-origin: 50% 8%;
+}
+
+.stickFigure[data-pose="ready"] .stickFigureBody {
+  transform: rotate(-4deg);
+}
+
+.stickFigure[data-pose="run"] .stickFigureBody {
+  animation: battleStageRunBob 340ms ease-in-out infinite alternate;
+}
+
+.stickFigure[data-pose="run"] .stickFigureArmFront,
+.stickFigure[data-pose="run"] .stickFigureLegBack {
+  animation: battleStageStrideFront 340ms ease-in-out infinite alternate;
+}
+
+.stickFigure[data-pose="run"] .stickFigureArmBack,
+.stickFigure[data-pose="run"] .stickFigureLegFront {
+  animation: battleStageStrideBack 340ms ease-in-out infinite alternate;
+}
+
+.stickFigure[data-pose="reach"] .stickFigureBody {
+  transform: rotate(-7deg) translateX(2px);
+}
+
+.stickFigure[data-pose="reach"] .stickFigureArmFront {
+  transform: rotate(-34deg) scaleY(1.12);
+}
+
+.stickFigure[data-pose="tired"] .stickFigureBody {
+  transform: translateY(5px) rotate(7deg);
+}
+
+.stickFigure[data-pose="tired"] .stickFigureArmFront,
+.stickFigure[data-pose="tired"] .stickFigureArmBack {
+  transform: rotate(18deg);
+}
+
+.stickFigure[data-pose="win"] .stickFigureBody {
+  transform: translateY(-2px);
+}
+
+.stickFigure[data-pose="win"] .stickFigureArmFront {
+  transform: rotate(-82deg);
+}
+
+.stickFigure[data-pose="win"] .stickFigureArmBack {
+  transform: rotate(82deg);
+}
+
+.stickFigure[data-pose="lose"] .stickFigureBody {
+  transform: translateY(5px) rotate(12deg);
+}
+
+.stickFigure[data-pose="lose"] .stickFigureArmFront {
+  transform: rotate(-18deg);
+}
+
+.battleStagePlayerMover[data-outcome="winner"] .battleStagePlayerLabel strong {
+  color: var(--success);
+}
+
+.battleStagePlayerMover[data-outcome="loser"] .battleStagePlayerLabel strong {
+  color: var(--muted);
+}
+
 .stickFigure[data-status="reconnecting"] {
   opacity: 0.46;
   stroke-dasharray: 5 4;
@@ -1023,6 +1107,89 @@ textarea::placeholder {
   color: color-mix(in srgb, var(--warning) 72%, var(--text));
   background: color-mix(in srgb, var(--warning-soft) 78%, var(--surface-strong));
   box-shadow: 0 4px 0 color-mix(in srgb, var(--warning) 32%, transparent);
+}
+
+.cargoObject[data-claimed-by="left"] {
+  border-left-color: var(--accent);
+}
+
+.cargoObject[data-claimed-by="right"] {
+  border-right-color: var(--accent-2);
+}
+
+.battleStage[data-result-animation="active"] .raceStageScene .battleStagePlayerMover[data-outcome="winner"] .battleStagePlayerInner {
+  animation: battleStageWinnerPop 760ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.battleStage[data-result-animation="active"] .raceStageScene .battleStagePlayerMover[data-outcome="loser"] .battleStagePlayerInner {
+  animation: battleStageLoserStop 620ms ease-out;
+}
+
+.battleStage[data-result-animation="active"] .raceStageScene .battleStageCargoInner {
+  animation: battleStageCargoClaim 760ms cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+@keyframes battleStageRunBob {
+  from {
+    transform: translateY(1px) rotate(-5deg);
+  }
+  to {
+    transform: translateY(-2px) rotate(-3deg);
+  }
+}
+
+@keyframes battleStageStrideFront {
+  from {
+    transform: rotate(-22deg);
+  }
+  to {
+    transform: rotate(24deg);
+  }
+}
+
+@keyframes battleStageStrideBack {
+  from {
+    transform: rotate(24deg);
+  }
+  to {
+    transform: rotate(-22deg);
+  }
+}
+
+@keyframes battleStageWinnerPop {
+  0% {
+    transform: translateX(-50%) translateY(0) rotate(0);
+  }
+  45% {
+    transform: translateX(-50%) translateY(-8px) rotate(-3deg);
+  }
+  100% {
+    transform: translateX(-50%) translateY(0) rotate(0);
+  }
+}
+
+@keyframes battleStageLoserStop {
+  0% {
+    transform: translateX(-50%) rotate(0);
+  }
+  45% {
+    transform: translateX(-50%) rotate(5deg);
+  }
+  100% {
+    transform: translateX(-50%) rotate(0);
+  }
+}
+
+@keyframes battleStageCargoClaim {
+  0% {
+    transform: translateX(-50%) translateY(0) rotate(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-7px) rotate(-2deg);
+  }
+  100% {
+    transform: translateX(-50%) translateY(0) rotate(0);
+  }
 }
 
 .cargoTape {
