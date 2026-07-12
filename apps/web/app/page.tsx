@@ -30,6 +30,7 @@ import type {
   TypingProgress
 } from "@type-battle/shared";
 import { GameHeader } from "./_components/game-header";
+import { BattleStage } from "./_components/battle-stage";
 import { PlayerSettingsModal } from "./_components/player-settings-modal";
 import { ProgressBlock } from "./_components/progress-block";
 import { ResultPanel } from "./_components/result-panel";
@@ -1339,6 +1340,10 @@ export default function HomePage() {
                 <div className="countdown">{Math.max(1, Math.ceil(countdownMs / 1000))}</div>
               ) : null}
 
+              {room ? (
+                <BattleStage room={room} result={result} localPlayerId={playerId} />
+              ) : null}
+
               {activePromptText ? (
                 <TypingPrompt
                   displayText={activePromptText}
@@ -1383,7 +1388,7 @@ export default function HomePage() {
                   isRoomResult={Boolean(room)}
                   onRetry={room ? rematch : retryPractice}
                   practiceMode={activePracticeMode}
-                  {...(room?.matchRule ? { matchRule: room.matchRule } : {})}
+                  {...(room ? { matchRule: activeResult.matchRule ?? room.matchRule } : {})}
                 />
               ) : null}
             </>
