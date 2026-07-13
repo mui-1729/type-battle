@@ -71,7 +71,7 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(guest.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(host.getByText("再戦する")).toBeVisible();
-  await expect(guest.getByText("再戦する")).toBeVisible();
+  await expect(guest.getByText("ホストが再戦を開始するのを待っています。")).toBeVisible();
 
   await hostContext.close();
   await guestContext.close();
@@ -98,7 +98,7 @@ test("rejoins the room after reload", async ({ browser }) => {
 });
 
 test("plays all three stage modes against COM and resets between rematches", async ({ browser }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
 
   const hostContext = await browser.newContext();
   const host = await hostContext.newPage();
@@ -115,12 +115,11 @@ test("plays all three stage modes against COM and resets between rematches", asy
   ] as const;
 
   for (const [index, mode] of modes.entries()) {
-    if (index > 0) {
-      await host.getByRole("button", { name: new RegExp(`^${mode.label}`) }).click();
-      await expect(host.getByTestId("battle-stage")).toHaveAttribute("data-mode", mode.key);
+    if (index === 0) {
+      await host.locator(".lobbyActions .primaryButton").click();
+    } else {
+      await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
     }
-
-    await host.locator(".lobbyActions .primaryButton").click();
     await expect(host.getByLabel("ルーム操作").getByText("COM (Normal)", { exact: true })).toBeVisible();
     await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
@@ -146,15 +145,22 @@ test("plays all three stage modes against COM and resets between rematches", asy
       await expect.poll(async () => Number(await localPlayer.getAttribute("data-position"))).toBeGreaterThan(14);
     }
 
-    await input.pressSequentially(guide.slice(splitIndex), { delay: 2 });
-    await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 8_000 });
+    if (mode.key === "timeAttack") {
+      await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 40_000 });
+    } else {
+      await input.pressSequentially(guide.slice(splitIndex), { delay: 2 });
+      await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 8_000 });
+    }
     await expect(stage).toHaveAttribute("data-phase", "result");
     await expect(stage).not.toHaveAttribute("data-winner-id", "none");
     await expect(host.locator(".resultPanel").getByText("COM (Normal)", { exact: true })).toBeVisible();
 
     if (index < modes.length - 1) {
+      const nextMode = modes[index + 1];
+      await host.getByRole("button", { name: new RegExp("^" + nextMode.label) }).click();
       await host.getByRole("button", { name: "再戦する" }).click();
-      await expect(stage).toHaveAttribute("data-phase", "waiting");
+      await expect(stage).toHaveAttribute("data-phase", "countdown");
+      await expect(stage).toHaveAttribute("data-mode", nextMode.key);
       await expect(stage).toHaveAttribute("data-winner-id", "none");
       await expect(stage).toHaveAttribute("data-result-animation", "idle");
       await expect(stage.locator('.battleStagePlayerMover[data-side="left"]')).toHaveAttribute("data-progress", "0.000");
