@@ -93,11 +93,7 @@ export const BattleStage = memo(function BattleStage({
   );
 });
 
-function getStageSummary(view: BattleStageViewModel, timeAttackExpired = false): string {
-  if (!view.rightPlayer) {
-    return "対戦相手を待っています";
-  }
-
+export function getStageSummary(view: BattleStageViewModel, timeAttackExpired = false): string {
   if (view.phase === "result") {
     const winner = view.players.find((player) => player.id === view.winnerId);
     return winner
@@ -105,6 +101,10 @@ function getStageSummary(view: BattleStageViewModel, timeAttackExpired = false):
         ? `サーバー結果: ${winner.nickname} の勝利`
         : `${winner.nickname} の勝利`
       : "結果を確認しています";
+  }
+
+  if (!view.rightPlayer) {
+    return "対戦相手を待っています";
   }
 
   if (timeAttackExpired) {

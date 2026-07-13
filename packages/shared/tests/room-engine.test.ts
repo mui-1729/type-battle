@@ -90,9 +90,10 @@ describe("room engine config", () => {
 
     expect(finished).toMatchObject({
       roomCode: created.room.roomCode,
-      matchRule: "timeAttack"
+      matchRule: "timeAttack",
+      status: "playing"
     });
-    expect(finished && "maxPlayers" in finished).toBe(false);
+    expect(finished && "maxPlayers" in finished).toBe(true);
   });
 
   it("ignores invalid prompts when selecting a room prompt", () => {

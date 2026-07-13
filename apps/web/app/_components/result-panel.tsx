@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { RotateCcw } from "lucide-react";
 import type { MatchResult } from "@type-battle/shared";
 import type { MatchRule } from "@type-battle/shared";
@@ -10,9 +9,21 @@ type ResultPanelProps = {
   onRetry: () => void;
   matchRule?: MatchRule;
   practiceMode?: "practice" | "daily";
+  canRetry?: boolean;
+  retryPending?: boolean;
+  retryError?: string;
 };
 
-export function ResultPanel({ result, isRoomResult, onRetry, matchRule, practiceMode = "practice" }: ResultPanelProps) {
+export function ResultPanel({
+  result,
+  isRoomResult,
+  onRetry,
+  matchRule,
+  practiceMode = "practice",
+  canRetry = true,
+  retryPending = false,
+  retryError = ""
+}: ResultPanelProps) {
   const title = isRoomResult
     ? matchRule
       ? `${MATCH_RULE_DETAILS[matchRule].label}の記録`
@@ -46,13 +57,27 @@ export function ResultPanel({ result, isRoomResult, onRetry, matchRule, practice
         ))}
       </div>
       <div className="resultActions">
-        <button className="primaryButton" type="button" onClick={onRetry}>
-          <RotateCcw size={18} />
-          {retryLabel}
-        </button>
-        <Link className="secondaryButton" href="/feedback">
-          不具合を報告
-        </Link>
+        {canRetry ? (
+          <button
+            className="primaryButton"
+            type="button"
+            onClick={onRetry}
+            disabled={retryPending}
+            aria-busy={retryPending}
+          >
+            <RotateCcw size={18} />
+            {retryPending && isRoomResult ? "再戦を開始しています…" : retryLabel}
+          </button>
+        ) : (
+          <p className="infoText" role="status">
+            ホストが再戦を開始するのを待っています。
+          </p>
+        )}
+        {retryError ? (
+          <p className="errorText" role="alert">
+            {retryError}
+          </p>
+        ) : null}
       </div>
     </div>
   );

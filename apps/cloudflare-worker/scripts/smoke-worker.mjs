@@ -13,6 +13,14 @@ if (!healthResponse.ok) {
   process.exit(1);
 }
 
+const health = await healthResponse.json();
+const expectedCommitSha = process.env.COMMIT_SHA;
+
+if (expectedCommitSha && health.commitSha !== expectedCommitSha) {
+  console.error(`Deployed commit mismatch: expected ${expectedCommitSha}, received ${health.commitSha ?? "unknown"}`);
+  process.exit(1);
+}
+
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const roomCode = Array.from(crypto.getRandomValues(new Uint8Array(6)), (value) => ROOM_CODE_ALPHABET[value & 31]).join("");
 const wsUrl = new URL(`/rooms/${roomCode}/socket`, workerUrl);
@@ -20,10 +28,40 @@ wsUrl.protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:";
 
 await new Promise((resolve, reject) => {
   const socket = new WebSocket(wsUrl);
+  const guestId = `smoke-${crypto.randomUUID()}`;
+  const sessionId = crypto.randomUUID();
+  let playerId = "";
+  let prompt = null;
+  let progressSent = false;
+  let settled = false;
   const timeout = setTimeout(() => {
     socket.close();
-    reject(new Error("WebSocket smoke test timed out."));
-  }, 5_000);
+    reject(new Error("WebSocket progress smoke test timed out."));
+  }, 15_000);
+
+  const finish = (error) => {
+    if (settled) {
+      return;
+    }
+
+    settled = true;
+    clearTimeout(timeout);
+
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({
+        id: crypto.randomUUID(),
+        type: "client:room:leave",
+        payload: { roomCode }
+      }));
+      socket.close();
+    }
+
+    if (error) {
+      reject(error);
+    } else {
+      resolve();
+    }
+  };
 
   socket.once("open", () => {
     socket.send(JSON.stringify({
@@ -31,8 +69,8 @@ await new Promise((resolve, reject) => {
       type: "client:room:create",
       payload: {
         nickname: "Smoke",
-        guestId: `smoke-${crypto.randomUUID()}`,
-        sessionId: crypto.randomUUID(),
+        guestId,
+        sessionId,
         deviceKind: "desktop"
       }
     }));
@@ -41,26 +79,66 @@ await new Promise((resolve, reject) => {
   socket.on("message", (rawMessage) => {
     try {
       const message = JSON.parse(rawMessage.toString());
-      if (message.type !== "server:ack" || !message.payload?.ok) {
+
+      if (message.type === "server:ack" && message.command === "client:room:create") {
+        if (!message.payload?.ok) {
+          finish(new Error(`Room creation failed: ${message.payload?.error ?? "unknown error"}`));
+          return;
+        }
+
+        playerId = message.payload.data.playerId;
+        socket.send(JSON.stringify({
+          id: crypto.randomUUID(),
+          type: "client:match:start",
+          payload: { roomCode }
+        }));
         return;
       }
-      clearTimeout(timeout);
-      socket.send(JSON.stringify({
-        id: crypto.randomUUID(),
-        type: "client:room:leave",
-        payload: { roomCode }
-      }));
-      socket.close();
-      resolve();
+
+      if (message.type === "server:ack" && message.command === "client:match:start") {
+        if (!message.payload?.ok) {
+          finish(new Error(`Match start failed: ${message.payload?.error ?? "unknown error"}`));
+          return;
+        }
+
+        prompt = message.payload.data.prompt ?? null;
+        return;
+      }
+
+      if (message.type === "server:match:started" && !progressSent) {
+        prompt = message.payload?.prompt ?? prompt;
+        const typing = prompt?.typing?.romaji;
+
+        if (!typing) {
+          finish(new Error("Match started without a romaji prompt."));
+          return;
+        }
+
+        progressSent = true;
+        socket.send(JSON.stringify({
+          id: crypto.randomUUID(),
+          type: "client:typing:progress",
+          payload: {
+            roomCode,
+            input: Array.from(typing).slice(0, 16).join(""),
+            sequence: 1
+          }
+        }));
+        return;
+      }
+
+      if (progressSent && (message.type === "server:room:state" || message.type === "server:player:progress")) {
+        const player = message.payload?.players?.find((candidate) => candidate.id === playerId);
+        if ((player?.progressIndex ?? 0) > 0) {
+          finish();
+        }
+      }
     } catch (error) {
-      clearTimeout(timeout);
-      socket.close();
-      reject(error);
+      finish(error);
     }
   });
 
   socket.once("error", (error) => {
-    clearTimeout(timeout);
-    reject(error);
+    finish(error);
   });
 });

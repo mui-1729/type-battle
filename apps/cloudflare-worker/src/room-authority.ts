@@ -6,9 +6,9 @@ import {
   calculateAccuracy,
   calculateWpm,
   createEmptyProgress,
+  getPromptsByCategory,
   getRomajiTypingUnitIndex,
   pickPrompt,
-  PROMPTS,
   rankPlayers
 } from "@type-battle/shared";
 import { isValidRoomCode, normalizeNickname, validateNickname } from "@type-battle/shared";
@@ -124,6 +124,7 @@ type PersistedPlayerTypingState = {
 };
 
 type RoomAuthorityEnv = {
+  TIME_ATTACK_MS?: string | number;
   GATEWAY?: {
     getByName(name: string): {
       fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
@@ -181,6 +182,7 @@ const ROOM_SNAPSHOT_SCHEMA_VERSION = 2;
 const GUEST_SESSION_STORAGE_PREFIX = "guest-session:";
 const MATCH_RESULT_STORAGE_PREFIX = "match-result:";
 const BOT_TICK_MS = 500;
+const DEFAULT_TIME_ATTACK_MS = 30_000;
 const WAITING_IDLE_TTL_MS = 60_000;
 const ABANDONED_ROOM_TTL_MS = 60_000;
 const FINISHED_RESULT_RETENTION_MS = 5 * 60_000;
@@ -741,12 +743,13 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
+    this.clearMatchTimers();
+    await this.persistRoom(result.roomCode);
     this.broadcastToAll({
       id: crypto.randomUUID(),
       type: "server:match:result",
       payload: result
     });
-    this.schedulePersistRoom(result.roomCode);
   }
 
   private async handleTypingFinish(socketId: string, payload: unknown): Promise<void> {
@@ -769,12 +772,13 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
+    this.clearMatchTimers();
+    await this.persistRoom(result.roomCode);
     this.broadcastToAll({
       id: crypto.randomUUID(),
       type: "server:match:result",
       payload: result
     });
-    this.schedulePersistRoom(result.roomCode);
   }
 
   private async handleRematch(socketId: string, messageId: string, payload: unknown): Promise<void> {
@@ -793,8 +797,16 @@ export class RoomAuthorityDurableObject {
     }
 
     this.sendAck(socketId, messageId, "client:match:rematch", { ok: true, data: result.room });
-    this.broadcastRoomState(result.room);
+    this.broadcastToAll({
+      id: crypto.randomUUID(),
+      type: "server:match:countdown",
+      payload: {
+        room: result.room,
+        serverStartAt: result.room.serverStartAt ?? Date.now()
+      }
+    });
     void this.persistRoom(result.room.roomCode);
+    this.scheduleMatchStart(result.room.roomCode);
   }
 
   private broadcastRoomState(room: InternalRoom | RoomState): void {
@@ -1077,7 +1089,7 @@ export class RoomAuthorityDurableObject {
   }
 
   private scheduleMatchStart(roomCode: string): void {
-    this.clearRoomTimers();
+    this.clearMatchTimers();
 
     const room = this.room;
     if (!room || normalizeRoomCode(room.roomCode) !== normalizeRoomCode(roomCode) || !room.serverStartAt) {
@@ -1088,6 +1100,10 @@ export class RoomAuthorityDurableObject {
       const playingRoom = this.markPlaying(roomCode);
 
       if (!playingRoom) {
+        if (this.room) {
+          this.broadcastRoomState(this.room);
+          void this.persistRoom(roomCode);
+        }
         return;
       }
 
@@ -1120,7 +1136,7 @@ export class RoomAuthorityDurableObject {
         const currentRoom = this.room;
 
         if (!currentRoom || currentRoom.status !== "playing") {
-          this.clearRoomTimers();
+          this.clearMatchTimers();
         }
 
         return;
@@ -1136,8 +1152,8 @@ export class RoomAuthorityDurableObject {
         if (currentRoom) {
           this.broadcastRoomState(currentRoom);
         }
+        this.clearMatchTimers();
         void this.persistRoom(roomCode);
-        this.clearRoomTimers();
         return;
       }
 
@@ -1146,7 +1162,7 @@ export class RoomAuthorityDurableObject {
     }, BOT_TICK_MS);
   }
 
-  private clearRoomTimers(): void {
+  private clearMatchTimers(): void {
     if (this.timers.countdown) {
       clearTimeout(this.timers.countdown);
     }
@@ -1155,13 +1171,13 @@ export class RoomAuthorityDurableObject {
       clearInterval(this.timers.bot);
     }
 
-    if (this.timers.persist) {
-      clearTimeout(this.timers.persist);
-    }
-
     this.timers.countdown = undefined;
     this.timers.bot = undefined;
-    this.timers.persist = undefined;
+  }
+
+  private clearRoomTimers(): void {
+    this.clearMatchTimers();
+    this.clearPersistTimer();
   }
 
   private clearPersistTimer(): void {
@@ -1189,6 +1205,46 @@ export class RoomAuthorityDurableObject {
     await this.scheduleMaintenanceAlarm();
   }
 
+  private async cleanupDisconnectedPlayers(): Promise<void> {
+    const room = this.room;
+    if (!room || (room.status !== "waiting" && room.status !== "finished")) {
+      return;
+    }
+
+    const hasConnectedHuman = [...room.players.values()].some((player) => player.connected && !player.isBot);
+    if (!hasConnectedHuman) {
+      return;
+    }
+
+    const now = Date.now();
+    const expiredPlayers = [...room.players.values()].filter(
+      (player) => !player.isBot && !player.connected && player.disconnectedAt !== undefined && now >= player.disconnectedAt + DISCONNECT_GRACE_MS
+    );
+    if (expiredPlayers.length === 0) {
+      return;
+    }
+
+    for (const player of expiredPlayers) {
+      room.players.delete(player.id);
+      this.playerSessions.delete(player.id);
+    }
+    ensureConnectedHost(room);
+
+    if (room.status === "finished") {
+      room.status = "waiting";
+      room.round += 1;
+      delete room.prompt;
+      delete room.result;
+      delete room.serverStartAt;
+      delete room.matchEndsAt;
+      delete room.finishedAt;
+      resetPlayers(room, true);
+    }
+
+    room.lastActivityAt = now;
+    this.broadcastRoomState(room);
+    await this.persistRoom(room.roomCode);
+  }
   private async handleForfeits(): Promise<void> {
     if (!this.room || this.room.status !== "playing") {
       await this.scheduleMaintenanceAlarm();
@@ -1200,7 +1256,7 @@ export class RoomAuthorityDurableObject {
     for (const player of this.room.players.values()) {
       if (!player.connected && player.disconnectedAt) {
         const elapsed = Date.now() - player.disconnectedAt;
-        if (elapsed > DISCONNECT_GRACE_MS && !player.forfeited) {
+        if (elapsed >= DISCONNECT_GRACE_MS && !player.forfeited) {
           player.finishedAt = Date.now();
           delete player.finishTimeMs;
           player.finishStatus = "forfeited";
@@ -1242,13 +1298,14 @@ export class RoomAuthorityDurableObject {
       payload: result
     });
     this.broadcastRoomState(this.room);
-    this.clearRoomTimers();
+    this.clearMatchTimers();
     await this.persistRoom(this.room.roomCode);
     await this.scheduleMaintenanceAlarm();
   }
 
   private async runMaintenance(): Promise<void> {
     await this.cleanupStaleRoom();
+    await this.cleanupDisconnectedPlayers();
     await this.handleForfeits();
     await this.handleTimeAttackExpirations();
     await this.cleanupRetentionRecords();
@@ -1312,20 +1369,19 @@ export class RoomAuthorityDurableObject {
       addDeadline(expirationDeadline);
     }
 
-    if (this.room.status === "playing") {
+    const hasConnectedHuman = [...this.room.players.values()].some((player) => player.connected && !player.isBot);
+    if (this.room.status === "playing" || hasConnectedHuman) {
       for (const player of this.room.players.values()) {
         if (player.connected || !player.disconnectedAt) {
           continue;
         }
 
-        const deadline = player.disconnectedAt + DISCONNECT_GRACE_MS;
-        addDeadline(deadline);
+        addDeadline(player.disconnectedAt + DISCONNECT_GRACE_MS);
       }
+    }
 
-      if (this.room.matchRule === "timeAttack" && this.room.matchEndsAt !== undefined) {
-        const deadline = this.room.matchEndsAt;
-        addDeadline(deadline);
-      }
+    if (this.room.status === "playing" && this.room.matchRule === "timeAttack" && this.room.matchEndsAt !== undefined) {
+      addDeadline(this.room.matchEndsAt);
     }
 
     return nextAlarmAt;
@@ -1732,18 +1788,26 @@ export class RoomAuthorityDurableObject {
       return { error: "切断中のプレイヤーがいます。" };
     }
 
+    let prompt: Prompt;
+    try {
+      prompt = selectPromptForRoom(context.room, Date.now());
+    } catch {
+      return { error: "有効な課題文がありません。" };
+    }
+
     context.room.status = "countdown";
-    context.room.prompt = selectPromptForRoom(context.room, Date.now());
-    if (!context.room.promptHistory.includes(context.room.prompt.id)) {
-      context.room.promptHistory.push(context.room.prompt.id);
+    context.room.prompt = prompt;
+    if (!context.room.promptHistory.includes(prompt.id)) {
+      context.room.promptHistory.push(prompt.id);
     }
     context.room.serverStartAt = Date.now() + COUNTDOWN_MS;
     if (context.room.matchRule === "timeAttack") {
-      context.room.matchEndsAt = context.room.serverStartAt + 30_000;
+      context.room.matchEndsAt = context.room.serverStartAt + getTimeAttackDurationMs(this.env.TIME_ATTACK_MS);
     } else {
       delete context.room.matchEndsAt;
     }
     delete context.room.result;
+    delete context.room.finishedAt;
     resetPlayers(context.room);
     context.room.lastActivityAt = Date.now();
     return { room: toPublicRoom(context.room) };
@@ -1751,6 +1815,12 @@ export class RoomAuthorityDurableObject {
 
   private markPlaying(roomCode: string): RoomState | null {
     if (!this.room || normalizeRoomCode(roomCode) !== normalizeRoomCode(this.room.roomCode) || this.room.status !== "countdown") {
+      return null;
+    }
+
+    const humans = [...this.room.players.values()].filter((player) => !player.isBot);
+    if (humans.length === 0 || humans.some((player) => !player.connected)) {
+      abortCountdown(this.room);
       return null;
     }
 
@@ -1767,6 +1837,10 @@ export class RoomAuthorityDurableObject {
     const context = this.getContext(socketId, payload.roomCode);
     if (!context || context.room.status !== "playing" || !context.room.prompt) {
       return null;
+    }
+
+    if (isTimeAttackExpired(context.room, Date.now())) {
+      return this.finalizeRoom(context.room);
     }
 
     if (!applyTypingInput(context.player, context.room, payload)) {
@@ -1792,10 +1866,18 @@ export class RoomAuthorityDurableObject {
       return null;
     }
 
+    if (isTimeAttackExpired(context.room, Date.now())) {
+      return this.finalizeRoom(context.room);
+    }
+
     if (!applyTypingInput(context.player, context.room, payload)) {
       return null;
     }
     context.room.lastActivityAt = Date.now();
+
+    if (context.room.matchRule === "timeAttack") {
+      return toPublicRoom(context.room);
+    }
 
     const promptLength = getTypingLength(context.room, context.player);
     if (context.player.progressIndex >= promptLength) {
@@ -1832,15 +1914,36 @@ export class RoomAuthorityDurableObject {
       return { error: "終了した試合だけ再戦できます。" };
     }
 
-    context.room.status = "waiting";
-    context.room.round += 1;
-    context.room.prompt = selectPromptForRoom(context.room, Date.now() + context.room.round);
-    if (!context.room.promptHistory.includes(context.room.prompt.id)) {
-      context.room.promptHistory.push(context.room.prompt.id);
+    if ([...context.room.players.values()].some((player) => !player.isBot && !player.connected)) {
+      return { error: "切断中のプレイヤーがいるため再戦できません。" };
     }
-    delete context.room.serverStartAt;
-    delete context.room.matchEndsAt;
+
+    if (context.room.players.size < MAX_PLAYERS) {
+      addBotPlayer(context.room);
+    }
+
+    const nextRound = context.room.round + 1;
+    let prompt: Prompt;
+    try {
+      prompt = selectPromptForRoom(context.room, Date.now() + nextRound);
+    } catch {
+      return { error: "有効な課題文がありません。" };
+    }
+
+    context.room.round = nextRound;
+    context.room.status = "countdown";
+    context.room.prompt = prompt;
+    if (!context.room.promptHistory.includes(prompt.id)) {
+      context.room.promptHistory.push(prompt.id);
+    }
+    context.room.serverStartAt = Date.now() + COUNTDOWN_MS;
+    if (context.room.matchRule === "timeAttack") {
+      context.room.matchEndsAt = context.room.serverStartAt + getTimeAttackDurationMs(this.env.TIME_ATTACK_MS);
+    } else {
+      delete context.room.matchEndsAt;
+    }
     delete context.room.result;
+    delete context.room.finishedAt;
     resetPlayers(context.room);
     context.room.lastActivityAt = Date.now();
     return { room: toPublicRoom(context.room) };
@@ -1859,10 +1962,21 @@ export class RoomAuthorityDurableObject {
     const room = this.room;
     const player = room.players.get(record.playerId ?? "");
 
+    const countdownAborted = room.status === "countdown";
     if (player) {
       player.connected = false;
       player.ready = false;
       player.disconnectedAt = Date.now();
+    }
+
+    if (countdownAborted) {
+      this.clearMatchTimers();
+      abortCountdown(room);
+      this.broadcastToAll({
+        id: crypto.randomUUID(),
+        type: "server:error",
+        payload: { message: "相手が退出したため開始を中止しました。" }
+      });
     }
 
     room.lastActivityAt = Date.now();
@@ -1900,6 +2014,7 @@ export class RoomAuthorityDurableObject {
     }
 
     room.players.delete(record.playerId ?? "");
+    this.playerSessions.delete(player.id);
     room.lastActivityAt = Date.now();
 
     if (room.players.size === 0) {
@@ -1941,8 +2056,12 @@ export class RoomAuthorityDurableObject {
       return null;
     }
 
+    if (isTimeAttackExpired(this.room, Date.now())) {
+      return { type: "result", result: this.finalizeRoom(this.room) };
+    }
+
     const bot = [...this.room.players.values()].find((player) => player.isBot);
-    if (!bot || bot.progressIndex >= getTypingLength(this.room, bot)) {
+    if (!bot || (this.room.matchRule !== "timeAttack" && bot.progressIndex >= getTypingLength(this.room, bot))) {
       return null;
     }
 
@@ -1955,7 +2074,7 @@ export class RoomAuthorityDurableObject {
     applyBotProgress(bot, this.room, charsToAdd, speed, isMistake);
 
     const promptLength = getTypingLength(this.room, bot);
-    if (bot.progressIndex >= promptLength) {
+    if (this.room.matchRule !== "timeAttack" && bot.progressIndex >= promptLength) {
       bot.finishedAt = Date.now();
       bot.finishTimeMs = bot.finishedAt - (this.room.serverStartAt ?? bot.finishedAt);
       bot.finishStatus = "finished";
@@ -1985,6 +2104,10 @@ export class RoomAuthorityDurableObject {
   }
 
   private maybeFinalizeRoom(room: InternalRoom): MatchResult | null {
+    if (room.matchRule === "timeAttack") {
+      return null;
+    }
+
     if (room.matchRule === "hpBattle") {
       const hasElimination = [...room.players.values()].some((player) => (player.hp ?? 1) <= 0);
 
@@ -2353,7 +2476,7 @@ function formatBotNickname(difficulty: BotDifficulty): string {
 }
 
 function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
-  const prompts = PROMPTS.filter((prompt) => prompt.category === room.promptCategory);
+  const prompts = getPromptsByCategory(room.promptCategory);
   const unseenPrompts = prompts.filter((prompt) => !room.promptHistory.includes(prompt.id));
   const pool = unseenPrompts.length > 0 ? unseenPrompts : prompts;
 
@@ -2371,7 +2494,7 @@ function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
   return selected;
 }
 
-function resetPlayers(room: InternalRoom): void {
+function resetPlayers(room: InternalRoom, preserveConnectionState = false): void {
   const promptLength = room.prompt ? getPromptCanonicalLength(room.prompt) : 0;
   const maxHp = room.matchRule === "hpBattle" ? Math.max(HP_BATTLE_MIN_HP, promptLength * HP_BATTLE_HP_PER_PROMPT_CHAR) : undefined;
 
@@ -2397,7 +2520,9 @@ function resetPlayers(room: InternalRoom): void {
     }
     delete player.forfeited;
     delete player.finishStatus;
-    delete player.disconnectedAt;
+    if (!preserveConnectionState) {
+      delete player.disconnectedAt;
+    }
     delete player.finishedAt;
     delete player.finishTimeMs;
   }
@@ -2413,8 +2538,69 @@ function getTypingLength(room: InternalRoom, player: InternalPlayer | PlayerStat
   return getPromptCanonicalLength(prompt);
 }
 
+function getTimeAttackDurationMs(value: string | number | undefined): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_TIME_ATTACK_MS;
+}
+
+function isTimeAttackExpired(room: InternalRoom, now: number): boolean {
+  return room.matchRule === "timeAttack" && room.matchEndsAt !== undefined && now >= room.matchEndsAt;
+}
+
+function containsKana(value: string): boolean {
+  return /[\u3040-\u30ff]/u.test(value);
+}
+
+function getRomajiProgressIndexForCanonicalProgress(
+  plan: ReturnType<typeof buildRomajiTypingPlan>,
+  canonicalProgressIndex: number,
+  loop: boolean
+): number {
+  const canonicalLength = plan.units.reduce((total, unit) => total + Array.from(unit.hiragana).length, 0);
+  if (!plan.guide || canonicalLength <= 0) {
+    return 0;
+  }
+
+  const cycles = loop ? Math.floor(canonicalProgressIndex / canonicalLength) : 0;
+  const cursor = loop ? modulo(canonicalProgressIndex, canonicalLength) : canonicalProgressIndex;
+  let canonicalCursor = 0;
+  let guideCursor = 0;
+
+  for (const unit of plan.units) {
+    const unitLength = Array.from(unit.hiragana).length;
+    if (canonicalCursor + unitLength > cursor) {
+      break;
+    }
+    canonicalCursor += unitLength;
+    guideCursor += unit.guide.length;
+  }
+
+  return cycles * plan.guide.length + guideCursor;
+}
+
+function modulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function abortCountdown(room: InternalRoom): void {
+  room.status = "waiting";
+  delete room.prompt;
+  delete room.serverStartAt;
+  delete room.matchEndsAt;
+  delete room.result;
+  delete room.finishedAt;
+  resetPlayers(room, true);
+  room.lastActivityAt = Date.now();
+}
 function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): boolean {
   if (!isValidTypingProgressPayload(payload) || payload.sequence !== player.lastInputSequence + 1) {
+    console.warn(JSON.stringify({
+      event: "typing_progress_rejected",
+      roomCode: room.roomCode,
+      playerId: player.id,
+      receivedSequence: payload.sequence,
+      expectedSequence: player.lastInputSequence + 1
+    }));
     return false;
   }
 
@@ -2425,41 +2611,63 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
   }
 
   const promptLength = getTypingLength(room, player);
+  if (promptLength <= 0 || !room.prompt) {
+    return false;
+  }
+
   const previousProgressIndex = player.progressIndex;
   const previousMistakes = player.mistakes;
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
+  const timeAttack = room.matchRule === "timeAttack";
+  const kanaInput = player.deviceKind === "mobile" || containsKana(payload.input);
   let progressDelta = 0;
 
-  if (player.deviceKind === "mobile") {
+  if (kanaInput) {
     for (const typedChar of Array.from(payload.input)) {
+      const expectedIndex = timeAttack ? modulo(player.progressIndex, promptLength) : player.progressIndex;
       const before = createProgressState(player);
-      const after = advanceProgress(before, room.prompt?.typing.hiragana[player.progressIndex], typedChar);
+      const after = advanceProgress(before, room.prompt.typing.hiragana[expectedIndex], typedChar);
       applyProgressState(player, after);
+      player.progressIndex = after.progressIndex;
       progressDelta += Math.max(after.progressIndex - before.progressIndex, 0);
     }
+
+    if (player.deviceKind === "desktop") {
+      const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
+      player.typingProgressIndex = getRomajiProgressIndexForCanonicalProgress(plan, player.progressIndex, timeAttack);
+    }
   } else {
-    const plan = buildRomajiTypingPlan(room.prompt?.typing.hiragana ?? "");
+    const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
+    const guideLength = plan.guide.length;
 
     for (const typedChar of Array.from(payload.input)) {
-      const before = createProgressState(player, player.typingProgressIndex);
+      const cursor = timeAttack && guideLength > 0
+        ? modulo(player.typingProgressIndex, guideLength)
+        : player.typingProgressIndex;
+      const cycleBase = timeAttack ? player.typingProgressIndex - cursor : 0;
+      const before = createProgressState(player, cursor);
       const beforeUnitIndex = getRomajiTypingUnitIndex(plan, before.progressIndex);
       const after = advanceRomajiProgress(before, plan, typedChar);
       const completedUnit = after.progressIndex > before.progressIndex ? plan.units[beforeUnitIndex] : undefined;
 
       applyProgressState(player, after);
-      player.typingProgressIndex = after.progressIndex;
+      player.typingProgressIndex = cycleBase + after.progressIndex;
 
       if (completedUnit) {
         const canonicalDelta = Array.from(completedUnit.hiragana).length;
-        player.progressIndex = clamp(player.progressIndex + canonicalDelta, 0, promptLength);
+        player.progressIndex = timeAttack
+          ? player.progressIndex + canonicalDelta
+          : clamp(player.progressIndex + canonicalDelta, 0, promptLength);
         progressDelta += canonicalDelta;
       }
     }
   }
 
-  player.progressIndex = clamp(player.progressIndex, 0, promptLength);
-  player.wpm = calculateWpm(player.correctCharacters, now - startedAt);
+  if (!timeAttack) {
+    player.progressIndex = clamp(player.progressIndex, 0, promptLength);
+  }
+  player.wpm = calculateWpm(player.progressIndex, now - startedAt);
   player.accuracy = calculateAccuracy(player.correctCharacters, player.totalTypedCharacters);
 
   if (room.matchRule === "hpBattle") {
@@ -2485,7 +2693,7 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
     }
   }
 
-  if (player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
+  if (!timeAttack && player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
     player.finishedAt = now;
     player.finishTimeMs = now - startedAt;
     player.finishStatus = "finished";
@@ -2493,8 +2701,11 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
 
   return true;
 }
-
 function areHumansFinished(room: InternalRoom): boolean {
+  if (room.matchRule === "timeAttack") {
+    return false;
+  }
+
   return [...room.players.values()]
     .filter((p) => !p.isBot)
     .every((p) => {
@@ -2530,7 +2741,9 @@ function applyBotProgress(
   const promptLength = getTypingLength(room, bot);
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
-  const progressDelta = Math.min(charsToAdd, Math.max(promptLength - bot.progressIndex, 0));
+  const progressDelta = room.matchRule === "timeAttack"
+    ? charsToAdd
+    : Math.min(charsToAdd, Math.max(promptLength - bot.progressIndex, 0));
 
   bot.totalTypedCharacters += totalTypedDelta;
 

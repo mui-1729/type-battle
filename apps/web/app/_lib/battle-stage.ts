@@ -174,12 +174,16 @@ export function createBattleStageViewModel(
 ): BattleStageViewModel {
   const effectiveResult = result ?? room.result ?? null;
   const resultPlayers = new Map(effectiveResult?.players.map((player) => [player.id, player]) ?? []);
+  const displayPlayers = new Map(room.players.map((player) => [player.id, player]));
+  for (const resultPlayer of effectiveResult?.players ?? []) {
+    displayPlayers.set(resultPlayer.id, resultPlayer);
+  }
   const prompt = room.prompt ?? effectiveResult?.prompt;
   const promptLength = prompt ? Array.from(prompt.typing.hiragana).length : 0;
-  const { leftPlayerId, rightPlayerId } = assignBattleSides(room.players, localPlayerId);
+  const { leftPlayerId, rightPlayerId } = assignBattleSides([...displayPlayers.values()], localPlayerId);
   const winnerId = effectiveResult?.players.find((player) => player.rank === 1)?.id ?? null;
 
-  const players = room.players.map((roomPlayer): BattleStagePlayer => {
+  const players = [...displayPlayers.values()].map((roomPlayer): BattleStagePlayer => {
     const resultPlayer = resultPlayers.get(roomPlayer.id);
     const player = resultPlayer ?? roomPlayer;
     const side: BattleSide = player.id === rightPlayerId ? "right" : "left";
@@ -192,7 +196,9 @@ export function createBattleStageViewModel(
       isBot: player.isBot,
       connected: player.connected,
       status: getBattlePlayerStatus(player, Boolean(effectiveResult), room.status),
-      progressRatio: toProgressRatio(player.progressIndex, promptLength),
+      progressRatio: resultPlayer?.finishStatus === "finished"
+        ? 1
+        : toProgressRatio(player.progressIndex, promptLength),
       ...(player.hp !== undefined ? { hp: player.hp } : {}),
       ...(player.maxHp !== undefined ? { maxHp: player.maxHp } : {}),
       ...(player.finishStatus !== undefined ? { finishStatus: player.finishStatus } : {}),
