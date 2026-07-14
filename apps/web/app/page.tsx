@@ -494,7 +494,8 @@ export default function HomePage() {
       storedRoomJoinAttemptsRef.current = 0;
       storedRoomJoinInFlightRef.current = false;
       window.localStorage.removeItem(ROOM_CODE_KEY);
-      setStoredRoomRecovery({ status: "failed", message });
+      setStoredRoomRecovery({ status: "idle", message: "" });
+      setError(message);
       connectPracticeSocket();
     },
     [clearStoredRoomRetryTimer, connectPracticeSocket]
@@ -576,6 +577,12 @@ export default function HomePage() {
   }, [attemptStoredRoomJoin]);
 
   const retryStoredRoomJoin = useCallback(() => {
+    const storedRoomCode = storedRoomCodeRef.current;
+    if (!storedRoomCode) {
+      setStoredRoomRecovery({ status: "idle", message: "" });
+      return;
+    }
+
     storedRoomJoinAttemptsRef.current = 0;
     setStoredRoomRecovery({ status: "reconnecting", message: "保存済みルームへ再接続しています…" });
     const socket = socketRef.current;
@@ -585,10 +592,7 @@ export default function HomePage() {
       return;
     }
 
-    const storedRoomCode = storedRoomCodeRef.current;
-    if (storedRoomCode) {
-      connectRoomSocket(storedRoomCode);
-    }
+    connectRoomSocket(storedRoomCode);
   }, [connectRoomSocket]);
 
   const startPractice = useCallback(() => {
@@ -1053,6 +1057,10 @@ export default function HomePage() {
         return;
       }
 
+      if (!acceptingTextInput) {
+        return;
+      }
+
       if (
         event.defaultPrevented ||
         event.isComposing ||
@@ -1112,6 +1120,7 @@ export default function HomePage() {
   }, [
     activeInputDeviceKind,
     activeTypingText,
+    acceptingTextInput,
     emitProgress,
     finishPractice,
     isTimeAttackPlaying,

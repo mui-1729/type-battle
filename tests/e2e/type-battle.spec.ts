@@ -213,6 +213,12 @@ test("forfeits the match after long disconnect", async ({ browser }) => {
   );
   await expect(host.getByTestId("battle-stage")).toContainText("再接続中");
 
+  const localMover = host.locator('.battleStagePlayerMover[data-side="left"]');
+  const progressBeforePausedInput = await localMover.getAttribute("data-progress");
+  await host.getByTitle("設定を開く").focus();
+  await host.keyboard.press("a");
+  await expect.poll(() => localMover.getAttribute("data-progress")).toBe(progressBeforePausedInput);
+
   // Wait for forfeit. Local runs can reuse an existing realtime server with the default 30s grace period.
   await expect(host.locator(".statusTag.isForfeited")).toBeVisible({ timeout: 40_000 });
   await expect(host.locator(".rivalBar").getByText("棄権")).toBeVisible();
