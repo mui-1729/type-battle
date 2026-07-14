@@ -79,7 +79,7 @@ jobs:
         run: npm run test --workspace @type-battle/cloudflare-worker
 
       - name: Deploy worker
-        run: npm run deploy --workspace @type-battle/cloudflare-worker
+        run: npm run deploy --workspace @type-battle/cloudflare-worker -- --keep-vars --var "DEPLOY_COMMIT_SHA:$COMMIT_SHA"
 
       - name: Smoke test deployed worker
         run: node apps/cloudflare-worker/scripts/smoke-worker.mjs

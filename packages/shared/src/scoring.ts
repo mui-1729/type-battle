@@ -66,21 +66,12 @@ function comparePlayers(
   matchRule: MatchRule
 ): number {
   const getPromptLength = typeof promptLength === "function" ? promptLength : () => promptLength;
-  const aPromptLength = getPromptLength(a);
-  const bPromptLength = getPromptLength(b);
   const aFinished = isPlayerFinished(a, getPromptLength);
   const bFinished = isPlayerFinished(b, getPromptLength);
 
   if (matchRule === "timeAttack") {
-    const aCompletion = aPromptLength > 0 ? a.progressIndex / aPromptLength : 0;
-    const bCompletion = bPromptLength > 0 ? b.progressIndex / bPromptLength : 0;
-
-    if (aCompletion !== bCompletion) {
-      return bCompletion - aCompletion;
-    }
-
-    if (a.totalTypedCharacters !== b.totalTypedCharacters) {
-      return a.totalTypedCharacters - b.totalTypedCharacters;
+    if (a.progressIndex !== b.progressIndex) {
+      return b.progressIndex - a.progressIndex;
     }
 
     if (a.accuracy !== b.accuracy) {
@@ -90,6 +81,12 @@ function comparePlayers(
     if (a.mistakes !== b.mistakes) {
       return a.mistakes - b.mistakes;
     }
+
+    if (a.maxStreak !== b.maxStreak) {
+      return b.maxStreak - a.maxStreak;
+    }
+
+    return 0;
   }
 
   if (matchRule === "hpBattle") {

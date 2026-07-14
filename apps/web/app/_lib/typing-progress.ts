@@ -52,11 +52,18 @@ export function advanceProgress(
 export function advanceProgressWithMistakes(
   previous: ProgressState,
   promptText: string,
-  typedText: string
+  typedText: string,
+  loop = false
 ): ProgressUpdate {
+  const promptCharacters = Array.from(promptText);
+
   return Array.from(typedText).reduce<ProgressUpdate>(
     (state, typedChar) => {
-      const expectedChar = promptText[state.progress.progressIndex];
+      const cursor =
+        loop && promptCharacters.length > 0
+          ? state.progress.progressIndex % promptCharacters.length
+          : state.progress.progressIndex;
+      const expectedChar = promptCharacters[cursor];
       const nextProgress = advanceProgress(state.progress, expectedChar, typedChar);
 
       if (nextProgress.mistakes > state.progress.mistakes) {
@@ -79,7 +86,8 @@ export function advanceProgressWithMistakes(
 export function advanceProgressByText(
   previous: ProgressState,
   promptText: string,
-  typedText: string
+  typedText: string,
+  loop = false
 ): ProgressState {
-  return advanceProgressWithMistakes(previous, promptText, typedText).progress;
+  return advanceProgressWithMistakes(previous, promptText, typedText, loop).progress;
 }

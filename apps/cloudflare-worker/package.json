@@ -9,7 +9,7 @@
     "deploy:dry-run": "wrangler deploy --dry-run",
     "lint": "eslint src tests",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout 30000",
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {

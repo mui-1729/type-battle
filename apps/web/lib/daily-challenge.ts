@@ -1,4 +1,7 @@
+export const DAILY_CHALLENGE_METRIC_VERSION = 2 as const;
+
 export type DailyChallengeRecord = {
+  metricVersion: typeof DAILY_CHALLENGE_METRIC_VERSION;
   challengeKey: string;
   bestWpm: number;
   bestAccuracy: number;
@@ -28,6 +31,7 @@ export function loadDailyChallengeRecord(
     const parsedRecord = JSON.parse(rawRecord) as Partial<DailyChallengeRecord>;
 
     if (
+      parsedRecord.metricVersion === DAILY_CHALLENGE_METRIC_VERSION &&
       parsedRecord.challengeKey === challengeKey &&
       typeof parsedRecord.bestWpm === "number" &&
       typeof parsedRecord.bestAccuracy === "number" &&
@@ -37,6 +41,7 @@ export function loadDailyChallengeRecord(
       typeof parsedRecord.promptId === "string"
     ) {
       return {
+        metricVersion: DAILY_CHALLENGE_METRIC_VERSION,
         challengeKey: parsedRecord.challengeKey,
         bestWpm: parsedRecord.bestWpm,
         bestAccuracy: parsedRecord.bestAccuracy,
@@ -73,6 +78,7 @@ export function updateDailyChallengeRecord(
 ): DailyChallengeRecord {
   if (!previous || previous.challengeKey !== next.challengeKey || previous.promptId !== next.promptId) {
     return {
+      metricVersion: DAILY_CHALLENGE_METRIC_VERSION,
       challengeKey: next.challengeKey,
       promptId: next.promptId,
       bestWpm: next.wpm,
@@ -91,4 +97,38 @@ export function updateDailyChallengeRecord(
     attempts: previous.attempts + 1,
     lastCompletedAt: next.completedAt
   };
+}
+
+export type DailyChallengeAttempt = {
+  challengeKey: string;
+  promptId: string;
+  wpm: number;
+  accuracy: number;
+  finishTimeMs: number;
+  completedAt: number;
+};
+
+export function recordDailyChallengeAttempt(
+  storage: Pick<Storage, "getItem" | "setItem">,
+  attempt: DailyChallengeAttempt,
+  visibleChallengeKey: string
+): { savedRecord: DailyChallengeRecord; visibleRecord: DailyChallengeRecord | null } {
+  const previousRecord = loadDailyChallengeRecord(storage, attempt.challengeKey);
+  const savedRecord = updateDailyChallengeRecord(previousRecord, attempt);
+  persistDailyChallengeRecord(storage, savedRecord);
+
+  return {
+    savedRecord,
+    visibleRecord:
+      savedRecord.challengeKey === visibleChallengeKey
+        ? savedRecord
+        : loadDailyChallengeRecord(storage, visibleChallengeKey)
+  };
+}
+
+export function getVisibleDailyChallengeRecord(
+  record: DailyChallengeRecord | null,
+  visibleChallengeKey: string
+): DailyChallengeRecord | null {
+  return record?.challengeKey === visibleChallengeKey ? record : null;
 }

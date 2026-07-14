@@ -9,6 +9,7 @@ export interface Env {
   GATEWAY: DurableObjectNamespace;
   ROOMS: DurableObjectNamespace;
   ROOM_STATE_WRITE_TOKEN: string;
+  DEPLOY_COMMIT_SHA?: string;
 }
 
 export default {
@@ -20,6 +21,7 @@ export default {
         ok: true,
         service: "type-battle-cloudflare-worker",
         check: "liveness",
+        commitSha: env.DEPLOY_COMMIT_SHA ?? "development",
         timestamp: new Date().toISOString()
       });
     }

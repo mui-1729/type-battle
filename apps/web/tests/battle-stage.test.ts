@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { MatchResult, PlayerState, RoomState } from "@type-battle/shared";
+import { getStageSummary } from "../app/_components/battle-stage";
 import { HpPushStage } from "../app/_components/hp-push-stage";
 import { RaceStage } from "../app/_components/race-stage";
 import {
@@ -117,6 +118,29 @@ describe("battle stage view model", () => {
     expect(view.rightPlayer?.id).toBe(rightPlayer.id);
     expect(view.rightPlayer?.progressRatio).toBe(1);
     expect(view.winnerId).toBe(rightPlayer.id);
+  });
+
+  it("keeps a departed opponent from the result and reports the confirmed winner", () => {
+    const room = createRoom({
+      status: "finished",
+      players: [leftPlayer]
+    });
+    const result = createResult(rightPlayer.id);
+
+    const view = createBattleStageViewModel(room, result, leftPlayer.id);
+
+    expect(view.players).toHaveLength(2);
+    expect(view.leftPlayer?.id).toBe(leftPlayer.id);
+    expect(view.rightPlayer?.id).toBe(rightPlayer.id);
+    expect(view.rightPlayer?.isWinner).toBe(true);
+    expect(view.rightPlayer?.progressRatio).toBe(1);
+    expect(getStageSummary(view)).toBe("COM の勝利");
+  });
+
+  it("still reports a missing opponent while waiting without a result", () => {
+    const view = createBattleStageViewModel(createRoom({ status: "waiting", players: [leftPlayer] }), null, leftPlayer.id);
+
+    expect(getStageSummary(view)).toBe("対戦相手を待っています");
   });
 
   it("preserves reconnecting and forfeited server states", () => {

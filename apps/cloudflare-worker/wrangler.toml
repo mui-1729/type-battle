@@ -2,6 +2,10 @@ name = "type-battle-cloudflare-worker"
 main = "src/worker.ts"
 compatibility_date = "2026-07-04"
 
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [durable_objects]
 bindings = [
   { name = "GATEWAY", class_name = "RoomDurableObject" },
