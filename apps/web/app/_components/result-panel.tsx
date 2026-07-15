@@ -21,6 +21,8 @@ type ResultPanelProps = {
   onOpenSettings?: () => void;
   onReaction?: (reaction: QuickReaction) => void;
   rematchReady?: boolean;
+  onPracticeNext?: (() => void) | undefined;
+  onPracticeMenu?: (() => void) | undefined;
 };
 
 export function ResultPanel({
@@ -38,7 +40,9 @@ export function ResultPanel({
   onNextAccessory,
   onOpenSettings,
   onReaction,
-  rematchReady = false
+  rematchReady = false,
+  onPracticeNext,
+  onPracticeMenu
 }: ResultPanelProps) {
   const rule = result.matchRule ?? matchRule;
   const doubleKo = isRoomResult && result.players.length > 1 && result.players.every((player) => (player.hp ?? 1) <= 0);
@@ -110,6 +114,12 @@ export function ResultPanel({
       ) : null}
 
       <div className="resultActions">
+        {!isRoomResult && onPracticeNext && onPracticeMenu ? (
+          <div className="practiceResultActions">
+            <Button variant="secondary" type="button" onClick={onPracticeNext}>次の文章</Button>
+            <Button variant="secondary" type="button" onClick={onPracticeMenu}>ひとり用メニューへ</Button>
+          </div>
+        ) : null}
         {isRoomResult && onOpenSettings ? <Button variant="secondary" type="button" onClick={onOpenSettings}><Settings size={17} /> 次の試合設定</Button> : null}
         {canRetry ? (
           <Button variant="primary" type="button" onClick={onRetry} disabled={retryPending} aria-busy={retryPending}>

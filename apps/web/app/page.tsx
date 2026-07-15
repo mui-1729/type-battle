@@ -90,6 +90,8 @@ import {
 } from "../lib/guest-session";
 import { playCountdownSound, playTypingSound, primeSoundPlayback } from "../lib/sound";
 import {
+  DAILY_CHALLENGE_MAX_ATTEMPTS,
+  consumeDailyChallengeAttempt,
   getVisibleDailyChallengeRecord,
   loadDailyChallengeRecord,
   recordDailyChallengeAttempt,
@@ -153,6 +155,7 @@ export default function HomePage() {
   const [practiceResult, setPracticeResult] = useState<MatchResult | null>(null);
   const [practiceCategory, setPracticeCategory] = useState<PromptCategory>("standard");
   const [dailyChallengeRecord, setDailyChallengeRecord] = useState<DailyChallengeRecord | null>(null);
+  const [dailyAttemptConsumed, setDailyAttemptConsumed] = useState(false);
   const [mistakeTrendRecord, setMistakeTrendRecord] = useState<MistakeTrendRecord | null>(null);
   const [error, setError] = useState("");
   const [rematchPending, setRematchPending] = useState(false);
@@ -170,6 +173,7 @@ export default function HomePage() {
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
   const localProgressRef = useRef<ProgressState>(createEmptyProgress());
   const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
+  const dailyAttemptConsumedRef = useRef(false);
   const inputSequenceRef = useRef(0);
   const roomRef = useRef<RoomState | null>(null);
   const guestSessionRef = useRef<GuestSession | null>(null);
@@ -646,6 +650,25 @@ export default function HomePage() {
     );
   }, [guestId, practiceCategory, prepareTypingInput, realtimeConfigured, resetTyping, socketMode]);
 
+  const consumeDailyAttempt = useCallback(() => {
+    if (!practiceSession || practiceSession.mode !== "daily" || dailyAttemptConsumedRef.current) {
+      return;
+    }
+
+    const record = consumeDailyChallengeAttempt(
+      window.localStorage,
+      practiceSession.challengeKey ?? dailyChallengeInfo.challengeKey,
+      practiceSession.prompt.id,
+      Date.now()
+    );
+    if (!record) {
+      return;
+    }
+    dailyAttemptConsumedRef.current = true;
+    setDailyAttemptConsumed(true);
+    setDailyChallengeRecord(getVisibleDailyChallengeRecord(record, dailyChallengeInfo.challengeKey));
+  }, [dailyChallengeInfo.challengeKey, practiceSession]);
+
   const startDailyChallenge = useCallback(() => {
     const socket = socketRef.current;
     const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
@@ -654,6 +677,12 @@ export default function HomePage() {
 
     if (!realtimeConfigured || !socket || socketMode !== "practice" || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
+      return;
+    }
+
+    const currentRecord = loadDailyChallengeRecord(window.localStorage, dailyChallengeInfo.challengeKey);
+    if ((currentRecord?.attempts ?? 0) >= DAILY_CHALLENGE_MAX_ATTEMPTS) {
+      setError("今日のデイリー挑戦回数を使い切りました。次の日付まで待ってください。");
       return;
     }
 
@@ -674,16 +703,22 @@ export default function HomePage() {
         mode: "daily",
         ...(response.data.challengeKey ? { challengeKey: response.data.challengeKey } : {})
       });
-      setPracticeResult(null);
-      setPracticeProgress(createEmptyProgress());
-      resetTyping();
+        setPracticeResult(null);
+        setPracticeProgress(createEmptyProgress());
+        dailyAttemptConsumedRef.current = false;
+        setDailyAttemptConsumed(false);
+        resetTyping();
     });
-  }, [guestId, prepareTypingInput, realtimeConfigured, resetTyping, socketMode]);
+  }, [dailyChallengeInfo.challengeKey, guestId, prepareTypingInput, realtimeConfigured, resetTyping, socketMode]);
 
   const finishPractice = useCallback(
     (finalProgress: ProgressState) => {
       if (!practiceSession) {
         return;
+      }
+
+      if (practiceSession.mode === "daily") {
+        consumeDailyAttempt();
       }
 
       const finishTimeMs = Date.now() - practiceSession.startedAt;
@@ -729,15 +764,17 @@ export default function HomePage() {
             promptId: practiceSession.prompt.id,
             wpm: player.wpm,
             accuracy: player.accuracy,
+            mistakes: player.mistakes,
             finishTimeMs,
-            completedAt: player.finishedAt ?? Date.now()
+            completedAt: player.finishedAt ?? Date.now(),
+            attemptConsumed: dailyAttemptConsumedRef.current
           },
           dailyChallengeInfo.challengeKey
         );
         setDailyChallengeRecord(visibleRecord);
       }
     },
-    [dailyChallengeInfo.challengeKey, practiceSession]
+    [consumeDailyAttempt, dailyChallengeInfo.challengeKey, practiceSession]
   );
 
   useEffect(() => {
@@ -819,6 +856,16 @@ export default function HomePage() {
 
     return () => window.clearTimeout(timer);
   }, [dailyChallengeInfo.nextChallengeAt]);
+
+  useEffect(() => {
+    if (!practiceSession || practiceSession.mode !== "daily" || dailyAttemptConsumed || practiceResult) {
+      return;
+    }
+
+    const elapsed = Date.now() - practiceSession.startedAt;
+    const timer = window.setTimeout(consumeDailyAttempt, Math.max(5_000 - elapsed, 0));
+    return () => window.clearTimeout(timer);
+  }, [consumeDailyAttempt, dailyAttemptConsumed, practiceResult, practiceSession]);
 
   useEffect(() => {
     if (!settingsHydrated) {
@@ -1045,6 +1092,10 @@ export default function HomePage() {
         practiceProgressRef.current = next.progress;
         recordMistakeSamples(next.mistakeSamples);
 
+        if (practiceSession.mode === "daily" && correct) {
+          consumeDailyAttempt();
+        }
+
         if (next.progress.progressIndex >= activeTypingText.length) {
           finishPractice(next.progress);
         }
@@ -1059,6 +1110,7 @@ export default function HomePage() {
       finishPractice,
       practiceResult,
       practiceSession,
+      consumeDailyAttempt,
       recordMistakeSamples,
       updateTypingProgress,
       room
@@ -1123,6 +1175,10 @@ export default function HomePage() {
         practiceProgressRef.current = next.progress;
         recordMistakeSamples(next.mistakeSamples);
 
+        if (practiceSession.mode === "daily" && correct) {
+          consumeDailyAttempt();
+        }
+
         if (next.progress.progressIndex >= activeTypingText.length) {
           finishPractice(next.progress);
         }
@@ -1139,6 +1195,7 @@ export default function HomePage() {
     acceptingTextInput,
     emitProgress,
     finishPractice,
+    consumeDailyAttempt,
     isTimeAttackPlaying,
     practiceResult,
     practiceSession,
@@ -1337,7 +1394,24 @@ export default function HomePage() {
     });
   };
 
-  const retryPractice = activePracticeMode === "daily" ? startDailyChallenge : startPractice;
+  const repeatPractice = useCallback(() => {
+    if (!practiceSession || practiceSession.mode !== "practice") {
+      return;
+    }
+    setPracticeSession((current) => current ? { ...current, startedAt: Date.now() } : current);
+    setPracticeResult(null);
+    setPracticeProgress(createEmptyProgress());
+    resetTyping();
+    prepareTypingInput();
+  }, [practiceSession, prepareTypingInput, resetTyping]);
+
+  const returnToPracticeMenu = useCallback(() => {
+    clearPracticeState();
+    resetTyping();
+    setHomeMode("solo");
+  }, [clearPracticeState, resetTyping]);
+
+  const retryPractice = activePracticeMode === "daily" ? startDailyChallenge : repeatPractice;
 
   const copyRoomCode = async () => {
     if (!room) {
@@ -1467,26 +1541,30 @@ export default function HomePage() {
               <div className="dailyChallengeStats">
                 <div>
                   <span>今日の最高 WPM</span>
-                  <strong>{visibleDailyChallengeRecord ? visibleDailyChallengeRecord.bestWpm : "—"}</strong>
+                  <strong>{visibleDailyChallengeRecord && visibleDailyChallengeRecord.bestWpm > 0 ? visibleDailyChallengeRecord.bestWpm : "—"}</strong>
                 </div>
                 <div>
                   <span>挑戦回数</span>
-                  <strong>{visibleDailyChallengeRecord?.attempts ?? 0}</strong>
+                  <strong>{visibleDailyChallengeRecord?.attempts ?? 0}/{DAILY_CHALLENGE_MAX_ATTEMPTS}</strong>
                 </div>
                 <div>
                   <span>ベスト正確率</span>
-                  <strong>{visibleDailyChallengeRecord ? `${visibleDailyChallengeRecord.bestAccuracy}%` : "—"}</strong>
+                  <strong>{visibleDailyChallengeRecord && visibleDailyChallengeRecord.bestWpm > 0 ? `${visibleDailyChallengeRecord.bestAccuracy}%` : "—"}</strong>
                 </div>
                 <div>
                   <span>ベスト時間</span>
-                  <strong>{visibleDailyChallengeRecord ? `${Math.round(visibleDailyChallengeRecord.bestFinishTimeMs / 1000)}s` : "—"}</strong>
+                  <strong>{visibleDailyChallengeRecord && visibleDailyChallengeRecord.bestFinishTimeMs > 0 ? `${Math.round(visibleDailyChallengeRecord.bestFinishTimeMs / 1000)}s` : "—"}</strong>
+                </div>
+                <div>
+                  <span>今日のポイント</span>
+                  <strong>{visibleDailyChallengeRecord?.points ?? 0}/3</strong>
                 </div>
               </div>
               <button
                 className="secondaryButton"
                 type="button"
                 onClick={startDailyChallenge}
-                disabled={!realtimeConfigured || Boolean(practiceSession && !practiceResult)}
+                disabled={!realtimeConfigured || Boolean(practiceSession && !practiceResult) || (visibleDailyChallengeRecord?.attempts ?? 0) >= DAILY_CHALLENGE_MAX_ATTEMPTS}
               >
                 <Swords size={18} />
                 今日の挑戦を開始
@@ -1764,6 +1842,8 @@ export default function HomePage() {
                   retryPending={rematchPending}
                   retryError={rematchError}
                   rematchReady={Boolean(currentPlayer?.ready)}
+                  onPracticeNext={!room && activePracticeMode === "practice" ? startPractice : undefined}
+                  onPracticeMenu={!room && activePracticeMode === "practice" ? returnToPracticeMenu : undefined}
                   {...(room ? {
                     accessoryIndex,
                     onPreviousAccessory: () => shiftAccessory(-1),
