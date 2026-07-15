@@ -41,8 +41,8 @@ test("creates a room and lets a second player join", async ({ browser }) => {
   await guest.getByLabel("ルームコード").fill(roomCode);
   await guest.getByTitle("ルームに参加").click();
 
-  await expect(host.getByLabel("ルーム操作").getByText("Bob")).toBeVisible();
-  await expect(guest.getByLabel("ルーム操作").getByText("Alice")).toBeVisible();
+  await expect(host.getByTestId("lobby-prep").getByText("Bob")).toBeVisible();
+  await expect(guest.getByTestId("lobby-prep").getByText("Alice")).toBeVisible();
 
   await hostContext.close();
   await guestContext.close();
@@ -67,9 +67,8 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await guest.getByLabel("ルームコード").fill(roomCode);
   await guest.getByTitle("ルームに参加").click();
 
-  await host.getByRole("button", { name: "準備する" }).click();
-  await guest.getByRole("button", { name: "準備する" }).click();
-  await host.getByRole("button", { name: "開始" }).click();
+  await host.getByRole("button", { name: "READYにする" }).click();
+  await guest.getByRole("button", { name: "READYにする" }).click();
   await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
   await expect(guest.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
   await expect(host.locator('.battleStagePlayerMover[data-side="left"] strong')).toHaveText("Alice");
@@ -111,7 +110,7 @@ test("rejoins the room after reload", async ({ browser }) => {
   // Wait for reconnection to complete
   await expect(host.locator(".connection")).toHaveClass(/isOnline/);
   await expect(host.locator(".roomMeta strong")).toHaveText(roomCode, { timeout: 10_000 });
-  await expect(host.getByLabel("ルーム操作").getByText("Alice")).toBeVisible();
+  await expect(host.getByTestId("lobby-prep").getByText("Alice")).toBeVisible();
 
   await hostContext.close();
 });
@@ -126,7 +125,7 @@ test("plays all three stage modes against COM and resets between rematches", asy
   await selectBattleMode(host);
   await setNickname(host, "Alice");
   await host.getByRole("button", { name: "ルームを作成" }).click();
-  await expect(host.getByRole("button", { name: "COM と開始" })).toBeEnabled();
+  await expect(host.getByRole("button", { name: "READYにする" })).toBeEnabled();
 
   const modes = [
     { key: "race", label: "レース" },
@@ -136,7 +135,7 @@ test("plays all three stage modes against COM and resets between rematches", asy
 
   for (const [index, mode] of modes.entries()) {
     if (index === 0) {
-      await host.locator(".lobbyActions .primaryButton").click();
+      await host.getByRole("button", { name: "READYにする" }).click();
     } else {
       await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
     }
@@ -217,9 +216,8 @@ test("forfeits the match after long disconnect", async ({ browser }) => {
   await guest.getByLabel("ルームコード").fill(roomCode);
   await guest.getByTitle("ルームに参加").click();
 
-  await host.getByRole("button", { name: "準備する" }).click();
-  await guest.getByRole("button", { name: "準備する" }).click();
-  await host.getByRole("button", { name: "開始" }).click();
+  await host.getByRole("button", { name: "READYにする" }).click();
+  await guest.getByRole("button", { name: "READYにする" }).click();
   await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
   await expect(guest.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
@@ -289,7 +287,7 @@ test("disables stage motion for the player setting and OS preference", async ({ 
     await selectBattleMode(page);
     await setNickname(page, source === "setting" ? "Reduced" : "SystemReduced");
     await page.getByRole("button", { name: "ルームを作成" }).click();
-    await page.getByRole("button", { name: "COM と開始" }).click();
+    await page.getByRole("button", { name: "READYにする" }).click();
     await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
     const motion = await page.locator('.battleStagePlayerMover[data-side="left"]').evaluate((element) => {
@@ -330,10 +328,8 @@ test("saves and restores player settings from localStorage", async ({ browser })
   await page.getByRole("button", { name: "設定を反映" }).click();
   await expect(page.getByText("プレイヤー設定")).not.toBeVisible();
 
-  await selectBattleMode(page);
-  await page.getByTitle("設定を開く").click();
-
   // Verify UI reflects changes
+  await page.getByTitle("設定を開く").click();
   await expect(page.locator(".modalContent input").first()).toHaveValue("Charlie");
   await expect(page.locator("html")).toHaveClass(/theme-dark/);
   await expect(page.locator("html")).toHaveClass(/font-large/);
@@ -341,7 +337,6 @@ test("saves and restores player settings from localStorage", async ({ browser })
 
   // Reload and verify persistence
   await page.reload();
-  await selectBattleMode(page);
   await page.getByTitle("設定を開く").click();
   await expect(page.locator(".modalContent input").first()).toHaveValue("Charlie");
   await expect(page.locator("html")).toHaveClass(/theme-dark/);

@@ -407,6 +407,120 @@ describe("room authority", () => {
     expect(parseMessages(joinedSocket).some((message) => message.type === "server:room:state")).toBe(true);
   });
 
+  it("broadcasts quick reactions to the room and enforces the cooldown", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "RX23YZ" });
+    roomAuthority.attachSocket(guestSocket as unknown as WebSocket, { roomCode: "RX23YZ" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-reaction",
+      type: "client:room:create",
+      payload: { nickname: "Alice", guestId: "guest-reaction-alice", sessionId: "session-reaction-alice" }
+    }));
+    await flushAsyncWork();
+    guestSocket.receive(JSON.stringify({
+      id: "msg-join-reaction",
+      type: "client:room:join",
+      payload: {
+        roomCode: "RX23YZ",
+        nickname: "Bob",
+        guestId: "guest-reaction-bob",
+        sessionId: "session-reaction-bob"
+      }
+    }));
+    await flushAsyncWork();
+
+    hostSocket.receive(JSON.stringify({
+      id: "msg-accessory-reaction",
+      type: "client:player:accessory",
+      payload: { roomCode: "RX23YZ", accessoryIndex: 2 }
+    }));
+    await flushAsyncWork();
+    const accessoryState = [...parseMessages(guestSocket)]
+      .reverse()
+      .find((message) => message.type === "server:room:state")?.payload as { players?: Array<{ id: string; accessoryIndex?: number }> } | undefined;
+    expect(accessoryState?.players).toContainEqual(expect.objectContaining({ id: "guest-reaction-alice", accessoryIndex: 2 }));
+
+    hostSocket.receive(JSON.stringify({
+      id: "msg-reaction-first",
+      type: "client:player:reaction",
+      payload: { roomCode: "RX23YZ", reaction: "よろしく" }
+    }));
+    hostSocket.receive(JSON.stringify({
+      id: "msg-reaction-too-soon",
+      type: "client:player:reaction",
+      payload: { roomCode: "RX23YZ", reaction: "ナイス" }
+    }));
+    await flushAsyncWork();
+
+    const firstReactions = parseMessages(guestSocket).filter((message) => message.type === "server:player:reaction");
+    expect(firstReactions).toHaveLength(1);
+    expect(firstReactions[0]?.payload).toEqual({ playerId: "guest-reaction-alice", reaction: "よろしく" });
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    hostSocket.receive(JSON.stringify({
+      id: "msg-reaction-second",
+      type: "client:player:reaction",
+      payload: { roomCode: "RX23YZ", reaction: "ナイス" }
+    }));
+    await flushAsyncWork();
+    expect(parseMessages(guestSocket).filter((message) => message.type === "server:player:reaction")).toHaveLength(2);
+  });
+
+  it("clears READY states when the host changes the next match settings", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "ST23UV" });
+    roomAuthority.attachSocket(guestSocket as unknown as WebSocket, { roomCode: "ST23UV" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-settings-reset",
+      type: "client:room:create",
+      payload: { nickname: "Alice", guestId: "guest-settings-alice", sessionId: "session-settings-alice" }
+    }));
+    await flushAsyncWork();
+    guestSocket.receive(JSON.stringify({
+      id: "msg-join-settings-reset",
+      type: "client:room:join",
+      payload: {
+        roomCode: "ST23UV",
+        nickname: "Bob",
+        guestId: "guest-settings-bob",
+        sessionId: "session-settings-bob"
+      }
+    }));
+    await flushAsyncWork();
+    for (const [socket, id] of [[hostSocket, "host"], [guestSocket, "guest"]] as const) {
+      socket.receive(JSON.stringify({
+        id: `msg-ready-settings-reset-${id}`,
+        type: "client:player:ready",
+        payload: { roomCode: "ST23UV", ready: true }
+      }));
+    }
+    hostSocket.receive(JSON.stringify({
+      id: "msg-category-settings-reset",
+      type: "client:room:setPromptCategory",
+      payload: { roomCode: "ST23UV", category: "long" }
+    }));
+    await flushAsyncWork();
+
+    expect(findLastAck(hostSocket, "client:room:setPromptCategory")).toMatchObject({
+      payload: {
+        ok: true,
+        data: { players: [{ ready: false }, { ready: false }] }
+      }
+    });
+  });
+
   it("persists guest sessions and match results for room-scoped sockets", async () => {
     const storage = new FakeStorage();
     const roomAuthority = new RoomAuthorityDurableObject(
@@ -452,6 +566,12 @@ describe("room authority", () => {
       lastSeenAt: expect.any(String)
     });
     expect(storage.values.get("retention-alarm-at")).toEqual(expect.any(Number));
+
+    socket.receive(JSON.stringify({
+      id: "msg-ready-room-authority",
+      type: "client:player:ready",
+      payload: { roomCode: "AB23CD", ready: true }
+    }));
 
     socket.receive(
       JSON.stringify({
@@ -500,6 +620,11 @@ describe("room authority", () => {
       id: "msg-category-rejoin-progress",
       type: "client:room:setPromptCategory",
       payload: { roomCode: "RJ34KL", category: "short" }
+    }));
+    firstSocket.receive(JSON.stringify({
+      id: "msg-ready-rejoin-progress",
+      type: "client:player:ready",
+      payload: { roomCode: "RJ34KL", ready: true }
     }));
     firstSocket.receive(JSON.stringify({
       id: "msg-start-rejoin-progress",
@@ -573,6 +698,11 @@ describe("room authority", () => {
       })
     );
     await flushAsyncWork();
+    socket.receive(JSON.stringify({
+      id: "msg-ready-disconnect",
+      type: "client:player:ready",
+      payload: { roomCode: "CD34EF", ready: true }
+    }));
     socket.receive(
       JSON.stringify({
         id: "msg-start-disconnect",

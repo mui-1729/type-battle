@@ -6,6 +6,7 @@ import type {
   MatchResult,
   Prompt,
   PromptCategory,
+  QuickReaction,
   RoomState,
   TypingFinish,
   TypingProgress
@@ -64,6 +65,8 @@ export type ClientToServerEvents = {
   ) => void;
   "room:leave": (payload: RoomCodePayload) => void;
   "player:ready": (payload: ReadyPayload) => void;
+  "player:reaction": (payload: RoomCodePayload & { reaction: QuickReaction }) => void;
+  "player:accessory": (payload: RoomCodePayload & { accessoryIndex: number }) => void;
   "room:setPromptCategory": (
     payload: RoomCodePayload & { category: PromptCategory },
     ack: (response: AckResponse<RoomState>) => void
@@ -103,4 +106,5 @@ export type ServerToClientEvents = {
   "match:started": (room: RoomState) => void;
   "match:result": (result: MatchResult) => void;
   "match:error": (payload: { message: string }) => void;
+  "player:reaction": (payload: { playerId: string; reaction: QuickReaction }) => void;
 };

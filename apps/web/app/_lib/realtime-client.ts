@@ -36,6 +36,8 @@ const CLOUDFLARE_CLIENT_EVENT_MAP: Record<keyof ClientToServerEvents, Cloudflare
   "room:join": "client:room:join",
   "room:leave": "client:room:leave",
   "player:ready": "client:player:ready",
+  "player:reaction": "client:player:reaction",
+  "player:accessory": "client:player:accessory",
   "room:setPromptCategory": "client:room:setPromptCategory",
   "room:setBotDifficulty": "client:room:setBotDifficulty",
   "room:setMatchRule": "client:room:setMatchRule",
@@ -53,7 +55,8 @@ const CLOUDFLARE_SERVER_EVENT_TO_APP_EVENT: Record<CloudflareServerEventName, ke
   "server:match:countdown": "match:countdown",
   "server:match:started": "match:started",
   "server:match:result": "match:result",
-  "server:error": "match:error"
+  "server:error": "match:error",
+  "server:player:reaction": "player:reaction"
 };
 
 const RECONNECT_DELAY_MS = 1_000;

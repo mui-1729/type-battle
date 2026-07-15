@@ -13,6 +13,7 @@ import type {
   MatchResult,
   MatchRule,
   PromptCategory,
+  QuickReaction,
   RoomState,
   TypingFinish,
   TypingProgress
@@ -34,6 +35,14 @@ type CloudflareClientCommandMap = {
   "client:player:ready": {
     request: ReadyPayload;
     response: RoomState;
+  };
+  "client:player:reaction": {
+    request: RoomCodePayload & { reaction: QuickReaction };
+    response: null;
+  };
+  "client:player:accessory": {
+    request: RoomCodePayload & { accessoryIndex: number };
+    response: null;
   };
   "client:room:setPromptCategory": {
     request: RoomCodePayload & { category: PromptCategory };
@@ -85,6 +94,10 @@ type CloudflareServerEventMap = {
   "server:error": {
     message: string;
   };
+  "server:player:reaction": {
+    playerId: string;
+    reaction: QuickReaction;
+  };
 };
 
 export const CLOUDFLARE_CLIENT_MESSAGE_TYPES = [
@@ -92,6 +105,8 @@ export const CLOUDFLARE_CLIENT_MESSAGE_TYPES = [
   "client:room:join",
   "client:room:leave",
   "client:player:ready",
+  "client:player:reaction",
+  "client:player:accessory",
   "client:room:setPromptCategory",
   "client:room:setBotDifficulty",
   "client:room:setMatchRule",
@@ -109,7 +124,8 @@ export const CLOUDFLARE_SERVER_EVENT_TYPES = [
   "server:match:countdown",
   "server:match:started",
   "server:match:result",
-  "server:error"
+  "server:error",
+  "server:player:reaction"
 ] as const satisfies readonly CloudflareServerEventType[];
 
 export type CloudflareClientMessageType = keyof CloudflareClientCommandMap;

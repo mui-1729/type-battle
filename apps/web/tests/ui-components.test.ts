@@ -4,6 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { Button, SectionHeading, SurfaceCard } from "../app/_components/ui";
 import { PlayerIdentity } from "../app/_components/player-identity";
 import { HomeModeMenu } from "../app/_components/home-mode-menu";
+import { LobbyPrep } from "../app/_components/lobby-prep";
+import type { RoomState } from "@type-battle/shared";
 
 beforeAll(() => vi.stubGlobal("React", React));
 afterAll(() => vi.unstubAllGlobals());
@@ -63,5 +65,78 @@ describe("shared UI foundation", () => {
     expect(markup).toContain("ひとりで遊ぶ");
     expect(markup).toContain("遊び方を見る");
     expect((markup.match(/modeCard(?:Battle|Solo)/g) ?? [])).toHaveLength(2);
+  });
+
+  it("renders the two-player lobby with self-only accessory controls", () => {
+    const room = {
+      roomCode: "ABC123",
+      hostPlayerId: "host",
+      status: "waiting",
+      matchRule: "race",
+      botDifficulty: "normal",
+      promptCategory: "standard",
+      maxPlayers: 2,
+      players: [
+        {
+          id: "host",
+          nickname: "Alice",
+          connected: true,
+          ready: true,
+          isHost: true,
+          isBot: false,
+          progressIndex: 0,
+          correctCharacters: 0,
+          totalTypedCharacters: 0,
+          mistakes: 0,
+          maxStreak: 0,
+          currentStreak: 0,
+          wpm: 0,
+          accuracy: 100
+        },
+        {
+          id: "guest",
+          nickname: "Bob",
+          connected: true,
+          ready: false,
+          isHost: false,
+          isBot: false,
+          progressIndex: 0,
+          correctCharacters: 0,
+          totalTypedCharacters: 0,
+          mistakes: 0,
+          maxStreak: 0,
+          currentStreak: 0,
+          wpm: 0,
+          accuracy: 100
+        }
+      ]
+    } satisfies RoomState;
+    const markup = renderToStaticMarkup(
+      React.createElement(LobbyPrep, {
+        room,
+        localPlayerId: "host",
+        accessoryIndex: 1,
+        onPreviousAccessory: vi.fn(),
+        onNextAccessory: vi.fn(),
+        onCopyRoomCode: vi.fn(),
+        onLeave: vi.fn(),
+        onToggleReady: vi.fn(),
+        onMatchRuleChange: vi.fn(),
+        onPromptCategoryChange: vi.fn(),
+        onBotDifficultyChange: vi.fn(),
+        onReaction: vi.fn(),
+        remoteReaction: { playerId: "guest", reaction: "よろしく" }
+      })
+    );
+
+    expect(markup).toContain('data-testid="lobby-prep"');
+    expect(markup).toContain("1P");
+    expect(markup).toContain("2P");
+    expect(markup).toContain("Alice");
+    expect(markup).toContain("Bob");
+    expect(markup.match(/aria-label="前のアクセサリ"/g)).toHaveLength(1);
+    expect(markup.match(/aria-label="次のアクセサリ"/g)).toHaveLength(1);
+    expect(markup).toContain("両者READYで開始します");
+    expect(markup).toContain("Bob: 「よろしく」");
   });
 });

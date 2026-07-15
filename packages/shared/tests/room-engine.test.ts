@@ -9,6 +9,8 @@ import {
   markPlaying,
   resetRoomEngineState,
   restoreRoomState,
+  setBotDifficulty,
+  setPromptCategory,
   setReady,
   setMatchRule,
   setRoomEngineConfig,
@@ -29,6 +31,75 @@ beforeEach(() => {
 });
 
 describe("room engine config", () => {
+  it("does not start until every connected human is ready", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_ready_guard",
+      socketId: "socket_alice_ready_guard"
+    });
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_ready_guard",
+      socketId: "socket_bob_ready_guard"
+    });
+
+    expect("error" in joined).toBe(false);
+    expect(startMatch("socket_alice_ready_guard", created.room.roomCode)).toEqual({
+      error: "参加者全員のREADYが必要です。"
+    });
+    expect(getRoom(created.room.roomCode)?.status).toBe("waiting");
+    expect(getRoom(created.room.roomCode)?.players).toHaveLength(2);
+
+    setReady("socket_alice_ready_guard", created.room.roomCode, true);
+    setReady("socket_bob_ready_guard", created.room.roomCode, true);
+    const started = startMatch("socket_alice_ready_guard", created.room.roomCode);
+    expect("error" in started).toBe(false);
+  });
+
+  it("clears both ready states when the host changes match settings", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_ready_settings",
+      socketId: "socket_alice_ready_settings"
+    });
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_ready_settings",
+      socketId: "socket_bob_ready_settings"
+    });
+
+    expect("error" in joined).toBe(false);
+    setReady("socket_alice_ready_settings", created.room.roomCode, true);
+    setReady("socket_bob_ready_settings", created.room.roomCode, true);
+
+    const updatedRule = setMatchRule("socket_alice_ready_settings", created.room.roomCode, "hpBattle");
+    expect("error" in updatedRule).toBe(false);
+    if ("error" in updatedRule) {
+      return;
+    }
+    expect(updatedRule.room.players.every((player) => !player.ready)).toBe(true);
+
+    setReady("socket_alice_ready_settings", created.room.roomCode, true);
+    setReady("socket_bob_ready_settings", created.room.roomCode, true);
+    const updatedPrompt = setPromptCategory("socket_alice_ready_settings", created.room.roomCode, "long");
+    expect("error" in updatedPrompt).toBe(false);
+    if ("error" in updatedPrompt) {
+      return;
+    }
+    expect(updatedPrompt.room.players.every((player) => !player.ready)).toBe(true);
+
+    setReady("socket_alice_ready_settings", created.room.roomCode, true);
+    setReady("socket_bob_ready_settings", created.room.roomCode, true);
+    const updatedBot = setBotDifficulty("socket_alice_ready_settings", created.room.roomCode, "hard");
+    expect("error" in updatedBot).toBe(false);
+    if ("error" in updatedBot) {
+      return;
+    }
+    expect(updatedBot.room.players.every((player) => !player.ready)).toBe(true);
+  });
+
   it("uses the configured time attack duration when starting a match", () => {
     setRoomEngineConfig({ timeAttackMs: 5_000 });
 
@@ -49,6 +120,8 @@ describe("room engine config", () => {
 
     const rule = setMatchRule("socket_alice_time_attack_config", created.room.roomCode, "timeAttack");
     expect("error" in rule).toBe(false);
+    setReady("socket_alice_time_attack_config", created.room.roomCode, true);
+    setReady("socket_bob_time_attack_config", created.room.roomCode, true);
 
     const started = startMatch("socket_alice_time_attack_config", created.room.roomCode);
     expect("error" in started).toBe(false);
@@ -68,6 +141,7 @@ describe("room engine config", () => {
     });
     const rule = setMatchRule("socket_alice_result_rule", created.room.roomCode, "timeAttack");
     expect("error" in rule).toBe(false);
+    setReady("socket_alice_result_rule", created.room.roomCode, true);
     const started = startMatch("socket_alice_result_rule", created.room.roomCode);
     expect("error" in started).toBe(false);
     if ("error" in started) {
@@ -119,6 +193,7 @@ describe("room engine config", () => {
         socketId: "socket_alice_invalid_prompt_filter"
       });
 
+      setReady("socket_alice_invalid_prompt_filter", created.room.roomCode, true);
       const started = startMatch("socket_alice_invalid_prompt_filter", created.room.roomCode);
 
       expect("error" in started).toBe(false);
@@ -163,6 +238,7 @@ describe("room engine config", () => {
         socketId: "socket_alice_no_valid_prompt"
       });
 
+      setReady("socket_alice_no_valid_prompt", created.room.roomCode, true);
       const started = startMatch("socket_alice_no_valid_prompt", created.room.roomCode);
 
       expect(started).toEqual({ error: "有効な課題文がありません。" });
@@ -202,6 +278,7 @@ describe("room engine config", () => {
       socketId: "socket_alice_rejoin_sequence_1"
     });
 
+    setReady("socket_alice_rejoin_sequence_1", created.room.roomCode, true);
     const started = startMatch("socket_alice_rejoin_sequence_1", created.room.roomCode);
     expect("error" in started).toBe(false);
     markPlaying(created.room.roomCode);
@@ -242,6 +319,7 @@ describe("room engine config", () => {
       socketId: "socket_alice_disconnect_grace"
     });
 
+    setReady("socket_alice_disconnect_grace", created.room.roomCode, true);
     const started = startMatch("socket_alice_disconnect_grace", created.room.roomCode);
     expect("error" in started).toBe(false);
 
