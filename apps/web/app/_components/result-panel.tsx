@@ -2,6 +2,8 @@ import { RotateCcw } from "lucide-react";
 import type { MatchResult } from "@type-battle/shared";
 import type { MatchRule } from "@type-battle/shared";
 import { MATCH_RULE_DETAILS, getPlayerDeviceLabel } from "../_lib/ui-labels";
+import { PlayerIdentity } from "./player-identity";
+import { Button, SurfaceCard } from "./ui";
 
 type ResultPanelProps = {
   result: MatchResult;
@@ -12,6 +14,7 @@ type ResultPanelProps = {
   canRetry?: boolean;
   retryPending?: boolean;
   retryError?: string;
+  localPlayerId?: string;
 };
 
 export function ResultPanel({
@@ -22,7 +25,8 @@ export function ResultPanel({
   practiceMode = "practice",
   canRetry = true,
   retryPending = false,
-  retryError = ""
+  retryError = "",
+  localPlayerId = ""
 }: ResultPanelProps) {
   const title = isRoomResult
     ? matchRule
@@ -34,7 +38,7 @@ export function ResultPanel({
   const retryLabel = isRoomResult ? "再戦する" : practiceMode === "daily" ? "もう一度挑戦" : "もう一度練習";
 
   return (
-    <div className="resultPanel">
+    <SurfaceCard className="resultPanel">
       <div className="resultPanelHeader">
         <div>
           <p className="eyebrow">RESULT</p>
@@ -46,7 +50,7 @@ export function ResultPanel({
         {result.players.map((player) => (
           <div className="resultRow" key={player.id}>
             <span className="resultRank">#{player.rank}</span>
-            <strong>{player.nickname}</strong>
+            <PlayerIdentity nickname={player.nickname} kind={player.isBot ? "com" : player.id === localPlayerId ? "you" : player.isHost ? "one" : "two"} slot={player.isHost ? "1P" : "2P"} compact />
             <small>
               {player.wpm} WPM / 正確率 {player.accuracy}% / ミス {player.mistakes} / 連続正解 {player.maxStreak}
               {` / 端末 ${getPlayerDeviceLabel(player)}`}
@@ -58,8 +62,8 @@ export function ResultPanel({
       </div>
       <div className="resultActions">
         {canRetry ? (
-          <button
-            className="primaryButton"
+          <Button
+            variant="primary"
             type="button"
             onClick={onRetry}
             disabled={retryPending}
@@ -67,7 +71,7 @@ export function ResultPanel({
           >
             <RotateCcw size={18} />
             {retryPending && isRoomResult ? "再戦を開始しています…" : retryLabel}
-          </button>
+          </Button>
         ) : (
           <p className="infoText" role="status">
             ホストが再戦を開始するのを待っています。
@@ -79,6 +83,6 @@ export function ResultPanel({
           </p>
         ) : null}
       </div>
-    </div>
+    </SurfaceCard>
   );
 }

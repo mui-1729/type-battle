@@ -39,6 +39,8 @@ import { Stat } from "./_components/stat";
 import { TypingInput } from "./_components/typing-input";
 import { StatusPill } from "./_components/status-pill";
 import { TypingPrompt } from "./_components/typing-prompt";
+import { PlayerIdentity } from "./_components/player-identity";
+import { Button, SectionHeading, SurfaceCard } from "./_components/ui";
 import {
   createEmptyProgress,
   advanceProgressWithMistakes,
@@ -1371,7 +1373,8 @@ export default function HomePage() {
           )}
 
           {!room ? (
-            <div className="dailyChallengePanel">
+            <SurfaceCard className="dailyChallengePanel">
+              <SectionHeading eyebrow="SOLO" title="Daily challenge" />
               <div className="dailyChallengeHeader">
                 <span>デイリーチャレンジ</span>
                 <small>{dailyChallengeInfo.challengeKey}</small>
@@ -1404,7 +1407,7 @@ export default function HomePage() {
                 <Swords size={18} />
                 今日の挑戦を開始
               </button>
-            </div>
+            </SurfaceCard>
           ) : null}
 
           <div className="mistakeTrendPanel">
@@ -1490,12 +1493,13 @@ export default function HomePage() {
             <div className="playerList">
               {room.players.map((player) => (
                 <div className="playerRow" key={player.id}>
-                  <div>
-                    <strong>{player.nickname}</strong>
-                    <span>
-                      {getPlayerRoleLabel(player)} / {getPlayerDeviceLabel(player)}
-                    </span>
-                  </div>
+                  <PlayerIdentity
+                    nickname={player.nickname}
+                    kind={player.isBot ? "com" : player.id === playerId ? "you" : player.id === room.hostPlayerId ? "one" : "two"}
+                    slot={player.id === room.hostPlayerId ? "1P" : "2P"}
+                    meta={`${getPlayerRoleLabel(player)} / ${getPlayerDeviceLabel(player)}`}
+                    compact
+                  />
                   <small>{getPlayerConnectionLabel(player)}</small>
                 </div>
               ))}
@@ -1568,18 +1572,18 @@ export default function HomePage() {
 
           {room?.status === "waiting" ? (
             <div className="lobbyActions">
-              <button className="secondaryButton" type="button" onClick={setReady}>
+              <Button type="button" onClick={setReady} aria-pressed={Boolean(currentPlayer?.ready)}>
                 {currentPlayer?.ready ? "準備完了" : "準備する"}
-              </button>
-              <button
-                className="primaryButton"
+              </Button>
+              <Button
+                variant="primary"
                 type="button"
                 onClick={startMatch}
                 disabled={!realtimeConfigured || !canStart}
               >
                 <Play size={18} />
                 {room.players.length < room.maxPlayers ? "COM と開始" : "開始"}
-              </button>
+              </Button>
             </div>
           ) : null}
         </aside>
@@ -1698,6 +1702,7 @@ export default function HomePage() {
               {activeResult ? (
                 <ResultPanel
                   result={activeResult}
+                  localPlayerId={playerId}
                   isRoomResult={Boolean(room)}
                   onRetry={room ? rematch : retryPractice}
                   practiceMode={activePracticeMode}
