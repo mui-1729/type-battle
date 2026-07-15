@@ -1,5 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const webPort = Number(process.env.PLAYWRIGHT_PORT ?? 3000);
+const webUrl = `http://127.0.0.1:${webPort}`;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
@@ -13,14 +16,14 @@ export default defineConfig({
       timeout: 120_000
     },
     {
-      command: "NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL=ws://127.0.0.1:8787 npm run start -w @type-battle/web",
-      url: "http://127.0.0.1:3000",
+      command: `NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL=ws://127.0.0.1:8787 npm exec next start -w @type-battle/web -- --hostname 127.0.0.1 --port ${webPort}`,
+      url: webUrl,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000
     }
   ],
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL: webUrl,
     trace: "on-first-retry"
   },
   projects: [
