@@ -110,7 +110,7 @@ test("rejoins the room after reload", async ({ browser }) => {
   // Wait for reconnection to complete
   await expect(host.locator(".connection")).toHaveClass(/isOnline/);
   await expect(host.locator(".roomMeta strong")).toHaveText(roomCode, { timeout: 10_000 });
-  await expect(host.getByLabel("ルーム操作").getByText("Alice")).toBeVisible();
+  await expect(host.getByTestId("lobby-prep").getByText("Alice")).toBeVisible();
 
   await hostContext.close();
 });
