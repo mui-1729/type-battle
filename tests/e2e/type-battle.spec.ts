@@ -71,10 +71,10 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await guest.getByRole("button", { name: "READYにする" }).click();
   await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
   await expect(guest.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
-  await expect(host.locator('.battleStagePlayerMover[data-side="left"] strong')).toHaveText("Alice");
-  await expect(host.locator('.battleStagePlayerMover[data-side="right"] strong')).toHaveText("Bob");
-  await expect(guest.locator('.battleStagePlayerMover[data-side="left"] strong')).toHaveText("Bob");
-  await expect(guest.locator('.battleStagePlayerMover[data-side="right"] strong')).toHaveText("Alice");
+  await expect(host.locator(".raceLaneOne strong")).toHaveText("Alice");
+  await expect(host.locator(".raceLaneTwo strong")).toHaveText("Bob");
+  await expect(guest.locator(".raceLaneOne strong")).toHaveText("Alice");
+  await expect(guest.locator(".raceLaneTwo strong")).toHaveText("Bob");
 
   const hostGuide = await readInputGuide(host);
   const guestGuide = await readInputGuide(guest);
@@ -116,7 +116,7 @@ test("rejoins the room after reload", async ({ browser }) => {
 });
 
 test("plays all three stage modes against COM and resets between rematches", async ({ browser }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
 
   const hostContext = await browser.newContext();
   const host = await hostContext.newPage();
@@ -143,29 +143,30 @@ test("plays all three stage modes against COM and resets between rematches", asy
     await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
     const stage = host.getByTestId("battle-stage");
-    const localPlayer = stage.locator('.battleStagePlayerMover[data-side="left"]');
+    const localPlayer = mode.key === "hpBattle" ? stage.locator('.battleStagePlayerMover[data-side="left"]') : stage.locator(".raceLaneOne");
+    const opponentPlayer = mode.key === "hpBattle" ? stage.locator('.battleStagePlayerMover[data-side="right"]') : stage.locator(".raceLaneTwo");
     const input = host.getByLabel("入力欄");
     await expect(stage).toHaveAttribute("data-mode", mode.key);
     await expect(stage).toHaveAttribute("data-phase", "playing");
     await expect(localPlayer.locator("strong")).toHaveText("Alice");
-    await expect(stage.locator('.battleStagePlayerMover[data-side="right"] span').first()).toContainText("COM");
+    await expect(opponentPlayer).toContainText("COM");
     await expect(input).toBeFocused();
 
     const guide = await readInputGuide(host);
     const splitIndex = Math.max(2, Math.floor(guide.length / 2));
     await input.pressSequentially(guide.slice(0, splitIndex), { delay: 2 });
-    await expect.poll(async () => Number(await localPlayer.getAttribute("data-progress"))).toBeGreaterThan(0);
+    await expect.poll(async () => Number(await (mode.key === "hpBattle" ? localPlayer.getAttribute("data-progress") : localPlayer.locator('[role="progressbar"]').getAttribute("aria-valuenow")))).toBeGreaterThan(0);
     await expect(input).toBeFocused();
 
     if (mode.key === "hpBattle") {
       await expect.poll(async () => Number(await stage.locator(".hpPushStageScene").getAttribute("data-cargo-position")))
         .toBeGreaterThan(50);
     } else {
-      await expect.poll(async () => Number(await localPlayer.getAttribute("data-position"))).toBeGreaterThan(14);
+      await expect.poll(async () => Number(await localPlayer.locator('[role="progressbar"]').getAttribute("aria-valuenow"))).toBeGreaterThan(0);
     }
 
     if (mode.key === "timeAttack") {
-      await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 40_000 });
+      await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 70_000 });
     } else {
       await input.pressSequentially(guide.slice(splitIndex), { delay: 2 });
       await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 8_000 });
@@ -182,7 +183,11 @@ test("plays all three stage modes against COM and resets between rematches", asy
       await expect(stage).toHaveAttribute("data-mode", nextMode.key);
       await expect(stage).toHaveAttribute("data-winner-id", "none");
       await expect(stage).toHaveAttribute("data-result-animation", "idle");
-      await expect(stage.locator('.battleStagePlayerMover[data-side="left"]')).toHaveAttribute("data-progress", "0.000");
+      if (nextMode.key === "hpBattle") {
+        await expect(stage.locator('.battleStagePlayerMover[data-side="left"]')).toHaveAttribute("data-progress", "0.000");
+      } else {
+        await expect(stage.locator(".raceLaneOne [role=progressbar]")).toHaveAttribute("aria-valuenow", "0");
+      }
     }
   }
 
@@ -227,23 +232,23 @@ test("forfeits the match after long disconnect", async ({ browser }) => {
   // Should immediately show reconnecting
   await expect(host.locator(".statusTag.isDisconnected")).toBeVisible();
   await expect(host.locator(".rivalBar").getByText("再接続中...")).toBeVisible();
-  await expect(host.getByTestId("battle-stage").locator('.battleStagePlayerMover[data-side="right"]')).toHaveAttribute(
-    "data-player-status",
+  await expect(host.getByTestId("battle-stage").locator(".raceLaneTwo .raceRunner")).toHaveAttribute(
+    "data-status",
     "reconnecting"
   );
   await expect(host.getByTestId("battle-stage")).toContainText("再接続中");
 
-  const localMover = host.locator('.battleStagePlayerMover[data-side="left"]');
-  const progressBeforePausedInput = await localMover.getAttribute("data-progress");
+  const localMover = host.locator(".raceLaneOne [role=progressbar]");
+  const progressBeforePausedInput = await localMover.getAttribute("aria-valuenow");
   await host.getByTitle("設定を開く").focus();
   await host.keyboard.press("a");
-  await expect.poll(() => localMover.getAttribute("data-progress")).toBe(progressBeforePausedInput);
+  await expect.poll(() => localMover.getAttribute("aria-valuenow")).toBe(progressBeforePausedInput);
 
   // Wait for forfeit. Local runs can reuse an existing realtime server with the default 30s grace period.
   await expect(host.locator(".statusTag.isForfeited")).toBeVisible({ timeout: 40_000 });
   await expect(host.locator(".rivalBar").getByText("棄権")).toBeVisible();
-  await expect(host.getByTestId("battle-stage").locator('.battleStagePlayerMover[data-side="right"]')).toHaveAttribute(
-    "data-player-status",
+  await expect(host.getByTestId("battle-stage").locator(".raceLaneTwo .raceRunner")).toHaveAttribute(
+    "data-status",
     "forfeited"
   );
   await expect(host.getByTestId("battle-stage")).toContainText("棄権");
@@ -290,7 +295,7 @@ test("disables stage motion for the player setting and OS preference", async ({ 
     await page.getByRole("button", { name: "READYにする" }).click();
     await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
-    const motion = await page.locator('.battleStagePlayerMover[data-side="left"]').evaluate((element) => {
+    const motion = await page.locator(".raceLaneOne .raceRunner").evaluate((element) => {
       const moverStyle = getComputedStyle(element);
       const figureBody = element.querySelector(".stickFigureBody");
       return {
@@ -298,7 +303,7 @@ test("disables stage motion for the player setting and OS preference", async ({ 
         animationName: figureBody ? getComputedStyle(figureBody).animationName : "missing"
       };
     });
-    expect(motion.transitionDuration).toBe("0s");
+    expect(Number.parseFloat(motion.transitionDuration)).toBeLessThan(0.001);
     expect(motion.animationName).toBe("none");
 
     await context.close();

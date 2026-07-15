@@ -17,13 +17,15 @@ type BattleStageProps = {
   result: MatchResult | null;
   localPlayerId: string;
   timeAttackExpired?: boolean;
+  timeAttackRemainingMs?: number;
 };
 
 export const BattleStage = memo(function BattleStage({
   room,
   result,
   localPlayerId,
-  timeAttackExpired = false
+  timeAttackExpired = false,
+  timeAttackRemainingMs = 0
 }: BattleStageProps) {
   const view = useMemo(
     () => createBattleStageViewModel(room, result, localPlayerId),
@@ -71,6 +73,12 @@ export const BattleStage = memo(function BattleStage({
         <span className="battleStageMode" data-testid="battle-stage-mode">
           {MATCH_RULE_DETAILS[view.mode].label}
         </span>
+        {view.mode === "timeAttack" ? (
+          <span className="battleStageTimeAttack" data-testid="time-attack-info">
+            <strong>{Math.max(Math.ceil(timeAttackRemainingMs / 1000), 0)}s</strong>
+            <small>{room.round ?? 1}周目</small>
+          </span>
+        ) : null}
         <span className="battleStageSummary">{summary}</span>
       </div>
 

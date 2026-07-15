@@ -1,13 +1,6 @@
 import { memo } from "react";
-import {
-  BATTLE_STAGE_COORDINATES,
-  toRacePosition,
-  type BattleStagePlayer,
-  type BattleStageViewModel
-} from "../_lib/battle-stage";
-import { CargoObject } from "./cargo-object";
-import { StagePlayer, getMoverStyle } from "./stage-player";
-import type { StickFigurePose } from "./stick-figure";
+import { StickFigure, type StickFigurePose } from "./stick-figure";
+import type { BattleStagePlayer, BattleStageViewModel } from "../_lib/battle-stage";
 
 type RaceStageProps = {
   view: BattleStageViewModel;
@@ -16,11 +9,6 @@ type RaceStageProps = {
 
 export const RaceStage = memo(function RaceStage({ view, timeAttackExpired }: RaceStageProps) {
   const winner = view.players.find((player) => player.id === view.winnerId) ?? null;
-  const cargoPosition = winner
-    ? winner.side === "left"
-      ? BATTLE_STAGE_COORDINATES.cargoCenter - 3
-      : BATTLE_STAGE_COORDINATES.cargoCenter + 3
-    : BATTLE_STAGE_COORDINATES.cargoCenter;
   const stageState = getRaceStageState(view, timeAttackExpired);
 
   return (
@@ -31,113 +19,75 @@ export const RaceStage = memo(function RaceStage({ view, timeAttackExpired }: Ra
       data-result-ready={view.winnerId ? "true" : "false"}
     >
       {view.players.map((player) => {
+        const ratio = player.isWinner && view.phase === "result" ? 1 : player.progressRatio;
         const outcome = view.phase === "result" && view.winnerId
-          ? player.isWinner
-            ? "winner"
-            : "loser"
+          ? player.isWinner ? "winner" : "loser"
           : "neutral";
-        const position = player.isWinner && view.phase === "result"
-          ? toRacePosition(1, player.side)
-          : toRacePosition(player.progressRatio, player.side);
-        const actionLabel = getRaceActionLabel(player, view, timeAttackExpired);
 
         return (
-          <StagePlayer
-            key={player.id}
-            player={player}
-            position={position}
-            pose={getRacePose(player, view, timeAttackExpired)}
-            outcome={outcome}
-            {...(actionLabel ? { actionLabel } : {})}
-          />
+          <div className={`raceLane raceLane${player.side === "left" ? "One" : "Two"}`} data-player-id={player.id} data-outcome={outcome} key={player.id}>
+            <div className="raceLaneHeader">
+              <div className="raceLaneIdentity">
+                <span className="raceLaneSlot">{player.side === "left" ? "1P" : "2P"}</span>
+                <strong title={player.nickname}>{player.nickname}</strong>
+                {player.isLocal ? <span className="raceYouBadge">YOU</span> : null}
+              </div>
+              <div className="raceLaneStats" aria-label={`${player.nickname} の記録`}>
+                <span>ミス {player.mistakes}</span>
+                <span>ミスガード {renderGuards(player.mistakeGuards)}</span>
+              </div>
+            </div>
+            <div
+              className="raceTrack"
+              role="progressbar"
+              aria-label={`${player.nickname} の進捗`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(ratio * 100)}
+            >
+              <span className="raceTrackFill" style={{ width: `${ratio * 100}%` }} />
+              <span className="raceTrackTicks" aria-hidden="true" />
+              <span className="raceGoalTape" aria-hidden="true">GOAL!</span>
+             <div
+                className="raceRunner"
+                data-pose={getRacePose(player, view, timeAttackExpired)}
+                data-status={player.status}
+                data-streak={player.currentStreak >= 5 ? "hot" : "normal"}
+                style={{ left: `${Math.min(Math.max(ratio * 100, 4), 94)}%` }}
+              >
+               <span className="raceSpeedLines" aria-hidden="true" />
+                <StickFigure side={player.side} pose={getRacePose(player, view, timeAttackExpired)} status={player.status} />
+              </div>
+            </div>
+          </div>
         );
       })}
-
-      <div
-        className="battleStageMover battleStageCargoMover"
-        data-position={cargoPosition.toFixed(1)}
-        data-claimed-by={winner?.side ?? "none"}
-        style={getMoverStyle(cargoPosition)}
-      >
-        <div className="battleStageCargoInner">
-          <CargoObject claimedBy={winner?.side ?? null} />
-        </div>
-      </div>
+      {winner ? (
+        <span className="raceWinnerCallout">{winner.nickname} GOAL!</span>
+      ) : timeAttackExpired ? (
+        <span className="raceWinnerCallout raceResultPendingCallout" role="status">判定待ち</span>
+      ) : null}
     </div>
   );
 });
 
-function getRacePose(
-  player: BattleStagePlayer,
-  view: BattleStageViewModel,
-  timeAttackExpired: boolean
-): StickFigurePose {
-  if (player.status === "forfeited" || player.status === "eliminated") {
-    return "lose";
-  }
+function renderGuards(count: number): string {
+  return count > 0 ? `${"◆".repeat(Math.min(count, 3))}${"◇".repeat(Math.max(3 - count, 0))}` : "なし";
+}
 
-  if (player.status === "reconnecting") {
-    return "idle";
-  }
-
-  if (view.phase === "result") {
-    return view.winnerId ? (player.isWinner ? "win" : "lose") : "tired";
-  }
-
-  if (timeAttackExpired) {
-    return "tired";
-  }
-
-  if (player.progressRatio >= 1) {
-    return "reach";
-  }
-
-  if (view.phase === "playing") {
-    return "run";
-  }
-
+function getRacePose(player: BattleStagePlayer, view: BattleStageViewModel, timeAttackExpired: boolean): StickFigurePose {
+  if (player.status === "forfeited" || player.status === "eliminated") return "lose";
+  if (player.status === "reconnecting") return "idle";
+  if (view.phase === "result") return view.winnerId ? (player.isWinner ? "win" : "lose") : "tired";
+  if (timeAttackExpired) return "tired";
+  if (player.progressRatio >= 1) return "reach";
+  if (view.phase === "playing") return "run";
   return view.phase === "countdown" ? "ready" : "idle";
 }
 
-function getRaceActionLabel(
-  player: BattleStagePlayer,
-  view: BattleStageViewModel,
-  timeAttackExpired: boolean
-): string | undefined {
-  if (view.phase === "result") {
-    if (!view.winnerId) {
-      return "結果を確認中";
-    }
-    return player.isWinner ? "荷物を獲得" : "結果確定";
-  }
-
-  if (timeAttackExpired) {
-    return "判定待ち";
-  }
-
-  if (player.progressRatio >= 1) {
-    return "ゴール・結果待ち";
-  }
-
-  if (view.phase === "playing") {
-    return "走行中";
-  }
-
-  return undefined;
-}
-
-function getRaceStageState(
-  view: BattleStageViewModel,
-  timeAttackExpired: boolean
-): "idle" | "running" | "goal-wait" | "time-expired" | "result-pending" | "result" {
-  if (view.phase === "result") {
-    return view.winnerId ? "result" : "result-pending";
-  }
-  if (timeAttackExpired) {
-    return "time-expired";
-  }
-  if (view.players.some((player) => player.progressRatio >= 1)) {
-    return "goal-wait";
-  }
+function getRaceStageState(view: BattleStageViewModel, timeAttackExpired: boolean): "idle" | "running" | "goal-wait" | "time-expired" | "result-pending" | "result" {
+  if (view.phase === "result") return view.winnerId ? "result" : "result-pending";
+  if (timeAttackExpired) return "time-expired";
+  if (view.players.some((player) => player.progressRatio >= 1)) return "goal-wait";
   return view.phase === "playing" ? "running" : "idle";
 }

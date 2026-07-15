@@ -1650,6 +1650,7 @@ export default function HomePage() {
                       result={result}
                       localPlayerId={playerId}
                       timeAttackExpired={isTimeAttackExpired}
+                      timeAttackRemainingMs={matchTimerMs}
                     />
                   ) : null}
 
@@ -1700,27 +1701,29 @@ export default function HomePage() {
                 </div>
               ) : null}
 
-              <section className="statsGrid" aria-label="補助記録">
-                <Stat
-                  label="WPM"
-                  value={isRoomPlaying || isPracticePlaying ? activeWpm : activeResultPlayer?.wpm ?? 0}
-                />
-                <Stat
-                  label="ACC"
+              <section className={isRoomPlaying ? "statsGrid battleStatsMinimal" : "statsGrid"} aria-label="補助記録">
+                {!isRoomPlaying ? <Stat label="WPM" value={isPracticePlaying ? activeWpm : activeResultPlayer?.wpm ?? 0} /> : null}
+                {!isRoomPlaying ? (
+                  <Stat
+                    label="ACC"
                   value={`${
                     isRoomPlaying || isPracticePlaying
                       ? activeAccuracy
                       : activeResultPlayer?.accuracy ?? 100
                   }%`}
-                />
+                  />
+                ) : null}
                 <Stat
                   label="MISS"
                   value={
-                    isRoomPlaying || isPracticePlaying
-                      ? activeProgress.mistakes
-                      : activeResultPlayer?.mistakes ?? 0
+                    isRoomPlaying
+                      ? currentPlayer?.mistakes ?? activeProgress.mistakes
+                      : isPracticePlaying
+                        ? activeProgress.mistakes
+                        : activeResultPlayer?.mistakes ?? 0
                   }
                 />
+                {isRoomPlaying ? <Stat label="ガード" value={currentPlayer?.mistakeGuards ?? 0} /> : null}
                 {isTimeAttackPlaying ? <Stat label="残り" value={`${activeTimeAttackRemainingSeconds}s`} /> : null}
                 {((currentPlayer?.maxHp ?? activeResultPlayer?.maxHp) !== undefined) ? (
                   <Stat

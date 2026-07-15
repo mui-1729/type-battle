@@ -29,7 +29,7 @@ const prompt = {
   }
 };
 
-const leftPlayer = createPlayer({ id: "player-b", nickname: "Alice" });
+const leftPlayer = createPlayer({ id: "player-b", nickname: "Alice", isHost: true });
 const rightPlayer = createPlayer({ id: "player-a", nickname: "COM", isBot: true });
 
 describe("battle stage coordinate transforms", () => {
@@ -77,12 +77,12 @@ describe("battle stage coordinate transforms", () => {
 });
 
 describe("battle stage view model", () => {
-  it("pins the local player to the left independent of the player array order", () => {
-    expect(assignBattleSides([rightPlayer, leftPlayer], leftPlayer.id)).toEqual({
+  it("keeps the host in the 1P lane independent of the player array order", () => {
+    expect(assignBattleSides([rightPlayer, leftPlayer], rightPlayer.id)).toEqual({
       leftPlayerId: leftPlayer.id,
       rightPlayerId: rightPlayer.id
     });
-    expect(assignBattleSides([leftPlayer, rightPlayer], leftPlayer.id)).toEqual({
+    expect(assignBattleSides([leftPlayer, rightPlayer], rightPlayer.id)).toEqual({
       leftPlayerId: leftPlayer.id,
       rightPlayerId: rightPlayer.id
     });
@@ -90,8 +90,8 @@ describe("battle stage view model", () => {
 
   it("uses a deterministic id order before a local player id is available", () => {
     expect(assignBattleSides([leftPlayer, rightPlayer], "")).toEqual({
-      leftPlayerId: rightPlayer.id,
-      rightPlayerId: leftPlayer.id
+      leftPlayerId: leftPlayer.id,
+      rightPlayerId: rightPlayer.id
     });
   });
 
@@ -188,9 +188,9 @@ describe("race and time attack presentation", () => {
 
     expect(markup).toContain('data-stage-state="goal-wait"');
     expect(markup).toContain('data-result-ready="false"');
-    expect(markup).toContain('data-position="43.0"');
-    expect(markup).toContain('data-position="57.0"');
-    expect(markup).toContain('data-claimed-by="none"');
+    expect(markup.match(/class="raceLane /g)).toHaveLength(2);
+    expect(markup).toContain('aria-valuenow="100"');
+    expect(markup).toContain('class="raceGoalTape"');
     expect(markup).not.toContain('data-outcome="winner"');
   });
 
@@ -208,11 +208,10 @@ describe("race and time attack presentation", () => {
     }));
 
     expect(leftMarkup).toContain('data-result-ready="true"');
-    expect(leftMarkup).toContain('data-claimed-by="left"');
-    expect(leftMarkup).toContain('data-player-id="player-b" data-side="left" data-position="43.0"');
+    expect(leftMarkup).toContain('data-player-id="player-b" data-outcome="winner"');
+    expect(leftMarkup).toContain('class="raceWinnerCallout"');
     expect(leftMarkup).toContain('data-outcome="winner"');
-    expect(rightMarkup).toContain('data-claimed-by="right"');
-    expect(rightMarkup).toContain('data-player-id="player-a" data-side="right" data-position="57.0"');
+    expect(rightMarkup).toContain('data-player-id="player-a" data-outcome="winner"');
   });
 
   it("shows a stopped time attack state until the server result arrives", () => {
@@ -223,6 +222,7 @@ describe("race and time attack presentation", () => {
     expect(markup).toContain('data-stage-state="time-expired"');
     expect(markup).toContain('data-time-expired="true"');
     expect(markup).toContain('data-pose="tired"');
+    expect(markup).toContain('class="raceLane raceLaneOne"');
     expect(markup).toContain("判定待ち");
     expect(markup).not.toContain('data-outcome="winner"');
   });

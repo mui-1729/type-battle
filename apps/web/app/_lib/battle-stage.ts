@@ -26,6 +26,9 @@ export type BattleStagePlayer = {
   connected: boolean;
   status: BattlePlayerStatus;
   progressRatio: number;
+  mistakes: number;
+  mistakeGuards: number;
+  currentStreak: number;
   hp?: number;
   maxHp?: number;
   finishStatus?: PlayerState["finishStatus"];
@@ -144,19 +147,20 @@ export function getHpAdvantage(
 }
 
 export function assignBattleSides(
-  players: readonly Pick<PlayerState, "id">[],
+  players: readonly Pick<PlayerState, "id" | "isHost">[],
   localPlayerId: string
 ): { leftPlayerId: string | null; rightPlayerId: string | null } {
+  void localPlayerId;
   if (players.length === 0) {
     return { leftPlayerId: null, rightPlayerId: null };
   }
 
-  const localPlayer = players.find((player) => player.id === localPlayerId);
+  const hostPlayer = players.find((player) => player.isHost);
 
-  if (localPlayer) {
+  if (hostPlayer) {
     return {
-      leftPlayerId: localPlayer.id,
-      rightPlayerId: players.find((player) => player.id !== localPlayer.id)?.id ?? null
+      leftPlayerId: hostPlayer.id,
+      rightPlayerId: players.find((player) => player.id !== hostPlayer.id)?.id ?? null
     };
   }
 
@@ -199,6 +203,9 @@ export function createBattleStageViewModel(
       progressRatio: resultPlayer?.finishStatus === "finished"
         ? 1
         : toProgressRatio(player.progressIndex, promptLength),
+      mistakes: player.mistakes,
+      mistakeGuards: player.mistakeGuards ?? 0,
+      currentStreak: player.currentStreak,
       ...(player.hp !== undefined ? { hp: player.hp } : {}),
       ...(player.maxHp !== undefined ? { maxHp: player.maxHp } : {}),
       ...(player.finishStatus !== undefined ? { finishStatus: player.finishStatus } : {}),
