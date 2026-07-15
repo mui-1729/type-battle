@@ -254,9 +254,14 @@ describe("HP push presentation", () => {
     expect(markup).toContain('data-cargo-position="50.0"');
     expect(markup).toContain('data-advantage="even"');
     expect(markup).toContain("互角");
+    expect(markup).toContain('class="hpBattlePlayer hpBattlePlayerLeft"');
+    expect(markup).toContain('class="hpBattlePlayer hpBattlePlayerRight"');
+    expect(markup).toContain('aria-label="Alice のHP"');
+    expect(markup).toContain('aria-label="COM のHP"');
+    expect(markup).toContain("hpBattleVs");
   });
 
-  it("moves cargo toward the lower-HP COM using only received HP", () => {
+  it("shows the lower-HP opponent as trailing with a live HP bar", () => {
     const room = createRoom({
       matchRule: "hpBattle",
       players: [
@@ -269,10 +274,12 @@ describe("HP push presentation", () => {
 
     expect(markup).toContain('data-hp-advantage="left"');
     expect(markup).toContain('data-cargo-position="72.5"');
-    expect(markup).toContain("COM・押し戻され中");
+    expect(markup).toContain("COM");
+    expect(markup).toContain('aria-label="COM のHP"');
+    expect(markup).toContain('data-advantage="trailing"');
   });
 
-  it("does not start an elimination effect for HP zero before a server result", () => {
+  it("does not show KO before a server result confirms elimination", () => {
     const room = createRoom({
       matchRule: "hpBattle",
       players: [
@@ -285,11 +292,10 @@ describe("HP push presentation", () => {
 
     expect(markup).toContain('data-cargo-position="20.0"');
     expect(markup).toContain('data-result-ready="false"');
-    expect(markup).not.toContain('data-eliminated="true"');
-    expect(markup).not.toContain("battleStageDefeatEffect");
+    expect(markup).not.toContain("KO!");
   });
 
-  it("enables the abstract defeat effect only for a confirmed eliminated loser", () => {
+  it("shows KO and impact styling only for a confirmed eliminated loser", () => {
     const room = createRoom({
       status: "finished",
       matchRule: "hpBattle",
@@ -303,10 +309,23 @@ describe("HP push presentation", () => {
     const markup = renderToStaticMarkup(React.createElement(HpPushStage, { view }));
 
     expect(markup).toContain('data-stage-state="elimination-result"');
-    expect(markup).toContain('data-player-id="player-b" data-side="left" data-position="11.0"');
-    expect(markup).toContain('data-eliminated="true"');
-    expect(markup).toContain("battleStageDefeatEffect");
-    expect(markup).toContain("敗北");
+    expect(markup).toContain('data-player-id="player-b"');
+    expect(markup).toContain('data-impact="large"');
+    expect(markup).toContain("KO!");
+    expect(markup).toContain("COM の勝利");
+  });
+
+  it("shows DOUBLE KO when both server result players have zero HP", () => {
+    const room = createRoom({ status: "finished", matchRule: "hpBattle" });
+    const result = createHpResult({ loserFinishStatus: "eliminated", loserHp: 0 });
+    result.players.forEach((player) => {
+      player.hp = 0;
+      player.finishStatus = "eliminated";
+    });
+    const view = createBattleStageViewModel(room, result, leftPlayer.id);
+    const markup = renderToStaticMarkup(React.createElement(HpPushStage, { view }));
+
+    expect(markup).toContain("DOUBLE KO");
   });
 
   it("does not crush a completed or forfeited loser", () => {

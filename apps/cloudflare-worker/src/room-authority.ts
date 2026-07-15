@@ -162,6 +162,7 @@ type InternalRoom = {
   promptHistory: string[];
   serverStartAt?: number;
   matchEndsAt?: number;
+  suddenDeath?: boolean;
   result?: MatchResult;
   players: Map<string, InternalPlayer>;
   createdAt: number;
@@ -210,10 +211,9 @@ const GUEST_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MATCH_RESULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_PLAYERS = 2;
 const COUNTDOWN_MS = 3_000;
-const HP_BATTLE_HP_PER_PROMPT_CHAR = 5;
-const HP_BATTLE_MIN_HP = 50;
-const HP_BATTLE_ATTACK_DAMAGE = 5;
-const HP_BATTLE_MISTAKE_DAMAGE = 2;
+const HP_BATTLE_MAX_HP = 100;
+const HP_BATTLE_MISTAKE_DAMAGE = 1;
+const HP_BATTLE_DURATION_MS = 90_000;
 const MISTAKE_GUARD_STREAK = 20;
 const MAX_MISTAKE_GUARDS = 3;
 const BOT_PLAYER_ID = "bot_com_1";
@@ -1345,7 +1345,7 @@ export class RoomAuthorityDurableObject {
   }
 
   private async handleTimeAttackExpirations(): Promise<void> {
-    if (!this.room || this.room.status !== "playing" || this.room.matchRule !== "timeAttack" || !this.room.matchEndsAt) {
+    if (!this.room || this.room.status !== "playing" || (this.room.matchRule !== "timeAttack" && this.room.matchRule !== "hpBattle") || !this.room.matchEndsAt) {
       await this.scheduleMaintenanceAlarm();
       return;
     }
@@ -1353,6 +1353,20 @@ export class RoomAuthorityDurableObject {
     if (Date.now() < this.room.matchEndsAt) {
       await this.scheduleMaintenanceAlarm();
       return;
+    }
+
+    if (this.room.matchRule === "hpBattle") {
+      const players = [...this.room.players.values()];
+      const leftHp = players[0]?.hp ?? 0;
+      const rightHp = players[1]?.hp ?? 0;
+      if (leftHp === rightHp) {
+        this.room.suddenDeath = true;
+        delete this.room.matchEndsAt;
+        this.broadcastRoomState(this.room);
+        await this.persistRoom(this.room.roomCode);
+        await this.scheduleMaintenanceAlarm();
+        return;
+      }
     }
 
     this.finalizeUnfinishedBots(this.room);
@@ -1445,7 +1459,7 @@ export class RoomAuthorityDurableObject {
       }
     }
 
-    if (this.room.status === "playing" && this.room.matchRule === "timeAttack" && this.room.matchEndsAt !== undefined) {
+    if (this.room.status === "playing" && (this.room.matchRule === "timeAttack" || this.room.matchRule === "hpBattle") && this.room.matchEndsAt !== undefined) {
       addDeadline(this.room.matchEndsAt);
     }
 
@@ -1871,9 +1885,12 @@ export class RoomAuthorityDurableObject {
     context.room.serverStartAt = Date.now() + COUNTDOWN_MS;
     if (context.room.matchRule === "timeAttack") {
       context.room.matchEndsAt = context.room.serverStartAt + getTimeAttackDurationMs(this.env.TIME_ATTACK_MS);
+    } else if (context.room.matchRule === "hpBattle") {
+      context.room.matchEndsAt = context.room.serverStartAt + HP_BATTLE_DURATION_MS;
     } else {
       delete context.room.matchEndsAt;
     }
+    context.room.suddenDeath = false;
     delete context.room.result;
     delete context.room.finishedAt;
     resetPlayers(context.room);
@@ -2129,7 +2146,7 @@ export class RoomAuthorityDurableObject {
     }
 
     const bot = [...this.room.players.values()].find((player) => player.isBot);
-    if (!bot || (this.room.matchRule !== "timeAttack" && bot.progressIndex >= getTypingLength(this.room, bot))) {
+    if (!bot || (this.room.matchRule !== "timeAttack" && this.room.matchRule !== "hpBattle" && bot.progressIndex >= getTypingLength(this.room, bot))) {
       return null;
     }
 
@@ -2597,8 +2614,7 @@ function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
 }
 
 function resetPlayers(room: InternalRoom, preserveConnectionState = false): void {
-  const promptLength = room.prompt ? getPromptCanonicalLength(room.prompt) : 0;
-  const maxHp = room.matchRule === "hpBattle" ? Math.max(HP_BATTLE_MIN_HP, promptLength * HP_BATTLE_HP_PER_PROMPT_CHAR) : undefined;
+  const maxHp = room.matchRule === "hpBattle" ? HP_BATTLE_MAX_HP : undefined;
 
   for (const player of room.players.values()) {
     player.ready = false;
@@ -2722,33 +2738,34 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
   const previousMistakes = player.mistakes;
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
-  const timeAttack = room.matchRule === "timeAttack";
+  const loopingMatch = room.matchRule === "timeAttack" || room.matchRule === "hpBattle";
   const kanaInput = player.deviceKind === "mobile" || containsKana(payload.input);
-  let progressDelta = 0;
+  let attackDamageDelta = 0;
 
   if (kanaInput) {
     for (const typedChar of Array.from(payload.input)) {
-      const expectedIndex = timeAttack ? modulo(player.progressIndex, promptLength) : player.progressIndex;
+      const expectedIndex = loopingMatch ? modulo(player.progressIndex, promptLength) : player.progressIndex;
       const before = createProgressState(player);
       const after = advanceProgress(before, room.prompt.typing.hiragana[expectedIndex], typedChar);
       applyGuardedProgress(player, before, after);
-      player.progressIndex = after.progressIndex;
-      progressDelta += Math.max(after.progressIndex - before.progressIndex, 0);
+      player.progressIndex = loopingMatch ? modulo(after.progressIndex, promptLength) : after.progressIndex;
+      const completedCharacters = Math.max(after.progressIndex - before.progressIndex, 0);
+      attackDamageDelta += completedCharacters;
     }
 
     if (player.deviceKind === "desktop") {
       const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
-      player.typingProgressIndex = getRomajiProgressIndexForCanonicalProgress(plan, player.progressIndex, timeAttack);
+        player.typingProgressIndex = getRomajiProgressIndexForCanonicalProgress(plan, player.progressIndex, loopingMatch);
     }
   } else {
     const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
     const guideLength = plan.guide.length;
 
     for (const typedChar of Array.from(payload.input)) {
-      const cursor = timeAttack && guideLength > 0
+      const cursor = loopingMatch && guideLength > 0
         ? modulo(player.typingProgressIndex, guideLength)
         : player.typingProgressIndex;
-      const cycleBase = timeAttack ? player.typingProgressIndex - cursor : 0;
+      const cycleBase = loopingMatch ? player.typingProgressIndex - cursor : 0;
       const before = createProgressState(player, cursor);
       const beforeUnitIndex = getRomajiTypingUnitIndex(plan, before.progressIndex);
       const after = advanceRomajiProgress(before, plan, typedChar);
@@ -2759,15 +2776,15 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
 
       if (completedUnit) {
         const canonicalDelta = Array.from(completedUnit.hiragana).length;
-        player.progressIndex = timeAttack
-          ? player.progressIndex + canonicalDelta
+        player.progressIndex = loopingMatch
+          ? modulo(player.progressIndex + canonicalDelta, promptLength)
           : clamp(player.progressIndex + canonicalDelta, 0, promptLength);
-        progressDelta += canonicalDelta;
+        attackDamageDelta += completedUnit.guide.length;
       }
     }
   }
 
-  if (!timeAttack) {
+  if (!loopingMatch) {
     player.progressIndex = clamp(player.progressIndex, 0, promptLength);
   }
   player.wpm = calculateWpm(player.progressIndex, now - startedAt);
@@ -2776,18 +2793,17 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
   if (room.matchRule === "hpBattle") {
     const mistakeDelta = Math.max(player.mistakes - previousMistakes, 0);
 
-    if (progressDelta > 0) {
+    if (attackDamageDelta > 0) {
       for (const opponent of room.players.values()) {
         if (
           opponent.id === player.id ||
           opponent.hp === undefined ||
-          opponent.progressIndex >= getTypingLength(room, opponent) ||
           opponent.hp <= 0
         ) {
           continue;
         }
 
-        applyHpDamage(opponent, progressDelta * HP_BATTLE_ATTACK_DAMAGE, room, now);
+        applyHpDamage(opponent, attackDamageDelta, room, now);
       }
     }
 
@@ -2796,7 +2812,7 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
     }
   }
 
-  if (!timeAttack && player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
+  if (!loopingMatch && player.progressIndex >= promptLength && previousProgressIndex < promptLength) {
     player.finishedAt = now;
     player.finishTimeMs = now - startedAt;
     player.finishStatus = "finished";
@@ -2807,6 +2823,12 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
 function areHumansFinished(room: InternalRoom): boolean {
   if (room.matchRule === "timeAttack") {
     return false;
+  }
+
+  if (room.matchRule === "hpBattle") {
+    return [...room.players.values()]
+      .filter((p) => !p.isBot)
+      .every((p) => p.finishStatus === "forfeited" || p.finishStatus === "eliminated" || (p.hp ?? 0) <= 0);
   }
 
   return [...room.players.values()]
@@ -2844,7 +2866,8 @@ function applyBotProgress(
   const promptLength = getTypingLength(room, bot);
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
-  const progressDelta = room.matchRule === "timeAttack"
+  const loopingMatch = room.matchRule === "timeAttack" || room.matchRule === "hpBattle";
+  const progressDelta = loopingMatch
     ? charsToAdd
     : Math.min(charsToAdd, Math.max(promptLength - bot.progressIndex, 0));
 
@@ -2856,6 +2879,9 @@ function applyBotProgress(
     } else {
       bot.mistakes += totalTypedDelta;
       bot.currentStreak = 0;
+      if (room.matchRule === "hpBattle") {
+        applyHpDamage(bot, totalTypedDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
+      }
     }
   } else if (progressDelta > 0) {
     const previousStreak = bot.currentStreak;
@@ -2863,6 +2889,14 @@ function applyBotProgress(
     bot.correctCharacters += progressDelta;
     bot.currentStreak += progressDelta;
     bot.maxStreak = Math.max(bot.maxStreak, bot.currentStreak);
+    if (room.matchRule === "hpBattle") {
+      bot.progressIndex = modulo(bot.progressIndex, promptLength);
+      for (const opponent of room.players.values()) {
+        if (opponent.id !== bot.id && opponent.hp !== undefined && opponent.hp > 0) {
+          applyHpDamage(opponent, progressDelta, room, now);
+        }
+      }
+    }
     const earned = Math.floor(bot.currentStreak / MISTAKE_GUARD_STREAK) - Math.floor(previousStreak / MISTAKE_GUARD_STREAK);
     bot.mistakeGuards = Math.min((bot.mistakeGuards ?? 0) + Math.max(earned, 0), MAX_MISTAKE_GUARDS);
   }
@@ -2914,6 +2948,7 @@ function getRoomExpirationDeadline(room: InternalRoom): number | null {
 
 function syncMatchRuleState(room: InternalRoom): void {
   delete room.matchEndsAt;
+  room.suddenDeath = false;
 }
 
 function clearRoomReadyStates(room: InternalRoom): void {
@@ -2927,7 +2962,7 @@ function applyHpDamage(player: InternalPlayer, damage: number, room: InternalRoo
     return;
   }
 
-  const nextHp = Math.max(0, player.hp - damage);
+  const nextHp = Math.max(0, player.hp - (room.suddenDeath ? damage * 2 : damage));
   if (nextHp === player.hp) {
     return;
   }
@@ -2970,7 +3005,8 @@ function toPublicRoom(room: InternalRoom): RoomState {
     promptCategory: room.promptCategory,
     players: toPublicPlayers(room),
     maxPlayers: MAX_PLAYERS,
-    round: room.round
+    round: room.round,
+    ...(room.suddenDeath ? { suddenDeath: true } : {})
   };
 
   if (room.prompt) {
@@ -3165,6 +3201,7 @@ function createRoomStateFromSnapshot(
     ...(room.prompt ? { prompt: room.prompt } : {}),
     ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
     ...(room.matchEndsAt !== undefined ? { matchEndsAt: room.matchEndsAt } : {}),
+    ...(room.suddenDeath ? { suddenDeath: true } : {}),
     ...(internal?.finishedAt !== undefined ? { finishedAt: internal.finishedAt } : {}),
     ...(room.result ? { result: room.result } : {})
   };

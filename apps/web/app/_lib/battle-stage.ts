@@ -29,6 +29,7 @@ export type BattleStagePlayer = {
   mistakes: number;
   mistakeGuards: number;
   currentStreak: number;
+  accessoryIndex?: number;
   hp?: number;
   maxHp?: number;
   finishStatus?: PlayerState["finishStatus"];
@@ -206,6 +207,7 @@ export function createBattleStageViewModel(
       mistakes: player.mistakes,
       mistakeGuards: player.mistakeGuards ?? 0,
       currentStreak: player.currentStreak,
+      ...(player.accessoryIndex !== undefined ? { accessoryIndex: player.accessoryIndex } : {}),
       ...(player.hp !== undefined ? { hp: player.hp } : {}),
       ...(player.maxHp !== undefined ? { maxHp: player.maxHp } : {}),
       ...(player.finishStatus !== undefined ? { finishStatus: player.finishStatus } : {}),

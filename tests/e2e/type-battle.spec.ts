@@ -143,19 +143,19 @@ test("plays all three stage modes against COM and resets between rematches", asy
     await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
     const stage = host.getByTestId("battle-stage");
-    const localPlayer = mode.key === "hpBattle" ? stage.locator('.battleStagePlayerMover[data-side="left"]') : stage.locator(".raceLaneOne");
-    const opponentPlayer = mode.key === "hpBattle" ? stage.locator('.battleStagePlayerMover[data-side="right"]') : stage.locator(".raceLaneTwo");
+    const localPlayer = mode.key === "hpBattle" ? stage.locator(".hpBattlePlayerLeft") : stage.locator(".raceLaneOne");
+    const opponentPlayer = mode.key === "hpBattle" ? stage.locator(".hpBattlePlayerRight") : stage.locator(".raceLaneTwo");
     const input = host.getByLabel("入力欄");
     await expect(stage).toHaveAttribute("data-mode", mode.key);
     await expect(stage).toHaveAttribute("data-phase", "playing");
-    await expect(localPlayer.locator("strong")).toHaveText("Alice");
+    await expect(localPlayer.locator(".raceLaneIdentity strong, .hpBattleIdentity strong")).toHaveText("Alice");
     await expect(opponentPlayer).toContainText("COM");
     await expect(input).toBeFocused();
 
     const guide = await readInputGuide(host);
     const splitIndex = Math.max(2, Math.floor(guide.length / 2));
     await input.pressSequentially(guide.slice(0, splitIndex), { delay: 2 });
-    await expect.poll(async () => Number(await (mode.key === "hpBattle" ? localPlayer.getAttribute("data-progress") : localPlayer.locator('[role="progressbar"]').getAttribute("aria-valuenow")))).toBeGreaterThan(0);
+    await expect.poll(async () => Number(await localPlayer.locator('[role="progressbar"]').getAttribute("aria-valuenow"))).toBeGreaterThan(0);
     await expect(input).toBeFocused();
 
     if (mode.key === "hpBattle") {
@@ -184,7 +184,7 @@ test("plays all three stage modes against COM and resets between rematches", asy
       await expect(stage).toHaveAttribute("data-winner-id", "none");
       await expect(stage).toHaveAttribute("data-result-animation", "idle");
       if (nextMode.key === "hpBattle") {
-        await expect(stage.locator('.battleStagePlayerMover[data-side="left"]')).toHaveAttribute("data-progress", "0.000");
+        await expect(stage.locator('.hpBattlePlayerLeft [role="progressbar"]')).toHaveAttribute("aria-valuenow", "100");
       } else {
         await expect(stage.locator(".raceLaneOne [role=progressbar]")).toHaveAttribute("aria-valuenow", "0");
       }

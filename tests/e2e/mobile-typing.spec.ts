@@ -64,7 +64,7 @@ test("keeps the COM battle stage inside a 390px mobile viewport", async ({ page 
   const stage = page.getByTestId("battle-stage");
   const textarea = page.getByLabel("入力欄");
   await expect(stage).toHaveAttribute("data-mode", "hpBattle");
-  await expect(stage.locator('.battleStagePlayerMover[data-side="left"] strong')).toHaveAttribute("title", nickname);
+  await expect(stage.locator(".hpBattlePlayerLeft .hpBattleIdentity strong")).toHaveAttribute("title", nickname);
   await expect(textarea).toBeFocused();
 
   const viewport = await page.evaluate(() => ({
