@@ -338,7 +338,7 @@ export function setPromptCategory(
     return { error: "ホストだけが課題カテゴリを変更できます。" };
   }
 
-  if (context.room.status !== "waiting") {
+  if (context.room.status !== "waiting" && context.room.status !== "finished") {
     return { error: "試合中は課題カテゴリを変更できません。" };
   }
 
@@ -362,7 +362,7 @@ export function setBotDifficulty(
     return { error: "ホストだけが COM 難易度を変更できます。" };
   }
 
-  if (context.room.status !== "waiting") {
+  if (context.room.status !== "waiting" && context.room.status !== "finished") {
     return { error: "試合中は COM 難易度を変更できません。" };
   }
 
@@ -489,7 +489,7 @@ export function setReady(socketId: string, roomCode: string, ready: boolean): Ro
   const record = socketIndex.get(socketId);
   const room = rooms.get(roomCode.toUpperCase());
 
-  if (!record || !room || record.roomCode !== room.roomCode || room.status !== "waiting") {
+  if (!record || !room || record.roomCode !== room.roomCode || (room.status !== "waiting" && room.status !== "finished")) {
     return null;
   }
 
@@ -500,6 +500,41 @@ export function setReady(socketId: string, roomCode: string, ready: boolean): Ro
   }
 
   player.ready = ready;
+
+  if (room.status === "finished") {
+    const humans = [...room.players.values()].filter((candidate) => !candidate.isBot);
+    if (humans.length > 0 && humans.every((candidate) => candidate.ready && candidate.connected)) {
+      const nextRound = room.round + 1;
+      let prompt: Prompt;
+      try {
+        prompt = selectPromptForRoom(room, Date.now() + nextRound);
+      } catch {
+        return toPublicRoom(room);
+      }
+
+      if (room.players.size < MAX_PLAYERS) {
+        addBotPlayer(room);
+      }
+      room.status = "countdown";
+      room.round = nextRound;
+      room.prompt = prompt;
+      if (!room.promptHistory.includes(prompt.id)) {
+        room.promptHistory.push(prompt.id);
+      }
+      room.serverStartAt = Date.now() + COUNTDOWN_MS;
+      if (room.matchRule === "timeAttack") {
+        room.matchEndsAt = room.serverStartAt + engineConfig.timeAttackMs;
+      } else if (room.matchRule === "hpBattle") {
+        room.matchEndsAt = room.serverStartAt + HP_BATTLE_DURATION_MS;
+      } else {
+        delete room.matchEndsAt;
+      }
+      room.suddenDeath = false;
+      delete room.result;
+      resetPlayers(room);
+    }
+  }
+
   return toPublicRoom(room);
 }
 
@@ -797,9 +832,12 @@ export function rematch(socketId: string, roomCode: string): { room: RoomState }
   room.serverStartAt = Date.now() + COUNTDOWN_MS;
   if (room.matchRule === "timeAttack") {
     room.matchEndsAt = room.serverStartAt + engineConfig.timeAttackMs;
+  } else if (room.matchRule === "hpBattle") {
+    room.matchEndsAt = room.serverStartAt + HP_BATTLE_DURATION_MS;
   } else {
     delete room.matchEndsAt;
   }
+  room.suddenDeath = false;
   delete room.result;
   resetPlayers(room);
 

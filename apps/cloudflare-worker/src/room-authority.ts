@@ -634,7 +634,16 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    this.broadcastRoomState(room);
+    if (room.status === "countdown") {
+      this.broadcastToAll({
+        id: crypto.randomUUID(),
+        type: "server:match:countdown",
+        payload: { room, serverStartAt: room.serverStartAt ?? Date.now() }
+      });
+      this.scheduleMatchStart(room.roomCode);
+    } else {
+      this.broadcastRoomState(room);
+    }
     void this.persistRoom(room.roomCode);
   }
 
@@ -673,7 +682,7 @@ export class RoomAuthorityDurableObject {
     const parsedPayload = parseAccessoryPayload(payload);
     const context = parsedPayload ? this.getContext(socketId, parsedPayload.roomCode) : null;
 
-    if (!parsedPayload || !context || context.room.status !== "waiting") {
+    if (!parsedPayload || !context || (context.room.status !== "waiting" && context.room.status !== "finished")) {
       this.sendError(socketId, INVALID_MESSAGE_ERROR);
       return;
     }
@@ -1764,7 +1773,7 @@ export class RoomAuthorityDurableObject {
     }
 
     const record = this.socketStates.get(socketId);
-    if (!record || this.room.status !== "waiting") {
+    if (!record || (this.room.status !== "waiting" && this.room.status !== "finished")) {
       return null;
     }
 
@@ -1774,6 +1783,42 @@ export class RoomAuthorityDurableObject {
     }
 
     player.ready = ready;
+
+    if (this.room.status === "finished") {
+      const humans = [...this.room.players.values()].filter((candidate) => !candidate.isBot);
+      if (humans.length > 0 && humans.every((candidate) => candidate.ready && candidate.connected)) {
+        const nextRound = this.room.round + 1;
+        let prompt: Prompt;
+        try {
+          prompt = selectPromptForRoom(this.room, Date.now() + nextRound);
+        } catch {
+          return toPublicRoom(this.room);
+        }
+
+        if (this.room.players.size < MAX_PLAYERS) {
+          addBotPlayer(this.room);
+        }
+        this.room.status = "countdown";
+        this.room.round = nextRound;
+        this.room.prompt = prompt;
+        if (!this.room.promptHistory.includes(prompt.id)) {
+          this.room.promptHistory.push(prompt.id);
+        }
+        this.room.serverStartAt = Date.now() + COUNTDOWN_MS;
+        if (this.room.matchRule === "timeAttack") {
+          this.room.matchEndsAt = this.room.serverStartAt + getTimeAttackDurationMs(this.env.TIME_ATTACK_MS);
+        } else if (this.room.matchRule === "hpBattle") {
+          this.room.matchEndsAt = this.room.serverStartAt + HP_BATTLE_DURATION_MS;
+        } else {
+          delete this.room.matchEndsAt;
+        }
+        this.room.suddenDeath = false;
+        delete this.room.result;
+        delete this.room.finishedAt;
+        resetPlayers(this.room);
+      }
+    }
+
     this.room.lastActivityAt = Date.now();
     return toPublicRoom(this.room);
   }
@@ -1788,7 +1833,7 @@ export class RoomAuthorityDurableObject {
       return { error: "ホストだけが課題カテゴリを変更できます。" };
     }
 
-    if (context.room.status !== "waiting") {
+    if (context.room.status !== "waiting" && context.room.status !== "finished") {
       return { error: "試合中は課題カテゴリを変更できません。" };
     }
 
@@ -1808,7 +1853,7 @@ export class RoomAuthorityDurableObject {
       return { error: "ホストだけが COM 難易度を変更できます。" };
     }
 
-    if (context.room.status !== "waiting") {
+    if (context.room.status !== "waiting" && context.room.status !== "finished") {
       return { error: "試合中は COM 難易度を変更できません。" };
     }
 
@@ -2024,9 +2069,12 @@ export class RoomAuthorityDurableObject {
     context.room.serverStartAt = Date.now() + COUNTDOWN_MS;
     if (context.room.matchRule === "timeAttack") {
       context.room.matchEndsAt = context.room.serverStartAt + getTimeAttackDurationMs(this.env.TIME_ATTACK_MS);
+    } else if (context.room.matchRule === "hpBattle") {
+      context.room.matchEndsAt = context.room.serverStartAt + HP_BATTLE_DURATION_MS;
     } else {
       delete context.room.matchEndsAt;
     }
+    context.room.suddenDeath = false;
     delete context.room.result;
     delete context.room.finishedAt;
     resetPlayers(context.room);

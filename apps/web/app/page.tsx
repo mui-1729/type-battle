@@ -35,6 +35,7 @@ import { HomeModeMenu } from "./_components/home-mode-menu";
 import { LobbyPrep } from "./_components/lobby-prep";
 import { BattleStage } from "./_components/battle-stage";
 import { PlayerSettingsModal } from "./_components/player-settings-modal";
+import { MatchSettingsModal } from "./_components/match-settings-modal";
 import { ProgressBlock } from "./_components/progress-block";
 import { ResultPanel } from "./_components/result-panel";
 import { RivalBar } from "./_components/rival-bar";
@@ -141,6 +142,7 @@ export default function HomePage() {
   const [settings, setSettings] = useState<PlayerSettings>(DEFAULT_PLAYER_SETTINGS);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [matchSettingsOpen, setMatchSettingsOpen] = useState(false);
   const [homeMode, setHomeMode] = useState<HomeMode | null>(null);
   const [accessoryIndex, setAccessoryIndex] = useState(0);
   const [joinCode, setJoinCode] = useState("");
@@ -348,6 +350,12 @@ export default function HomePage() {
     setResult(null);
     setLastProgressSentAt(null);
   }, []);
+
+  useEffect(() => {
+    if (currentPlayer?.accessoryIndex !== undefined) {
+      setAccessoryIndex(currentPlayer.accessoryIndex);
+    }
+  }, [currentPlayer?.accessoryIndex]);
 
   const prepareTypingInput = useCallback(() => {
     typingInputRef.current?.focus({ preventScroll: true });
@@ -1298,7 +1306,16 @@ export default function HomePage() {
   }, [currentPlayer?.isHost, room, startMatch]);
 
   const rematch = () => {
-    if (!realtimeConfigured || !socketRef.current || !room) {
+    if (!realtimeConfigured || !socketRef.current || !room || !currentPlayer) {
+      return;
+    }
+
+    if (room.status === "finished") {
+      socketRef.current.emit("player:ready", {
+        roomCode: room.roomCode,
+        ready: !currentPlayer.ready
+      });
+      setRematchError("");
       return;
     }
 
@@ -1743,9 +1760,17 @@ export default function HomePage() {
                   isRoomResult={Boolean(room)}
                   onRetry={room ? rematch : retryPractice}
                   practiceMode={activePracticeMode}
-                  canRetry={!room || Boolean(currentPlayer?.isHost)}
+                  canRetry={!room || Boolean(currentPlayer?.connected)}
                   retryPending={rematchPending}
                   retryError={rematchError}
+                  rematchReady={Boolean(currentPlayer?.ready)}
+                  {...(room ? {
+                    accessoryIndex,
+                    onPreviousAccessory: () => shiftAccessory(-1),
+                    onNextAccessory: () => shiftAccessory(1),
+                    onOpenSettings: () => setMatchSettingsOpen(true),
+                    onReaction: sendReaction
+                  } : {})}
                   {...(room ? { matchRule: activeResult.matchRule ?? room.matchRule } : {})}
                 />
               ) : null}
@@ -1768,6 +1793,21 @@ export default function HomePage() {
           setSettings={setSettings}
           setNickname={setNickname}
           onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
+      {matchSettingsOpen && room ? (
+        <MatchSettingsModal
+          room={room}
+          onClose={() => setMatchSettingsOpen(false)}
+          onMatchRuleChange={setMatchRule}
+          onPromptCategoryChange={setPromptCategory}
+          onBotDifficultyChange={setBotDifficulty}
+          canEdit={Boolean(currentPlayer?.isHost)}
+          onResetOfficial={() => {
+            setMatchRule("race");
+            setPromptCategory("standard");
+            setBotDifficulty("normal");
+          }}
         />
       ) : null}
     </main>

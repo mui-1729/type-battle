@@ -50,7 +50,7 @@ describe("ResultPanel", () => {
     );
 
     expect(markup).toContain('role="status"');
-    expect(markup).toContain("ホストが再戦を開始するのを待っています。");
+    expect(markup).toContain("相手の再戦READYを待っています。");
     expect(markup).not.toContain("再戦する</button>");
     expect(markup).not.toContain("不具合を報告");
   });
@@ -69,7 +69,7 @@ describe("ResultPanel", () => {
 
     expect(markup).toContain("disabled");
     expect(markup).toContain('aria-busy="true"');
-    expect(markup).toContain("再戦を開始しています…");
+    expect(markup).toContain("READYを送信中…");
     expect(markup).toContain('role="alert"');
     expect(markup).toContain("再戦を開始できませんでした。");
   });
