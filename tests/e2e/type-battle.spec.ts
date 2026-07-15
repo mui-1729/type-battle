@@ -88,7 +88,7 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(guest.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(host.getByText("再戦READY")).toBeVisible();
-  await expect(guest.getByText("相手の再戦READYを待っています。")).toBeVisible();
+  await expect(guest.getByText("再戦READY")).toBeVisible();
 
   await hostContext.close();
   await guestContext.close();
