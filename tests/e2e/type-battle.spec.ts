@@ -169,6 +169,11 @@ test("plays all three stage modes against COM and resets between rematches", asy
       await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 70_000 });
     } else {
       await input.pressSequentially(guide.slice(splitIndex), { delay: 2 });
+      if (mode.key === "hpBattle") {
+        for (let attempt = 0; attempt < 12 && !(await host.locator(".resultPanel").isVisible()); attempt += 1) {
+          await input.pressSequentially(await readInputGuide(host), { delay: 2 });
+        }
+      }
       await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 20_000 });
     }
     await expect(stage).toHaveAttribute("data-phase", "result");
