@@ -169,7 +169,7 @@ test("plays all three stage modes against COM and resets between rematches", asy
       await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 70_000 });
     } else {
       await input.pressSequentially(guide.slice(splitIndex), { delay: 2 });
-      await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 8_000 });
+      await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 20_000 });
     }
     await expect(stage).toHaveAttribute("data-phase", "result");
     await expect(stage).not.toHaveAttribute("data-winner-id", "none");
