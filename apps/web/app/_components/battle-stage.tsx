@@ -18,6 +18,7 @@ type BattleStageProps = {
   localPlayerId: string;
   timeAttackExpired?: boolean;
   timeAttackRemainingMs?: number;
+  matchRemainingMs?: number;
 };
 
 export const BattleStage = memo(function BattleStage({
@@ -25,7 +26,8 @@ export const BattleStage = memo(function BattleStage({
   result,
   localPlayerId,
   timeAttackExpired = false,
-  timeAttackRemainingMs = 0
+  timeAttackRemainingMs = 0,
+  matchRemainingMs
 }: BattleStageProps) {
   const view = useMemo(
     () => createBattleStageViewModel(room, result, localPlayerId),
@@ -56,7 +58,7 @@ export const BattleStage = memo(function BattleStage({
   }, [resultKey]);
 
   const hasTimeExpired = view.mode === "timeAttack" && view.phase === "playing" && timeAttackExpired;
-  const summary = getStageSummary(view, hasTimeExpired);
+  const summary = room.suddenDeath ? "SUDDEN DEATH・攻撃2倍" : getStageSummary(view, hasTimeExpired);
 
   return (
     <section
@@ -73,10 +75,10 @@ export const BattleStage = memo(function BattleStage({
         <span className="battleStageMode" data-testid="battle-stage-mode">
           {MATCH_RULE_DETAILS[view.mode].label}
         </span>
-        {view.mode === "timeAttack" ? (
+        {view.mode === "timeAttack" || view.mode === "hpBattle" ? (
           <span className="battleStageTimeAttack" data-testid="time-attack-info">
-            <strong>{Math.max(Math.ceil(timeAttackRemainingMs / 1000), 0)}s</strong>
-            <small>{room.round ?? 1}周目</small>
+            <strong>{room.suddenDeath ? "SUDDEN DEATH" : `${Math.max(Math.ceil((matchRemainingMs ?? timeAttackRemainingMs) / 1000), 0)}s`}</strong>
+            <small>{view.mode === "hpBattle" ? "HP MATCH" : `${room.round ?? 1}周目`}</small>
           </span>
         ) : null}
         <span className="battleStageSummary">{summary}</span>
@@ -88,7 +90,7 @@ export const BattleStage = memo(function BattleStage({
         <span className="battleStageGround" aria-hidden="true" />
 
         {view.mode === "hpBattle" ? (
-          <HpPushStage view={view} />
+          <HpPushStage view={view} suddenDeath={room.suddenDeath ?? false} />
         ) : (
           <RaceStage view={view} timeAttackExpired={hasTimeExpired} />
         )}

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   advanceBot,
+  checkExpiredTimeAttackMatches,
   createRoom,
   finishTyping,
   getRoom,
@@ -63,6 +64,103 @@ describe("room engine config", () => {
       sequence: 21
     });
     expect(getRoom(created.room.roomCode)?.players[0]).toMatchObject({ mistakes: 0, mistakeGuards: 0 });
+  });
+
+  it("uses HP100, romaji input damage, and one self-damage per mistake", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_hp_damage",
+      socketId: "socket_alice_hp_damage"
+    });
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_hp_damage",
+      socketId: "socket_bob_hp_damage"
+    });
+    expect("error" in joined).toBe(false);
+
+    setMatchRule("socket_alice_hp_damage", created.room.roomCode, "hpBattle");
+    setReady("socket_alice_hp_damage", created.room.roomCode, true);
+    setReady("socket_bob_hp_damage", created.room.roomCode, true);
+    const started = startMatch("socket_alice_hp_damage", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    if ("error" in started) return;
+
+    expect(started.room.matchEndsAt).toBe(started.room.serverStartAt! + 90_000);
+    markPlaying(created.room.roomCode);
+    const prompt = started.room.prompt?.typing.romaji ?? "a";
+    updateProgress("socket_alice_hp_damage", {
+      roomCode: created.room.roomCode,
+      input: prompt.slice(0, 3),
+      sequence: 1
+    });
+
+    let room = getRoom(created.room.roomCode);
+    const bobHpAfterAttack = room?.players.find((player) => player.id === "guest_bob_hp_damage")?.hp ?? 100;
+    expect(bobHpAfterAttack).toBeLessThan(100);
+
+    const aliceHpBeforeMistake = room?.players.find((player) => player.id === "guest_alice_hp_damage")?.hp ?? 100;
+    updateProgress("socket_alice_hp_damage", {
+      roomCode: created.room.roomCode,
+      input: "!",
+      sequence: 2
+    });
+    room = getRoom(created.room.roomCode);
+    expect(room?.players.find((player) => player.id === "guest_alice_hp_damage")).toMatchObject({ hp: aliceHpBeforeMistake - 1, mistakes: 1 });
+  });
+
+  it("enters sudden death when HP is tied at the 90-second deadline", () => {
+    const created = createRoom({ nickname: "Alice", guestId: "guest_alice_hp_sudden", socketId: "socket_alice_hp_sudden" });
+    const joined = joinRoom({ roomCode: created.room.roomCode, nickname: "Bob", guestId: "guest_bob_hp_sudden", socketId: "socket_bob_hp_sudden" });
+    expect("error" in joined).toBe(false);
+    setMatchRule("socket_alice_hp_sudden", created.room.roomCode, "hpBattle");
+    setReady("socket_alice_hp_sudden", created.room.roomCode, true);
+    setReady("socket_bob_hp_sudden", created.room.roomCode, true);
+    const started = startMatch("socket_alice_hp_sudden", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    if ("error" in started) return;
+
+    markPlaying(created.room.roomCode);
+    const now = vi.spyOn(Date, "now").mockReturnValue(started.room.matchEndsAt! + 1);
+    expect(checkExpiredTimeAttackMatches()).toEqual([]);
+    expect(getRoom(created.room.roomCode)).toMatchObject({ suddenDeath: true });
+    now.mockRestore();
+  });
+
+  it("loops the HP prompt instead of finishing after the first cycle", () => {
+    const created = createRoom({ nickname: "Alice", guestId: "guest_alice_hp_loop", socketId: "socket_alice_hp_loop" });
+    const joined = joinRoom({ roomCode: created.room.roomCode, nickname: "Bob", guestId: "guest_bob_hp_loop", socketId: "socket_bob_hp_loop" });
+    expect("error" in joined).toBe(false);
+    setMatchRule("socket_alice_hp_loop", created.room.roomCode, "hpBattle");
+    setReady("socket_alice_hp_loop", created.room.roomCode, true);
+    setReady("socket_bob_hp_loop", created.room.roomCode, true);
+    const started = startMatch("socket_alice_hp_loop", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    if ("error" in started) return;
+
+    markPlaying(created.room.roomCode);
+    const prompt = started.room.prompt?.typing.romaji ?? "a";
+    for (let offset = 0, sequence = 1; offset < prompt.length; offset += 16, sequence += 1) {
+      updateProgress("socket_alice_hp_loop", {
+        roomCode: created.room.roomCode,
+        input: prompt.slice(offset, offset + 16),
+        sequence
+      });
+    }
+
+    const afterFirstCycle = getRoom(created.room.roomCode);
+    expect(afterFirstCycle?.status).toBe("playing");
+    expect(afterFirstCycle?.players[0]?.finishStatus).not.toBe("finished");
+    const hpAfterFirstCycle = afterFirstCycle?.players[1]?.hp ?? 100;
+
+    updateProgress("socket_alice_hp_loop", {
+      roomCode: created.room.roomCode,
+      input: prompt.slice(0, 3),
+      sequence: Math.ceil(prompt.length / 16) + 1
+    });
+
+    expect(getRoom(created.room.roomCode)?.players[1]?.hp).toBeLessThan(hpAfterFirstCycle);
   });
 
   it("does not start until every connected human is ready", () => {

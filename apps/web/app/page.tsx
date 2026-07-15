@@ -875,7 +875,7 @@ export default function HomePage() {
   useEffect(() => {
     const matchEndsAt = room?.matchEndsAt;
 
-    if (!room || room.status !== "playing" || room.matchRule !== "timeAttack" || !matchEndsAt) {
+    if (!room || room.status !== "playing" || (room.matchRule !== "timeAttack" && room.matchRule !== "hpBattle") || !matchEndsAt) {
       setMatchTimerMs(0);
       return;
     }
@@ -1651,6 +1651,7 @@ export default function HomePage() {
                       localPlayerId={playerId}
                       timeAttackExpired={isTimeAttackExpired}
                       timeAttackRemainingMs={matchTimerMs}
+                      matchRemainingMs={matchTimerMs}
                     />
                   ) : null}
 

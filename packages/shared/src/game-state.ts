@@ -68,6 +68,7 @@ export type RoomState = {
   players: PlayerState[];
   maxPlayers: number;
   round?: number;
+  suddenDeath?: boolean;
   result?: MatchResult;
 };
 
