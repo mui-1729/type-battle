@@ -14,6 +14,20 @@ async function setNickname(page: Page, nickname: string): Promise<void> {
   await page.getByRole("button", { name: "設定を反映" }).click();
 }
 
+async function selectSoloMode(page: import("@playwright/test").Page): Promise<void> {
+  await page.getByRole("button", { name: "ひとりで遊ぶ" }).click();
+}
+
+async function selectBattleMode(page: import("@playwright/test").Page): Promise<void> {
+  await page.getByRole("button", { name: "対戦する" }).click();
+}
+
+async function setNickname(page: import("@playwright/test").Page, nickname: string): Promise<void> {
+  await page.getByTitle("設定を開く").click();
+  await page.locator(".modalContent input").first().fill(nickname);
+  await page.getByRole("button", { name: "設定を反映" }).click();
+}
+
 test("completes practice with mobile Japanese textarea input", async ({ page }) => {
   await page.goto("/");
   await selectSoloMode(page);
