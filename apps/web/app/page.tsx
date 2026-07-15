@@ -44,6 +44,7 @@ import { TypingInput } from "./_components/typing-input";
 import { StatusPill } from "./_components/status-pill";
 import { TypingPrompt } from "./_components/typing-prompt";
 import { PlayerIdentity } from "./_components/player-identity";
+import { PracticeStage } from "./_components/practice-stage";
 import { SectionHeading, SurfaceCard } from "./_components/ui";
 import {
   createEmptyProgress,
@@ -1434,9 +1435,22 @@ export default function HomePage() {
   const showHomeModeMenu = !room && !practiceSession && !practiceResult && homeMode === null && !isRecoveringStoredRoom;
   const showModeSetup = !room && !practiceSession && !practiceResult && homeMode !== null;
   const hasNickname = nickname.trim().length > 0;
+  const visualState = showHomeModeMenu
+    ? "isHome"
+    : showModeSetup && homeMode === "solo"
+      ? "isSoloSetup"
+      : showModeSetup && homeMode === "battle"
+        ? "isBattleSetup"
+        : room?.status === "waiting"
+          ? "isLobby"
+          : room
+            ? `isBattle isBattle-${room.matchRule}`
+            : practiceSession || practiceResult
+              ? `isPractice isPractice-${activePracticeMode}`
+              : "isSetup";
 
   return (
-    <main className="appShell">
+    <main className={`appShell ${visualState}${activeResult ? " hasResult" : ""}`}>
       <GameHeader
         connected={connected}
         realtimeConfigured={realtimeConfigured}
@@ -1532,20 +1546,16 @@ export default function HomePage() {
 
           {!room && homeMode === "solo" ? (
             <SurfaceCard className="dailyChallengePanel">
-              <SectionHeading eyebrow="SOLO" title="Daily challenge" />
+              <SectionHeading eyebrow="SOLO" title="デイリーチャレンジ" />
               <div className="dailyChallengeHeader">
-                <span>デイリーチャレンジ</span>
-                <small>{dailyChallengeInfo.challengeKey}</small>
+                <span>残りの挑戦回数</span>
+                <small>{Math.max(DAILY_CHALLENGE_MAX_ATTEMPTS - (visibleDailyChallengeRecord?.attempts ?? 0), 0)} / {DAILY_CHALLENGE_MAX_ATTEMPTS}</small>
               </div>
               <p className="dailyChallengePrompt">{dailyChallengePrompt.text}</p>
               <div className="dailyChallengeStats">
                 <div>
                   <span>今日の最高 WPM</span>
                   <strong>{visibleDailyChallengeRecord && visibleDailyChallengeRecord.bestWpm > 0 ? visibleDailyChallengeRecord.bestWpm : "—"}</strong>
-                </div>
-                <div>
-                  <span>挑戦回数</span>
-                  <strong>{visibleDailyChallengeRecord?.attempts ?? 0}/{DAILY_CHALLENGE_MAX_ATTEMPTS}</strong>
                 </div>
                 <div>
                   <span>ベスト正確率</span>
@@ -1560,6 +1570,7 @@ export default function HomePage() {
                   <strong>{visibleDailyChallengeRecord?.points ?? 0}/3</strong>
                 </div>
               </div>
+              <PracticeStage progressPercent={35} mode="daily" />
               <button
                 className="secondaryButton"
                 type="button"
@@ -1748,6 +1759,8 @@ export default function HomePage() {
                       timeAttackRemainingMs={matchTimerMs}
                       matchRemainingMs={matchTimerMs}
                     />
+                  ) : practiceSession ? (
+                    <PracticeStage progressPercent={activeProgressPercent} mode={activePracticeMode} />
                   ) : null}
 
               {activePromptText ? (
