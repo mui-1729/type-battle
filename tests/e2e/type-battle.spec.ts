@@ -87,8 +87,8 @@ test("plays a complete two player typing match", async ({ browser }) => {
 
   await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(guest.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
-  await expect(host.getByText("再戦する")).toBeVisible();
-  await expect(guest.getByText("ホストが再戦を開始するのを待っています。")).toBeVisible();
+  await expect(host.getByText("再戦READY")).toBeVisible();
+  await expect(guest.getByText("相手の再戦READYを待っています。")).toBeVisible();
 
   await hostContext.close();
   await guestContext.close();
@@ -178,12 +178,12 @@ test("plays all three stage modes against COM and resets between rematches", asy
     }
     await expect(stage).toHaveAttribute("data-phase", "result");
     await expect(stage).not.toHaveAttribute("data-winner-id", "none");
-    await expect(host.locator(".resultPanel").getByText("COM (Normal)", { exact: true })).toBeVisible();
+    await expect(host.getByLabel("試合結果カード").getByText("COM (Normal)", { exact: true })).toBeVisible();
 
     if (index < modes.length - 1) {
       const nextMode = modes[index + 1];
       await host.getByRole("button", { name: new RegExp("^" + nextMode.label) }).click();
-      await host.getByRole("button", { name: "再戦する" }).click();
+      await host.getByRole("button", { name: "再戦READY" }).click();
       await expect(stage).toHaveAttribute("data-phase", "countdown");
       await expect(stage).toHaveAttribute("data-mode", nextMode.key);
       await expect(stage).toHaveAttribute("data-winner-id", "none");
