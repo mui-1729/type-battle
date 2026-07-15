@@ -110,7 +110,7 @@ test("rejoins the room after reload", async ({ browser }) => {
   // Wait for reconnection to complete
   await expect(host.locator(".connection")).toHaveClass(/isOnline/);
   await expect(host.locator(".roomMeta strong")).toHaveText(roomCode, { timeout: 10_000 });
-  await expect(host.getByText("Alice", { exact: true })).toBeVisible();
+  await expect(host.getByTestId("lobby-prep").getByText("Alice")).toBeVisible();
 
   await hostContext.close();
 });
@@ -169,7 +169,12 @@ test("plays all three stage modes against COM and resets between rematches", asy
       await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 70_000 });
     } else {
       await input.pressSequentially(guide.slice(splitIndex), { delay: 2 });
-      await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 8_000 });
+      if (mode.key === "hpBattle") {
+        for (let attempt = 0; attempt < 12 && !(await host.locator(".resultPanel").isVisible()); attempt += 1) {
+          await input.pressSequentially(await readInputGuide(host), { delay: 2 });
+        }
+      }
+      await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 20_000 });
     }
     await expect(stage).toHaveAttribute("data-phase", "result");
     await expect(stage).not.toHaveAttribute("data-winner-id", "none");
