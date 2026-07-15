@@ -31,6 +31,40 @@ beforeEach(() => {
 });
 
 describe("room engine config", () => {
+  it("earns and consumes a mistake guard after a 20-character streak", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_mistake_guard",
+      socketId: "socket_alice_mistake_guard",
+      deviceKind: "mobile"
+    });
+    setReady("socket_alice_mistake_guard", created.room.roomCode, true);
+    const started = startMatch("socket_alice_mistake_guard", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    if ("error" in started) {
+      return;
+    }
+
+    markPlaying(created.room.roomCode);
+    const prompt = started.room.prompt?.typing.hiragana ?? "";
+    Array.from(prompt.slice(0, 20)).forEach((character, index) => {
+      updateProgress("socket_alice_mistake_guard", {
+        roomCode: created.room.roomCode,
+        input: character,
+        sequence: index + 1
+      });
+    });
+
+    expect(getRoom(created.room.roomCode)?.players[0]?.mistakeGuards).toBe(1);
+
+    updateProgress("socket_alice_mistake_guard", {
+      roomCode: created.room.roomCode,
+      input: "誤",
+      sequence: 21
+    });
+    expect(getRoom(created.room.roomCode)?.players[0]).toMatchObject({ mistakes: 0, mistakeGuards: 0 });
+  });
+
   it("does not start until every connected human is ready", () => {
     const created = createRoom({
       nickname: "Alice",

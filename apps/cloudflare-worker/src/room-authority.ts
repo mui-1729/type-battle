@@ -192,7 +192,7 @@ const ROOM_SNAPSHOT_SCHEMA_VERSION = 2;
 const GUEST_SESSION_STORAGE_PREFIX = "guest-session:";
 const MATCH_RESULT_STORAGE_PREFIX = "match-result:";
 const BOT_TICK_MS = 500;
-const DEFAULT_TIME_ATTACK_MS = 30_000;
+const DEFAULT_TIME_ATTACK_MS = 60_000;
 const WAITING_IDLE_TTL_MS = 60_000;
 const ABANDONED_ROOM_TTL_MS = 60_000;
 const FINISHED_RESULT_RETENTION_MS = 5 * 60_000;
@@ -214,6 +214,8 @@ const HP_BATTLE_HP_PER_PROMPT_CHAR = 5;
 const HP_BATTLE_MIN_HP = 50;
 const HP_BATTLE_ATTACK_DAMAGE = 5;
 const HP_BATTLE_MISTAKE_DAMAGE = 2;
+const MISTAKE_GUARD_STREAK = 20;
+const MAX_MISTAKE_GUARDS = 3;
 const BOT_PLAYER_ID = "bot_com_1";
 const BOT_NICKNAME = "COM";
 
@@ -2604,6 +2606,7 @@ function resetPlayers(room: InternalRoom, preserveConnectionState = false): void
     player.correctCharacters = 0;
     player.totalTypedCharacters = 0;
     player.mistakes = 0;
+    player.mistakeGuards = 0;
     player.maxStreak = 0;
     player.currentStreak = 0;
     player.typingProgressIndex = 0;
@@ -2728,7 +2731,7 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
       const expectedIndex = timeAttack ? modulo(player.progressIndex, promptLength) : player.progressIndex;
       const before = createProgressState(player);
       const after = advanceProgress(before, room.prompt.typing.hiragana[expectedIndex], typedChar);
-      applyProgressState(player, after);
+      applyGuardedProgress(player, before, after);
       player.progressIndex = after.progressIndex;
       progressDelta += Math.max(after.progressIndex - before.progressIndex, 0);
     }
@@ -2751,7 +2754,7 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
       const after = advanceRomajiProgress(before, plan, typedChar);
       const completedUnit = after.progressIndex > before.progressIndex ? plan.units[beforeUnitIndex] : undefined;
 
-      applyProgressState(player, after);
+      applyGuardedProgress(player, before, after);
       player.typingProgressIndex = cycleBase + after.progressIndex;
 
       if (completedUnit) {
@@ -2848,13 +2851,20 @@ function applyBotProgress(
   bot.totalTypedCharacters += totalTypedDelta;
 
   if (isMistake) {
-    bot.mistakes += totalTypedDelta;
-    bot.currentStreak = 0;
+    if ((bot.mistakeGuards ?? 0) > 0) {
+      bot.mistakeGuards = Math.max((bot.mistakeGuards ?? 0) - 1, 0);
+    } else {
+      bot.mistakes += totalTypedDelta;
+      bot.currentStreak = 0;
+    }
   } else if (progressDelta > 0) {
+    const previousStreak = bot.currentStreak;
     bot.progressIndex += progressDelta;
     bot.correctCharacters += progressDelta;
     bot.currentStreak += progressDelta;
     bot.maxStreak = Math.max(bot.maxStreak, bot.currentStreak);
+    const earned = Math.floor(bot.currentStreak / MISTAKE_GUARD_STREAK) - Math.floor(previousStreak / MISTAKE_GUARD_STREAK);
+    bot.mistakeGuards = Math.min((bot.mistakeGuards ?? 0) + Math.max(earned, 0), MAX_MISTAKE_GUARDS);
   }
 
   bot.wpm = calculateWpm(bot.progressIndex, now - startedAt);
@@ -2959,7 +2969,8 @@ function toPublicRoom(room: InternalRoom): RoomState {
     botDifficulty: room.botDifficulty,
     promptCategory: room.promptCategory,
     players: toPublicPlayers(room),
-    maxPlayers: MAX_PLAYERS
+    maxPlayers: MAX_PLAYERS,
+    round: room.round
   };
 
   if (room.prompt) {
@@ -3015,6 +3026,10 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     publicPlayer.deviceKind = player.deviceKind;
   }
 
+  if (player.mistakeGuards !== undefined) {
+    publicPlayer.mistakeGuards = player.mistakeGuards;
+  }
+
   if (player.accessoryIndex !== undefined) {
     publicPlayer.accessoryIndex = player.accessoryIndex;
   }
@@ -3062,6 +3077,31 @@ function applyProgressState(player: InternalPlayer, progress: ReturnType<typeof 
   if (player.deviceKind === "mobile") {
     player.progressIndex = progress.progressIndex;
   }
+}
+
+function applyGuardedProgress(
+  player: InternalPlayer,
+  before: ReturnType<typeof createProgressState>,
+  after: ReturnType<typeof createProgressState>
+): void {
+  const mistake = after.mistakes > before.mistakes;
+  const guarded = mistake && (player.mistakeGuards ?? 0) > 0;
+
+  if (guarded) {
+    player.mistakeGuards = Math.max((player.mistakeGuards ?? 0) - 1, 0);
+    after.mistakes = before.mistakes;
+    after.currentStreak = before.currentStreak;
+    after.maxStreak = before.maxStreak;
+  }
+
+  if (!guarded && after.currentStreak > 0) {
+    const earned = Math.floor(after.currentStreak / MISTAKE_GUARD_STREAK) - Math.floor(before.currentStreak / MISTAKE_GUARD_STREAK);
+    if (earned > 0) {
+      player.mistakeGuards = Math.min((player.mistakeGuards ?? 0) + earned, MAX_MISTAKE_GUARDS);
+    }
+  }
+
+  applyProgressState(player, after);
 }
 
 function getPromptCanonicalLength(prompt: Prompt): number {

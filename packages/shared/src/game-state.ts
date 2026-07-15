@@ -25,6 +25,7 @@ export type PlayerState = {
   correctCharacters: number;
   totalTypedCharacters: number;
   mistakes: number;
+  mistakeGuards?: number;
   deviceKind?: DeviceKind;
   accessoryIndex?: number;
   hp?: number;
@@ -66,6 +67,7 @@ export type RoomState = {
   matchEndsAt?: number;
   players: PlayerState[];
   maxPlayers: number;
+  round?: number;
   result?: MatchResult;
 };
 
