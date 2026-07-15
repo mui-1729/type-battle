@@ -1,8 +1,23 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+async function selectSoloMode(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "ひとりで遊ぶ" }).click();
+}
+
+async function selectBattleMode(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "対戦する" }).click();
+}
+
+async function setNickname(page: Page, nickname: string): Promise<void> {
+  await page.getByTitle("設定を開く").click();
+  await page.locator(".modalContent input").first().fill(nickname);
+  await page.getByRole("button", { name: "設定を反映" }).click();
+}
 
 test("completes practice with mobile Japanese textarea input", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("ニックネーム").fill("Mobile");
+  await selectSoloMode(page);
+  await setNickname(page, "Mobile");
   await expect(page.locator(".connection")).toHaveClass(/isOnline/);
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
@@ -38,11 +53,12 @@ test("completes practice with mobile Japanese textarea input", async ({ page }) 
 
 test("keeps the COM battle stage inside a 390px mobile viewport", async ({ page }) => {
   await page.goto("/");
+  await selectBattleMode(page);
   const nickname = "MobilePlayerLong18";
-  await page.getByLabel("ニックネーム").fill(nickname);
+  await setNickname(page, nickname);
   await page.getByRole("button", { name: "ルームを作成" }).click();
   await page.getByRole("button", { name: /^HPバトル/ }).click();
-  await page.getByRole("button", { name: "COM と開始" }).click();
+  await page.getByRole("button", { name: "READYにする" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
   const stage = page.getByTestId("battle-stage");

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Clipboard, Play, Swords, Unplug, Users } from "lucide-react";
+import { Clipboard, Swords, Unplug, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createRealtimeSocket,
@@ -26,11 +26,13 @@ import type {
   PlayerResult,
   Prompt,
   PromptCategory,
+  QuickReaction,
   RoomState,
   TypingProgress
 } from "@type-battle/shared";
 import { GameHeader } from "./_components/game-header";
 import { HomeModeMenu } from "./_components/home-mode-menu";
+import { LobbyPrep } from "./_components/lobby-prep";
 import { BattleStage } from "./_components/battle-stage";
 import { PlayerSettingsModal } from "./_components/player-settings-modal";
 import { ProgressBlock } from "./_components/progress-block";
@@ -41,7 +43,7 @@ import { TypingInput } from "./_components/typing-input";
 import { StatusPill } from "./_components/status-pill";
 import { TypingPrompt } from "./_components/typing-prompt";
 import { PlayerIdentity } from "./_components/player-identity";
-import { Button, SectionHeading, SurfaceCard } from "./_components/ui";
+import { SectionHeading, SurfaceCard } from "./_components/ui";
 import {
   createEmptyProgress,
   advanceProgressWithMistakes,
@@ -65,7 +67,6 @@ import {
   getStoredRoomRejoinDelayMs
 } from "./_lib/room-reconnect";
 import {
-  BOT_DIFFICULTY_LABELS,
   DEVICE_KIND_LABELS,
   MATCH_RULE_DETAILS,
   PROMPT_CATEGORY_LABELS,
@@ -141,8 +142,10 @@ export default function HomePage() {
   const [settingsHydrated, setSettingsHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [homeMode, setHomeMode] = useState<HomeMode | null>(null);
+  const [accessoryIndex, setAccessoryIndex] = useState(0);
   const [joinCode, setJoinCode] = useState("");
   const [room, setRoom] = useState<RoomState | null>(null);
+  const [remoteReaction, setRemoteReaction] = useState<{ playerId: string; reaction: QuickReaction } | null>(null);
   const [result, setResult] = useState<MatchResult | null>(null);
   const [practiceSession, setPracticeSession] = useState<PracticeSession | null>(null);
   const [practiceResult, setPracticeResult] = useState<MatchResult | null>(null);
@@ -173,6 +176,7 @@ export default function HomePage() {
   const storedRoomJoinInFlightRef = useRef(false);
   const storedRoomJoinAttemptsRef = useRef(0);
   const storedRoomRetryTimerRef = useRef<number | null>(null);
+  const autoStartRoomRef = useRef<string | null>(null);
   const attemptStoredRoomJoinRef = useRef<(socket: ClientSocket) => void>(() => undefined);
   const realtimeUrl = CLOUDFLARE_REALTIME_URL || localRealtimeUrl;
   const realtimeConfigured = realtimeUrl.length > 0;
@@ -241,13 +245,6 @@ export default function HomePage() {
     isTimeAttackPlaying && room?.matchEndsAt && matchTimerMs <= 0 && Date.now() >= room.matchEndsAt
   );
   const activeTimeAttackRemainingSeconds = Math.max(matchTimerMs / 1000, 0).toFixed(1);
-  const canStart =
-    room?.status === "waiting" &&
-    currentPlayer?.isHost &&
-    room.players.length >= 1 &&
-    room.players.every((player) => player.connected || player.isBot) &&
-    (room.players.filter((player) => !player.isBot).length <= 1 ||
-      room.players.filter((player) => !player.isBot).every((player) => player.ready));
   const acceptingTextInput =
     (isRoomPlaying && connected && !result && !isTimeAttackExpired) || isPracticePlaying;
   const progressSyncState = room
@@ -461,6 +458,9 @@ export default function HomePage() {
       setError(message);
       setRematchError(message);
       setRematchPending(false);
+    });
+    socket.on("player:reaction", (payload) => {
+      setRemoteReaction(payload);
     });
   }, [resetTyping]);
 
@@ -1253,9 +1253,9 @@ export default function HomePage() {
     });
   };
 
-  const startMatch = () => {
+  const startMatch = useCallback(() => {
     if (!realtimeConfigured || !socketRef.current || !room) {
-      return;
+      return false;
     }
 
     prepareTypingInput();
@@ -1263,9 +1263,39 @@ export default function HomePage() {
     socketRef.current.emit("match:start", { roomCode: room.roomCode }, (response) => {
       if (!response.ok) {
         setError(response.error);
+        autoStartRoomRef.current = null;
       }
     });
-  };
+    return true;
+  }, [prepareTypingInput, primeSoundPlayback, realtimeConfigured, room]);
+
+  const sendReaction = useCallback((reaction: QuickReaction) => {
+    if (!socketRef.current || !room) {
+      return;
+    }
+
+    socketRef.current.emit("player:reaction", { roomCode: room.roomCode, reaction });
+  }, [room]);
+
+  useEffect(() => {
+    if (!room || room.status !== "waiting") {
+      autoStartRoomRef.current = null;
+      return;
+    }
+
+    const humans = room.players.filter((player) => !player.isBot);
+    const allReady = humans.length > 0 && humans.every((player) => player.ready && player.connected);
+
+    if (!currentPlayer?.isHost || !allReady || autoStartRoomRef.current === room.roomCode) {
+      if (!allReady) {
+        autoStartRoomRef.current = null;
+      }
+      return;
+    }
+
+    autoStartRoomRef.current = room.roomCode;
+    startMatch();
+  }, [currentPlayer?.isHost, room, startMatch]);
 
   const rematch = () => {
     if (!realtimeConfigured || !socketRef.current || !room) {
@@ -1298,6 +1328,16 @@ export default function HomePage() {
     }
 
     await navigator.clipboard.writeText(room.roomCode);
+  };
+  const shiftAccessory = (direction: -1 | 1) => {
+    const nextAccessoryIndex = (accessoryIndex + direction + 4) % 4;
+    setAccessoryIndex(nextAccessoryIndex);
+    if (socketRef.current && room) {
+      socketRef.current.emit("player:accessory", {
+        roomCode: room.roomCode,
+        accessoryIndex: nextAccessoryIndex
+      });
+    }
   };
   const isRecoveringStoredRoom = storedRoomRecovery.status !== "idle";
   const showHomeModeMenu = !room && !practiceSession && !practiceResult && homeMode === null && !isRecoveringStoredRoom;
@@ -1518,7 +1558,7 @@ export default function HomePage() {
 
           {error ? <p className="errorText">{error}</p> : null}
 
-          {room ? (
+          {room && room.status !== "waiting" ? (
             <div className="playerList">
               {room.players.map((player) => (
                 <div className="playerRow" key={player.id}>
@@ -1535,13 +1575,13 @@ export default function HomePage() {
             </div>
           ) : null}
 
-          {room ? (
+          {room && room.status !== "waiting" ? (
             <p className="infoText">
               端末の組み合わせ: <strong>{getMatchupLabel(room.players)}</strong>
             </p>
           ) : null}
 
-          {room ? (
+          {room && room.status !== "waiting" ? (
             <div className="difficultySelector">
               <span>対戦ルール</span>
               <div className="matchRuleButtons">
@@ -1561,60 +1601,6 @@ export default function HomePage() {
             </div>
           ) : null}
 
-          {room?.status === "waiting" && room.players.length < room.maxPlayers ? (
-            <div className="difficultySelector">
-              <span>課題カテゴリ</span>
-              <div className="difficultyButtons">
-                {(["short", "standard", "long"] as const).map((c) => (
-                  <button
-                    key={c}
-                    className={room.promptCategory === c ? "active" : ""}
-                    type="button"
-                    onClick={() => setPromptCategory(c)}
-                    disabled={!currentPlayer?.isHost}
-                  >
-                    {PROMPT_CATEGORY_LABELS[c]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {room?.status === "waiting" && room.players.length < room.maxPlayers ? (
-            <div className="difficultySelector">
-              <span>COM の強さ</span>
-              <div className="difficultyButtons">
-                {(["easy", "normal", "hard"] as const).map((difficulty) => (
-                  <button
-                    key={difficulty}
-                    className={room.botDifficulty === difficulty ? "active" : ""}
-                    type="button"
-                    onClick={() => setBotDifficulty(difficulty)}
-                    disabled={!currentPlayer?.isHost}
-                  >
-                    {BOT_DIFFICULTY_LABELS[difficulty]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {room?.status === "waiting" ? (
-            <div className="lobbyActions">
-              <Button type="button" onClick={setReady} aria-pressed={Boolean(currentPlayer?.ready)}>
-                {currentPlayer?.ready ? "準備完了" : "準備する"}
-              </Button>
-              <Button
-                variant="primary"
-                type="button"
-                onClick={startMatch}
-                disabled={!realtimeConfigured || !canStart}
-              >
-                <Play size={18} />
-                {room.players.length < room.maxPlayers ? "COM と開始" : "開始"}
-              </Button>
-            </div>
-          ) : null}
         </aside>
 
         <section
@@ -1640,14 +1626,32 @@ export default function HomePage() {
                 <div className="countdown">{Math.max(1, Math.ceil(countdownMs / 1000))}</div>
               ) : null}
 
-              {room ? (
-                <BattleStage
-                  room={displayRoom ?? room}
-                  result={result}
+              {room?.status === "waiting" ? (
+                <LobbyPrep
+                  room={room}
                   localPlayerId={playerId}
-                  timeAttackExpired={isTimeAttackExpired}
+                  accessoryIndex={accessoryIndex}
+                  onPreviousAccessory={() => shiftAccessory(-1)}
+                  onNextAccessory={() => shiftAccessory(1)}
+                  onCopyRoomCode={copyRoomCode}
+                  onLeave={leaveRoom}
+                  onToggleReady={setReady}
+                  onMatchRuleChange={setMatchRule}
+                  onPromptCategoryChange={setPromptCategory}
+                  onBotDifficultyChange={setBotDifficulty}
+                  onReaction={sendReaction}
+                  remoteReaction={remoteReaction}
                 />
-              ) : null}
+              ) : (
+                <>
+                  {room ? (
+                    <BattleStage
+                      room={displayRoom ?? room}
+                      result={result}
+                      localPlayerId={playerId}
+                      timeAttackExpired={isTimeAttackExpired}
+                    />
+                  ) : null}
 
               {activePromptText ? (
                 <TypingPrompt
@@ -1741,6 +1745,8 @@ export default function HomePage() {
                   {...(room ? { matchRule: activeResult.matchRule ?? room.matchRule } : {})}
                 />
               ) : null}
+                </>
+              )}
             </>
           ) : (
             <div className="emptyState large">

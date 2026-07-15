@@ -4,6 +4,10 @@ export type BotDifficulty = "easy" | "normal" | "hard";
 
 export type MatchRule = "race" | "timeAttack" | "hpBattle";
 
+export const QUICK_REACTIONS = ["よろしく", "準備OK", "ちょっと待って", "もう一戦", "ナイス", "くやしい"] as const;
+
+export type QuickReaction = (typeof QUICK_REACTIONS)[number];
+
 export type DeviceKind = "mobile" | "desktop";
 
 export type PlayerFinishStatus = "finished" | "forfeited" | "eliminated" | "unfinished";
@@ -22,6 +26,7 @@ export type PlayerState = {
   totalTypedCharacters: number;
   mistakes: number;
   deviceKind?: DeviceKind;
+  accessoryIndex?: number;
   hp?: number;
   maxHp?: number;
   maxStreak: number;

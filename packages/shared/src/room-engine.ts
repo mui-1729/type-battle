@@ -340,6 +340,7 @@ export function setPromptCategory(
   }
 
   context.room.promptCategory = category;
+  clearRoomReadyStates(context.room);
   return { room: toPublicRoom(context.room) };
 }
 
@@ -363,6 +364,7 @@ export function setBotDifficulty(
   }
 
   context.room.botDifficulty = difficulty;
+  clearRoomReadyStates(context.room);
   return { room: toPublicRoom(context.room) };
 }
 
@@ -387,7 +389,14 @@ export function setMatchRule(
 
   context.room.matchRule = rule;
   syncMatchRuleState(context.room);
+  clearRoomReadyStates(context.room);
   return { room: toPublicRoom(context.room) };
+}
+
+function clearRoomReadyStates(room: InternalRoom): void {
+  for (const player of room.players.values()) {
+    player.ready = false;
+  }
 }
 
 export function leaveBySocket(socketId: string): RoomState | null {
@@ -508,6 +517,12 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
   }
 
   const players = [...room.players.values()];
+
+  const humanPlayers = players.filter((player) => !player.isBot);
+
+  if (humanPlayers.some((player) => !player.connected || !player.ready)) {
+    return { error: "参加者全員のREADYが必要です。" };
+  }
 
   if (players.length < MAX_PLAYERS) {
     addBotPlayer(room);
@@ -1152,6 +1167,10 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
 
   if (player.deviceKind !== undefined) {
     publicPlayer.deviceKind = player.deviceKind;
+  }
+
+  if (player.accessoryIndex !== undefined) {
+    publicPlayer.accessoryIndex = player.accessoryIndex;
   }
 
   if (player.maxHp !== undefined) {

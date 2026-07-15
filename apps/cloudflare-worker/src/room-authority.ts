@@ -9,7 +9,8 @@ import {
   getPromptsByCategory,
   getRomajiTypingUnitIndex,
   pickPrompt,
-  rankPlayers
+  rankPlayers,
+  QUICK_REACTIONS
 } from "@type-battle/shared";
 import { isValidRoomCode, normalizeNickname, validateNickname } from "@type-battle/shared";
 import type {
@@ -20,7 +21,8 @@ import type {
   MatchStatus,
   PlayerState,
   Prompt,
-  PromptCategory
+  PromptCategory,
+  QuickReaction
 } from "@type-battle/shared";
 import type {
   CloudflareClientMessageType,
@@ -83,6 +85,14 @@ type RoomCodePayload = {
 
 type ReadyPayload = RoomCodePayload & {
   ready: boolean;
+};
+
+type ReactionPayload = RoomCodePayload & {
+  reaction: QuickReaction;
+};
+
+type AccessoryPayload = RoomCodePayload & {
+  accessoryIndex: number;
 };
 
 type PromptCategoryPayload = RoomCodePayload & {
@@ -216,6 +226,7 @@ const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistake
 export class RoomAuthorityDurableObject {
   private readonly sockets = new Map<string, CloudflareSocketLike>();
   private readonly socketStates = new Map<string, SocketState>();
+  private readonly reactionTimestamps = new Map<string, number>();
   private readonly unjoinedSocketTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly playerSessions = new Map<string, string>();
   private readonly timers: GatewayTimers = {};
@@ -427,6 +438,12 @@ export class RoomAuthorityDurableObject {
       case "client:player:ready":
         await this.handleSetReady(socketId, message.payload);
         return;
+      case "client:player:reaction":
+        await this.handlePlayerReaction(socketId, message.payload);
+        return;
+      case "client:player:accessory":
+        await this.handlePlayerAccessory(socketId, message.payload);
+        return;
       case "client:room:setPromptCategory":
         await this.handleSetPromptCategory(socketId, message.id, message.payload);
         return;
@@ -617,6 +634,52 @@ export class RoomAuthorityDurableObject {
 
     this.broadcastRoomState(room);
     void this.persistRoom(room.roomCode);
+  }
+
+  private async handlePlayerReaction(socketId: string, payload: unknown): Promise<void> {
+    const parsedPayload = parseReactionPayload(payload);
+    const socketState = this.socketStates.get(socketId);
+
+    if (!parsedPayload || !socketState?.playerId || !socketState.roomCode) {
+      this.sendError(socketId, INVALID_MESSAGE_ERROR);
+      return;
+    }
+
+    if (normalizeRoomCode(parsedPayload.roomCode) !== normalizeRoomCode(socketState.roomCode)) {
+      this.sendError(socketId, "ルームに参加していません。");
+      return;
+    }
+
+    const now = Date.now();
+    const previous = this.reactionTimestamps.get(socketState.playerId) ?? 0;
+    if (now - previous < 3_000) {
+      return;
+    }
+
+    this.reactionTimestamps.set(socketState.playerId, now);
+    this.broadcastToAll({
+      id: crypto.randomUUID(),
+      type: "server:player:reaction",
+      payload: {
+        playerId: socketState.playerId,
+        reaction: parsedPayload.reaction
+      }
+    });
+  }
+
+  private async handlePlayerAccessory(socketId: string, payload: unknown): Promise<void> {
+    const parsedPayload = parseAccessoryPayload(payload);
+    const context = parsedPayload ? this.getContext(socketId, parsedPayload.roomCode) : null;
+
+    if (!parsedPayload || !context || context.room.status !== "waiting") {
+      this.sendError(socketId, INVALID_MESSAGE_ERROR);
+      return;
+    }
+
+    context.player.accessoryIndex = parsedPayload.accessoryIndex;
+    context.room.lastActivityAt = Date.now();
+    this.broadcastRoomState(context.room);
+    void this.persistRoom(context.room.roomCode);
   }
 
   private async handleSetPromptCategory(
@@ -1714,6 +1777,7 @@ export class RoomAuthorityDurableObject {
     }
 
     context.room.promptCategory = category;
+    clearRoomReadyStates(context.room);
     context.room.lastActivityAt = Date.now();
     return { room: toPublicRoom(context.room) };
   }
@@ -1737,6 +1801,7 @@ export class RoomAuthorityDurableObject {
     if (bot) {
       bot.nickname = formatBotNickname(difficulty);
     }
+    clearRoomReadyStates(context.room);
     context.room.lastActivityAt = Date.now();
     return { room: toPublicRoom(context.room) };
   }
@@ -1757,6 +1822,7 @@ export class RoomAuthorityDurableObject {
 
     context.room.matchRule = rule;
     syncMatchRuleState(context.room);
+    clearRoomReadyStates(context.room);
     context.room.lastActivityAt = Date.now();
     return { room: toPublicRoom(context.room) };
   }
@@ -1776,7 +1842,7 @@ export class RoomAuthorityDurableObject {
     }
 
     const humanPlayers = [...context.room.players.values()].filter((player) => !player.isBot);
-    if (humanPlayers.length > 1 && !humanPlayers.every((player) => player.ready)) {
+    if (humanPlayers.some((player) => !player.connected || !player.ready)) {
       return { error: "参加者全員が準備完了になるまで開始できません。" };
     }
 
@@ -2255,6 +2321,40 @@ function parseReadyPayload(payload: unknown): ReadyPayload | null {
   }
 
   return { roomCode, ready };
+}
+
+function parseReactionPayload(payload: unknown): ReactionPayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const roomCode = readRoomCode(payload.roomCode);
+  const reaction = typeof payload.reaction === "string" && QUICK_REACTIONS.includes(payload.reaction as QuickReaction)
+    ? payload.reaction as QuickReaction
+    : null;
+
+  if (!roomCode || !reaction) {
+    return null;
+  }
+
+  return { roomCode, reaction };
+}
+
+function parseAccessoryPayload(payload: unknown): AccessoryPayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const roomCode = readRoomCode(payload.roomCode);
+  const accessoryIndex = typeof payload.accessoryIndex === "number" && Number.isInteger(payload.accessoryIndex)
+    ? payload.accessoryIndex
+    : null;
+
+  if (!roomCode || accessoryIndex === null || accessoryIndex < 0 || accessoryIndex > 3) {
+    return null;
+  }
+
+  return { roomCode, accessoryIndex };
 }
 
 function parsePromptCategoryPayload(payload: unknown): PromptCategoryPayload | null {
@@ -2806,6 +2906,12 @@ function syncMatchRuleState(room: InternalRoom): void {
   delete room.matchEndsAt;
 }
 
+function clearRoomReadyStates(room: InternalRoom): void {
+  for (const player of room.players.values()) {
+    player.ready = false;
+  }
+}
+
 function applyHpDamage(player: InternalPlayer, damage: number, room: InternalRoom, now: number): void {
   if (damage <= 0 || player.hp === undefined || player.hp <= 0) {
     return;
@@ -2907,6 +3013,10 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
 
   if (player.deviceKind !== undefined) {
     publicPlayer.deviceKind = player.deviceKind;
+  }
+
+  if (player.accessoryIndex !== undefined) {
+    publicPlayer.accessoryIndex = player.accessoryIndex;
   }
 
   if (player.maxHp !== undefined) {
