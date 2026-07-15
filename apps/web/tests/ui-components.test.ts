@@ -3,6 +3,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Button, SectionHeading, SurfaceCard } from "../app/_components/ui";
 import { PlayerIdentity } from "../app/_components/player-identity";
+import { HomeModeMenu } from "../app/_components/home-mode-menu";
 
 beforeAll(() => vi.stubGlobal("React", React));
 afterAll(() => vi.unstubAllGlobals());
@@ -48,5 +49,19 @@ describe("shared UI foundation", () => {
     expect(markup).toContain(`data-player-role="${kind}"`);
     expect(markup).toContain(label);
     expect(markup).toContain(slot);
+  });
+
+  it("keeps the home entry point to two clear modes", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(HomeModeMenu, {
+        onBattle: vi.fn(),
+        onSolo: vi.fn()
+      })
+    );
+
+    expect(markup).toContain("対戦する");
+    expect(markup).toContain("ひとりで遊ぶ");
+    expect(markup).toContain("遊び方を見る");
+    expect((markup.match(/modeCard(?:Battle|Solo)/g) ?? [])).toHaveLength(2);
   });
 });

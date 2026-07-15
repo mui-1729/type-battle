@@ -30,6 +30,7 @@ import type {
   TypingProgress
 } from "@type-battle/shared";
 import { GameHeader } from "./_components/game-header";
+import { HomeModeMenu } from "./_components/home-mode-menu";
 import { BattleStage } from "./_components/battle-stage";
 import { PlayerSettingsModal } from "./_components/player-settings-modal";
 import { ProgressBlock } from "./_components/progress-block";
@@ -118,6 +119,8 @@ type StoredRoomRecoveryState = {
   message: string;
 };
 
+type HomeMode = "battle" | "solo";
+
 const REALTIME_TRANSPORT: RealtimeTransport = "cloudflare";
 const CLOUDFLARE_REALTIME_URL = process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL?.trim() ?? "";
 const REALTIME_UNAVAILABLE_MESSAGE = "Realtime transport is not configured.";
@@ -137,6 +140,7 @@ export default function HomePage() {
   const [settings, setSettings] = useState<PlayerSettings>(DEFAULT_PLAYER_SETTINGS);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [homeMode, setHomeMode] = useState<HomeMode | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [room, setRoom] = useState<RoomState | null>(null);
   const [result, setResult] = useState<MatchResult | null>(null);
@@ -609,6 +613,7 @@ export default function HomePage() {
     }
 
     prepareTypingInput();
+    setHomeMode(null);
     void primeSoundPlayback();
     socket.emit(
       "practice:start",
@@ -645,6 +650,7 @@ export default function HomePage() {
     }
 
     prepareTypingInput();
+    setHomeMode(null);
     void primeSoundPlayback();
     socket.emit("practice:dailyStart", { nickname: normalizeNickname(currentNickname) }, (response) => {
       if (!response.ok) {
@@ -1145,6 +1151,7 @@ export default function HomePage() {
 
     void primeSoundPlayback();
     const socket = connectRoomSocket(roomCode);
+    setHomeMode(null);
     socket.emit(
       "room:create",
       {
@@ -1184,6 +1191,7 @@ export default function HomePage() {
 
     if (!realtimeConfigured || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
+    setHomeMode(null);
       return;
     }
 
@@ -1222,6 +1230,7 @@ export default function HomePage() {
     if (socket && room) {
       socket.emit("room:leave", { roomCode: room.roomCode });
     }
+    setHomeMode(null);
 
     connectPracticeSocket();
     setRoom(null);
@@ -1290,6 +1299,10 @@ export default function HomePage() {
 
     await navigator.clipboard.writeText(room.roomCode);
   };
+  const isRecoveringStoredRoom = storedRoomRecovery.status !== "idle";
+  const showHomeModeMenu = !room && !practiceSession && !practiceResult && homeMode === null && !isRecoveringStoredRoom;
+  const showModeSetup = !room && !practiceSession && !practiceResult && homeMode !== null;
+  const hasNickname = nickname.trim().length > 0;
 
   return (
     <main className="appShell">
@@ -1299,8 +1312,19 @@ export default function HomePage() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
-      <section className="workspace">
+      {showHomeModeMenu ? (
+        <HomeModeMenu
+          onBattle={() => setHomeMode("battle")}
+          onSolo={() => setHomeMode("solo")}
+        />
+      ) : (
+      <section className={showModeSetup ? "workspace modeWorkspace" : "workspace"}>
         <aside className="sidePanel" aria-label="ルーム操作">
+          {showModeSetup ? (
+            <button className="modeBackButton" type="button" onClick={() => setHomeMode(null)}>
+              ← モードを選び直す
+            </button>
+          ) : null}
           {!realtimeConfigured ? (
             <p className="infoText">
               Realtime の接続先が未設定のため、今は Vercel への web deploy はできますが対戦は使えません。
@@ -1318,7 +1342,8 @@ export default function HomePage() {
             </div>
           ) : null}
 
-          <div className="fieldGroup">
+          {showModeSetup && !hasNickname ? (
+          <div className="fieldGroup nicknameSetupField">
             <label htmlFor="nickname">ニックネーム</label>
             <input
               id="nickname"
@@ -1329,9 +1354,11 @@ export default function HomePage() {
               disabled={!settingsHydrated || Boolean(room)}
               suppressHydrationWarning
             />
+            <small>開始前にニックネームを入力してください。</small>
           </div>
+          ) : null}
 
-          {!room ? (
+          {!room && homeMode === "battle" ? (
             <div className="roomActions">
               <button className="primaryButton" type="button" onClick={createRoom} disabled={!realtimeConfigured}>
                 <Swords size={18} />
@@ -1357,7 +1384,7 @@ export default function HomePage() {
                 </button>
               </div>
             </div>
-          ) : (
+          ) : room ? (
             <div className="roomMeta">
               <div>
                 <span>ルーム</span>
@@ -1370,9 +1397,9 @@ export default function HomePage() {
                 <Unplug size={18} />
               </button>
             </div>
-          )}
+          ) : null}
 
-          {!room ? (
+          {!room && homeMode === "solo" ? (
             <SurfaceCard className="dailyChallengePanel">
               <SectionHeading eyebrow="SOLO" title="Daily challenge" />
               <div className="dailyChallengeHeader">
@@ -1410,6 +1437,7 @@ export default function HomePage() {
             </SurfaceCard>
           ) : null}
 
+          {!room && homeMode === "solo" ? (
           <div className="mistakeTrendPanel">
             <div className="mistakeTrendHeader">
               <div>
@@ -1448,8 +1476,9 @@ export default function HomePage() {
               </div>
             )}
           </div>
+          ) : null}
 
-          {!room ? (
+          {!room && homeMode === "solo" ? (
             <div className="difficultySelector">
               <span>練習モード</span>
               <div className="difficultyButtons">
@@ -1721,6 +1750,7 @@ export default function HomePage() {
           )}
         </section>
       </section>
+      )}
 
       {settingsOpen ? (
         <PlayerSettingsModal

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Settings } from "lucide-react";
 
 type GameHeaderProps = {
@@ -15,6 +16,9 @@ export function GameHeader({ connected, realtimeConfigured, onOpenSettings }: Ga
         <p className="topBarCopy">ルーム作成、練習、対戦、結果確認を 1 画面にまとめています。</p>
       </div>
       <div className="headerActions">
+        <Link className="headerTextLink" href="/feedback">
+          Feedback
+        </Link>
         <div className={connected ? "connection isOnline" : "connection"}>
           <span />
           {connected ? "接続中" : realtimeConfigured ? "未接続" : "Realtime 未設定"}
