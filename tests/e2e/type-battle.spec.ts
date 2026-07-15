@@ -8,6 +8,14 @@ async function typeInputGuide(page: Page, guide: string): Promise<void> {
   await page.getByLabel("入力欄").pressSequentially(guide, { delay: 40 });
 }
 
+async function selectBattleMode(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "対戦する" }).click();
+}
+
+async function selectSoloMode(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "ひとりで遊ぶ" }).click();
+}
+
 test("creates a room and lets a second player join", async ({ browser }) => {
   const hostContext = await browser.newContext();
   const guestContext = await browser.newContext();
@@ -15,12 +23,14 @@ test("creates a room and lets a second player join", async ({ browser }) => {
   const guest = await guestContext.newPage();
 
   await host.goto("/");
+  await selectBattleMode(host);
   await host.getByLabel("ニックネーム").fill("Alice");
   await host.getByRole("button", { name: "ルームを作成" }).click();
 
   const roomCode = await host.locator(".roomMeta strong").innerText();
 
   await guest.goto("/");
+  await selectBattleMode(guest);
   await guest.getByLabel("ニックネーム").fill("Bob");
   await guest.getByLabel("ルームコード").fill(roomCode);
   await guest.getByTitle("ルームに参加").click();
@@ -39,12 +49,14 @@ test("plays a complete two player typing match", async ({ browser }) => {
   const guest = await guestContext.newPage();
 
   await host.goto("/");
+  await selectBattleMode(host);
   await host.getByLabel("ニックネーム").fill("Alice");
   await host.getByRole("button", { name: "ルームを作成" }).click();
 
   const roomCode = await host.locator(".roomMeta strong").innerText();
 
   await guest.goto("/");
+  await selectBattleMode(guest);
   await guest.getByLabel("ニックネーム").fill("Bob");
   await guest.getByLabel("ルームコード").fill(roomCode);
   await guest.getByTitle("ルームに参加").click();
@@ -82,6 +94,7 @@ test("rejoins the room after reload", async ({ browser }) => {
   const host = await hostContext.newPage();
 
   await host.goto("/");
+  await selectBattleMode(host);
   await host.getByLabel("ニックネーム").fill("Alice");
   await host.getByRole("button", { name: "ルームを作成" }).click();
 
@@ -104,6 +117,7 @@ test("plays all three stage modes against COM and resets between rematches", asy
   const host = await hostContext.newPage();
 
   await host.goto("/");
+  await selectBattleMode(host);
   await host.getByLabel("ニックネーム").fill("Alice");
   await host.getByRole("button", { name: "ルームを作成" }).click();
   await expect(host.getByRole("button", { name: "COM と開始" })).toBeEnabled();
@@ -185,12 +199,14 @@ test("forfeits the match after long disconnect", async ({ browser }) => {
   const guest = await guestContext.newPage();
 
   await host.goto("/");
+  await selectBattleMode(host);
   await host.getByLabel("ニックネーム").fill("Alice");
   await host.getByRole("button", { name: "ルームを作成" }).click();
 
   const roomCode = await host.locator(".roomMeta strong").innerText();
 
   await guest.goto("/");
+  await selectBattleMode(guest);
   await guest.getByLabel("ニックネーム").fill("Bob");
   await guest.getByLabel("ルームコード").fill(roomCode);
   await guest.getByTitle("ルームに参加").click();
@@ -236,6 +252,7 @@ test("completes a practice session", async ({ browser }) => {
   const page = await context.newPage();
 
   await page.goto("/");
+  await selectSoloMode(page);
   await page.getByLabel("ニックネーム").fill("Alice");
   await expect(page.locator(".connection")).toHaveClass(/isOnline/);
   await page.getByRole("button", { name: "練習を開始" }).click();
@@ -263,6 +280,7 @@ test("disables stage motion for the player setting and OS preference", async ({ 
       await expect(page.locator("html")).toHaveClass(/reduced-motion/);
     }
 
+    await selectBattleMode(page);
     await page.getByLabel("ニックネーム").fill(source === "setting" ? "Reduced" : "SystemReduced");
     await page.getByRole("button", { name: "ルームを作成" }).click();
     await page.getByRole("button", { name: "COM と開始" }).click();
@@ -306,6 +324,8 @@ test("saves and restores player settings from localStorage", async ({ browser })
   await page.getByRole("button", { name: "設定を反映" }).click();
   await expect(page.getByText("プレイヤー設定")).not.toBeVisible();
 
+  await selectBattleMode(page);
+
   // Verify UI reflects changes
   await expect(page.getByLabel("ニックネーム")).toHaveValue("Charlie");
   await expect(page.locator("html")).toHaveClass(/theme-dark/);
@@ -313,6 +333,7 @@ test("saves and restores player settings from localStorage", async ({ browser })
 
   // Reload and verify persistence
   await page.reload();
+  await selectBattleMode(page);
   await expect(page.getByLabel("ニックネーム")).toHaveValue("Charlie");
   await expect(page.locator("html")).toHaveClass(/theme-dark/);
   await expect(page.locator("html")).toHaveClass(/font-large/);

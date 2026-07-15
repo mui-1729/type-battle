@@ -266,6 +266,16 @@ h1 {
   flex-shrink: 0;
 }
 
+.headerTextLink {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .connection {
   align-items: center;
   display: inline-flex;
@@ -2072,4 +2082,135 @@ textarea::placeholder {
 @media (max-width: 560px) {
   .uiButton { width: 100%; }
   .playerIdentityMark { width: 28px; height: 28px; flex-basis: 28px; }
+}
+
+.homeModeMenu {
+  display: grid;
+  gap: 24px;
+  max-width: 1080px;
+  margin: 18px auto 0;
+  padding: clamp(24px, 6vw, 72px) clamp(18px, 5vw, 64px);
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--accent-soft) 90%, transparent), transparent 30%),
+    linear-gradient(180deg, color-mix(in srgb, var(--sky) 32%, var(--surface)), var(--surface));
+  box-shadow: var(--shadow-lg);
+}
+
+.homeModeMenu > .sectionHeading {
+  max-width: 620px;
+}
+
+.homeModeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.modeCard {
+  min-height: 190px;
+  overflow: hidden;
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.modeCard:hover,
+.modeCard:focus-within {
+  border-color: var(--accent);
+}
+
+.modeBackButton {
+  align-self: flex-start;
+  min-height: 40px;
+  padding: 8px 0;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.modeBackButton:hover,
+.modeBackButton:focus-visible {
+  color: var(--accent);
+}
+
+.modeCardButton {
+  width: 100%;
+  min-height: 190px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 24px;
+  color: var(--text);
+  text-align: left;
+  background: transparent;
+}
+
+.modeCardButton:hover,
+.modeCardButton:focus-visible {
+  background: color-mix(in srgb, var(--accent-soft) 44%, transparent);
+}
+
+.modeCardIcon {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--accent-soft) 82%, var(--surface));
+}
+
+.modeCardSolo .modeCardIcon {
+  color: var(--accent-2);
+  border-color: color-mix(in srgb, var(--accent-2) 28%, var(--line));
+  background: color-mix(in srgb, var(--accent-2-soft) 82%, var(--surface));
+}
+
+.modeCardRunner {
+  font-size: 34px;
+  transform: rotate(90deg);
+}
+
+.modeCardContent {
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .homeModeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .homeModeMenu {
+    margin-top: 12px;
+    padding: 28px 18px;
+  }
+}
+
+@media (max-width: 420px) {
+  .modeCardButton {
+    min-height: 156px;
+    gap: 12px;
+    padding: 18px;
+  }
+
+  .modeCardIcon {
+    width: 56px;
+    height: 56px;
+    border-radius: 18px;
+  }
+
+  .modeCardIcon svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .modeCardRunner {
+    font-size: 28px;
+  }
+
+  .modeCardDescription {
+    font-size: 13px;
+  }
 }
