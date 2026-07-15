@@ -9,7 +9,14 @@ export function ProgressBlock({ progressPercent }: ProgressBlockProps) {
         <span>あなたの進捗</span>
         <strong>{progressPercent}%</strong>
       </div>
-      <div className="progressTrack">
+      <div
+        className="progressTrack"
+        role="progressbar"
+        aria-label="Your progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progressPercent}
+      >
         <span style={{ width: `${progressPercent}%` }} />
       </div>
     </div>
