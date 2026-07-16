@@ -4,6 +4,7 @@ import { resetRoomEngineState } from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
 import worker, { RoomAuthorityDurableObject, RoomDurableObject } from "../src/worker.js";
 import { GATEWAY_ROOM_RATE_LIMIT_PATH } from "../src/realtime-gateway.js";
+import { readCloudflareClientIp } from "../src/client-ip.js";
 
 class FakeStorage {
   readonly values = new Map<string, unknown>();
@@ -295,6 +296,15 @@ afterEach(async () => {
 });
 
 describe("cloudflare gateway", () => {
+  it("uses only the Cloudflare client IP header for rate-limit identity", () => {
+    expect(readCloudflareClientIp(new Headers({ "CF-Connecting-IP": "203.0.113.10" }))).toBe("203.0.113.10");
+    expect(readCloudflareClientIp(new Headers({ "X-Forwarded-For": "198.51.100.10" }))).toBe("unknown");
+    expect(readCloudflareClientIp(new Headers({
+      "CF-Connecting-IP": " 203.0.113.10 ",
+      "X-Forwarded-For": "198.51.100.10"
+    }))).toBe("203.0.113.10");
+  });
+
   it("rejects room lifecycle commands on the root websocket", async () => {
     const gateway = new RoomDurableObject(
       new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
