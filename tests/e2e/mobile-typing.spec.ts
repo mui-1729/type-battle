@@ -1,18 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
-
-async function selectSoloMode(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "ひとりで遊ぶ" }).click();
-}
-
-async function selectBattleMode(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "対戦する" }).click();
-}
-
-async function setNickname(page: Page, nickname: string): Promise<void> {
-  await page.getByTitle("設定を開く").click();
-  await page.locator(".modalContent input").first().fill(nickname);
-  await page.getByRole("button", { name: "設定を反映" }).click();
-}
+import { expect, test } from "@playwright/test";
+import { selectBattleMode, selectSoloMode, setNickname } from "./helpers";
 
 test("completes practice with mobile Japanese textarea input", async ({ page }) => {
   await page.goto("/");
