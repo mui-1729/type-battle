@@ -46,6 +46,9 @@ import {
   parseReadyPayload,
   parseRoomCodePayload,
   parseTypingPayload,
+  isValidTypingPayloadValues,
+  MAX_WEB_SOCKET_MESSAGE_BYTES,
+  getUtf8ByteLength,
 } from "./room-protocol.js";
 import {
   GATEWAY_ROOM_RATE_LIMIT_PATH,
@@ -164,8 +167,6 @@ const DISCONNECT_GRACE_MS = 30_000;
 const ROOM_PERSIST_DEBOUNCE_MS = 1_000;
 const MAINTENANCE_ALARM_FALLBACK_MS = 5_000;
 const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
-const MAX_WEB_SOCKET_MESSAGE_BYTES = 16 * 1024;
-const MAX_TYPING_INPUT_CHARS = 16;
 const MAX_ROOM_SOCKETS = 16;
 const UNJOINED_SOCKET_IDLE_MS = 30_000;
 const GUEST_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -371,7 +372,7 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    if (byteLength(rawMessage) > MAX_WEB_SOCKET_MESSAGE_BYTES) {
+    if (getUtf8ByteLength(rawMessage) > MAX_WEB_SOCKET_MESSAGE_BYTES) {
       this.closeSocket(socketId, 1009, "Message too large.");
       return;
     }
@@ -2915,17 +2916,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function isValidTypingProgressPayload(payload: TypingProgress): boolean {
-  return (
-    Number.isSafeInteger(payload.sequence) &&
-    payload.sequence >= 1 &&
-    typeof payload.input === "string" &&
-    Array.from(payload.input).length <= MAX_TYPING_INPUT_CHARS &&
-    byteLength(payload.input) <= MAX_WEB_SOCKET_MESSAGE_BYTES
-  );
-}
-
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).length;
+  return isValidTypingPayloadValues(payload.input, payload.sequence);
 }
 
 function createRoomStateFromSnapshot(

@@ -26,8 +26,8 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
 }
 
-const MAX_WEB_SOCKET_MESSAGE_BYTES = 16 * 1024;
-const MAX_TYPING_INPUT_CHARS = 16;
+export const MAX_WEB_SOCKET_MESSAGE_BYTES = 16 * 1024;
+export const MAX_TYPING_INPUT_CHARS = 16;
 const MAX_MESSAGE_ID_LENGTH = 80;
 const MAX_IDENTIFIER_LENGTH = 96;
 
@@ -233,15 +233,21 @@ export function parseTypingPayload(payload: unknown): TypingPayload | null {
   const input = typeof payload.input === "string" ? payload.input : null;
   const sequence = typeof payload.sequence === "number" ? payload.sequence : null;
 
-  if (!roomCode || input === null || sequence === null || !Number.isSafeInteger(sequence) || sequence < 1) {
+  if (!roomCode || !isValidTypingPayloadValues(input, sequence)) {
     return null;
   }
 
-  if (Array.from(input).length > MAX_TYPING_INPUT_CHARS || byteLength(input) > MAX_WEB_SOCKET_MESSAGE_BYTES) {
-    return null;
-  }
+  return { roomCode, input, sequence: sequence as number };
+}
 
-  return { roomCode, input, sequence };
+export function isValidTypingPayloadValues(input: unknown, sequence: unknown): input is string {
+  return (
+    typeof input === "string" &&
+    Number.isSafeInteger(sequence) &&
+    (sequence as number) >= 1 &&
+    Array.from(input).length <= MAX_TYPING_INPUT_CHARS &&
+    getUtf8ByteLength(input) <= MAX_WEB_SOCKET_MESSAGE_BYTES
+  );
 }
 
 function readRoomCode(value: unknown): string | null {
@@ -279,7 +285,7 @@ function parseMatchRule(value: unknown): MatchRule | null {
   return value === "race" || value === "timeAttack" || value === "hpBattle" ? value : null;
 }
 
-function byteLength(value: string): number {
+export function getUtf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).length;
 }
 
