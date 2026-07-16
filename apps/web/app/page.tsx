@@ -186,6 +186,44 @@ export default function HomePage() {
     [playerId, room]
   );
   const [dailyChallengeNow, setDailyChallengeNow] = useState(() => new Date());
+  const homePageViewModel = useMemo(
+    () =>
+      getHomePageViewModel({
+        now: Date.now(),
+        room,
+        playerId,
+        currentPlayer,
+        result,
+        practiceSession,
+        practiceResult,
+        dailyChallengeNow,
+        dailyChallengeRecord,
+        mistakeTrendRecord,
+        localProgress,
+        practiceProgress,
+        connected,
+        lastProgressSentAt,
+        syncClock,
+        matchTimerMs
+      }),
+    [
+      room,
+      playerId,
+      currentPlayer,
+      result,
+      practiceSession,
+      practiceResult,
+      dailyChallengeNow,
+      dailyChallengeRecord,
+      mistakeTrendRecord,
+      localProgress,
+      practiceProgress,
+      connected,
+      lastProgressSentAt,
+      syncClock,
+      matchTimerMs
+    ]
+  );
   const {
     activeResult,
     activePrompt,
@@ -214,24 +252,7 @@ export default function HomePage() {
     progressSyncState,
     displayRoom,
     typingInputKey
-  } = getHomePageViewModel({
-    now: Date.now(),
-    room,
-    playerId,
-    currentPlayer,
-    result,
-    practiceSession,
-    practiceResult,
-    dailyChallengeNow,
-    dailyChallengeRecord,
-    mistakeTrendRecord,
-    localProgress,
-    practiceProgress,
-    connected,
-    lastProgressSentAt,
-    syncClock,
-    matchTimerMs
-  });
+  } = homePageViewModel;
 
   const setPromptCategory = useCallback(
     (category: "short" | "standard" | "long") => {

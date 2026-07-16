@@ -67,6 +67,8 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await guest.getByLabel("ルームコード").fill(roomCode);
   await guest.getByTitle("ルームに参加").click();
 
+  await expect(host.getByTestId("lobby-prep").getByText("Bob")).toBeVisible();
+  await expect(guest.getByTestId("lobby-prep").getByText("Alice")).toBeVisible();
   await host.getByRole("button", { name: "READYにする" }).click();
   await guest.getByRole("button", { name: "READYにする" }).click();
   await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
@@ -226,6 +228,8 @@ test("forfeits the match after long disconnect", async ({ browser }) => {
   await guest.getByLabel("ルームコード").fill(roomCode);
   await guest.getByTitle("ルームに参加").click();
 
+  await expect(host.getByTestId("lobby-prep").getByText("Bob")).toBeVisible();
+  await expect(guest.getByTestId("lobby-prep").getByText("Alice")).toBeVisible();
   await host.getByRole("button", { name: "READYにする" }).click();
   await guest.getByRole("button", { name: "READYにする" }).click();
   await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
