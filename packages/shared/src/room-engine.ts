@@ -1,8 +1,9 @@
-import { getDailyChallengeInfo, getPromptsByCategory, pickDailyChallengePrompt, pickPrompt } from "./prompts.js";
+import { getPromptsByCategory, pickPrompt } from "./prompts.js";
 import { advanceRomajiProgress, buildRomajiTypingPlan, getRomajiTypingUnitIndex } from "./romaji-typing.js";
 import { calculateAccuracy, calculateWpm, rankPlayers } from "./scoring.js";
 import { advanceProgress, createEmptyProgress } from "./typing-progress.js";
 import { createRoomCode, normalizeNickname } from "./validation.js";
+export { startDailyPractice, startPractice } from "./practice.js";
 import type {
   BotDifficulty,
   DeviceKind,
@@ -1511,32 +1512,6 @@ export function checkExpiredTimeAttackMatches(): MatchResult[] {
   }
 
   return results;
-}
-
-export function startPractice(nickname: string, category: PromptCategory): { practiceId: string; prompt: Prompt; startedAt: number } {
-  void nickname;
-  const practiceId = createRoomCode(); // Reuse room code generator for practice ID
-  const prompt = pickPrompt(category, Date.now());
-  return {
-    practiceId,
-    prompt,
-    startedAt: Date.now()
-  };
-}
-
-export function startDailyPractice(nickname: string): { practiceId: string; prompt: Prompt; startedAt: number; challengeKey: string } {
-  void nickname;
-  const practiceId = createRoomCode();
-  const now = new Date();
-  const prompt = pickDailyChallengePrompt(now);
-  const { challengeKey } = getDailyChallengeInfo(now);
-
-  return {
-    practiceId,
-    prompt,
-    startedAt: Date.now(),
-    challengeKey
-  };
 }
 
 function clamp(value: number, min: number, max: number): number {
