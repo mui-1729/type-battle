@@ -1,26 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
-
-async function readInputGuide(page: Page): Promise<string> {
-  return (await page.getByLabel("入力ガイド").innerText()).replace(/\s+/g, "");
-}
-
-async function typeInputGuide(page: Page, guide: string): Promise<void> {
-  await page.getByLabel("入力欄").pressSequentially(guide, { delay: 40 });
-}
-
-async function selectBattleMode(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "対戦する" }).click();
-}
-
-async function selectSoloMode(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "ひとりで遊ぶ" }).click();
-}
-
-async function setNickname(page: Page, nickname: string): Promise<void> {
-  await page.getByTitle("設定を開く").click();
-  await page.locator(".modalContent input").first().fill(nickname);
-  await page.getByRole("button", { name: "設定を反映" }).click();
-}
+import { expect, test } from "@playwright/test";
+import {
+  readInputGuide,
+  selectBattleMode,
+  selectSoloMode,
+  setNickname,
+  typeInputGuide
+} from "./helpers";
 
 test("creates a room and lets a second player join", async ({ browser }) => {
   const hostContext = await browser.newContext();
