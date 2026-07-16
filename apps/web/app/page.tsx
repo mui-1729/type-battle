@@ -43,24 +43,21 @@ import { PracticeStage } from "./_components/practice-stage";
 import { SectionHeading, SurfaceCard } from "./_components/ui";
 import {
   createEmptyProgress,
-  advanceProgressWithMistakes,
   type MistakeSample,
   type ProgressState
 } from "./_lib/typing-progress";
 import {
-  advanceRomajiProgressWithMistakes,
   buildRomajiTypingPlan
 } from "./_lib/romaji-typing";
 import {
-  advanceLoopingRomajiProgressWithMistakes,
-  getCanonicalProgressIndex,
-  getRomajiProgressIndexForCanonicalProgress
+  getCanonicalProgressIndex
 } from "./_lib/looping-typing";
 import {
   getHomePageViewModel,
   type PracticeSession
 } from "./_lib/home-page-view-model";
 import { detectDeviceKind } from "./_lib/device-kind";
+import { advanceTypingProgress } from "./_lib/typing-input-strategy";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
 import {
@@ -970,49 +967,6 @@ export default function HomePage() {
     [room]
   );
 
-  const updateTypingProgress = useCallback(
-    (previous: ProgressState, typedText: string) => {
-      const canonicalText = activePrompt?.typing.hiragana ?? activeTypingText;
-
-      if (activeInputDeviceKind === "mobile") {
-        return advanceProgressWithMistakes(previous, canonicalText, typedText, isTimeAttackPlaying);
-      }
-
-      if (activeRomajiTypingPlan && containsKanaInput(typedText)) {
-        const canonicalPrevious = {
-          ...previous,
-          progressIndex: getCanonicalProgressIndex(activeRomajiTypingPlan, previous.progressIndex)
-        };
-        const next = advanceProgressWithMistakes(
-          canonicalPrevious,
-          canonicalText,
-          typedText,
-          isTimeAttackPlaying
-        );
-
-        return {
-          ...next,
-          progress: {
-            ...next.progress,
-            progressIndex: getRomajiProgressIndexForCanonicalProgress(
-              activeRomajiTypingPlan,
-              next.progress.progressIndex
-            )
-          }
-        };
-      }
-
-      if (activeRomajiTypingPlan) {
-        return isTimeAttackPlaying
-          ? advanceLoopingRomajiProgressWithMistakes(previous, activeRomajiTypingPlan, typedText)
-          : advanceRomajiProgressWithMistakes(previous, activeRomajiTypingPlan, typedText);
-      }
-
-      return advanceProgressWithMistakes(previous, activeTypingText, typedText, isTimeAttackPlaying);
-    },
-    [activeInputDeviceKind, activePrompt, activeRomajiTypingPlan, activeTypingText, isTimeAttackPlaying]
-  );
-
   const handleTypedText = useCallback(
     (typedText: string) => {
       if (!typedText) {
@@ -1021,7 +975,15 @@ export default function HomePage() {
 
       if (room?.status === "playing" && room?.prompt) {
         const previous = localProgressRef.current;
-        const next = updateTypingProgress(previous, typedText);
+        const next = advanceTypingProgress({
+          previous,
+          typedText,
+          deviceKind: activeInputDeviceKind,
+          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
+          displayText: activeTypingText,
+          romajiPlan: activeRomajiTypingPlan,
+          loop: isTimeAttackPlaying
+        });
         const correct = next.progress.correctCharacters > previous.correctCharacters;
 
         setLocalProgress(next.progress);
@@ -1037,7 +999,15 @@ export default function HomePage() {
 
       if (practiceSession && !practiceResult && !room) {
         const previous = practiceProgressRef.current;
-        const next = updateTypingProgress(previous, typedText);
+        const next = advanceTypingProgress({
+          previous,
+          typedText,
+          deviceKind: activeInputDeviceKind,
+          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
+          displayText: activeTypingText,
+          romajiPlan: activeRomajiTypingPlan,
+          loop: isTimeAttackPlaying
+        });
         const correct = next.progress.correctCharacters > previous.correctCharacters;
 
         setPracticeProgress(next.progress);
@@ -1064,7 +1034,9 @@ export default function HomePage() {
       practiceSession,
       consumeDailyAttempt,
       recordMistakeSamples,
-      updateTypingProgress,
+      activeInputDeviceKind,
+      activePrompt,
+      activeRomajiTypingPlan,
       room
     ]
   );
@@ -1102,7 +1074,15 @@ export default function HomePage() {
 
       if (room?.status === "playing" && room?.prompt) {
         const previous = localProgressRef.current;
-        const next = updateTypingProgress(previous, typedKey);
+        const next = advanceTypingProgress({
+          previous,
+          typedText: typedKey,
+          deviceKind: activeInputDeviceKind,
+          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
+          displayText: activeTypingText,
+          romajiPlan: activeRomajiTypingPlan,
+          loop: isTimeAttackPlaying
+        });
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const soundOptions = settingsRef.current;
 
@@ -1119,7 +1099,15 @@ export default function HomePage() {
 
       if (practiceActive && practiceSession) {
         const previous = practiceProgressRef.current;
-        const next = updateTypingProgress(previous, typedKey);
+        const next = advanceTypingProgress({
+          previous,
+          typedText: typedKey,
+          deviceKind: activeInputDeviceKind,
+          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
+          displayText: activeTypingText,
+          romajiPlan: activeRomajiTypingPlan,
+          loop: isTimeAttackPlaying
+        });
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const soundOptions = settingsRef.current;
 
@@ -1152,7 +1140,8 @@ export default function HomePage() {
     practiceResult,
     practiceSession,
     recordMistakeSamples,
-    updateTypingProgress,
+    activePrompt,
+    activeRomajiTypingPlan,
     room
   ]);
 
@@ -1856,10 +1845,6 @@ export default function HomePage() {
       ) : null}
     </main>
   );
-}
-
-function containsKanaInput(value: string): boolean {
-  return /[\u3040-\u30ff\uff66-\uff9f]/u.test(value);
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
