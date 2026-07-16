@@ -8,6 +8,11 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "next": {
+      "postcss": "8.5.10"
+    }
+  },
   "scripts": {
     "dev": "turbo dev",
     "lint": "turbo lint",
