@@ -10,7 +10,6 @@ import {
   getRomajiTypingUnitIndex,
   pickPrompt,
   rankPlayers,
-  QUICK_REACTIONS
 } from "@type-battle/shared";
 import { isValidRoomCode, normalizeNickname, validateNickname } from "@type-battle/shared";
 import type {
@@ -21,8 +20,7 @@ import type {
   MatchStatus,
   PlayerState,
   Prompt,
-  PromptCategory,
-  QuickReaction
+  PromptCategory
 } from "@type-battle/shared";
 import type {
   CloudflareClientMessageType,
@@ -30,11 +28,28 @@ import type {
   CloudflareServerEventType,
   CloudflareServerMessage
 } from "@type-battle/shared/cloudflare-events";
-import { CLOUDFLARE_CLIENT_MESSAGE_TYPES } from "@type-battle/shared/cloudflare-events";
 import type { RoomEngineHooks } from "@type-battle/shared/room-engine";
 import { readCloudflareClientIp } from "./client-ip.js";
 import { normalizeRoomCode, resolveRoomRoute } from "./room-routing.js";
 import { RateLimiter } from "./rate-limiter.js";
+import {
+  isCloudflareClientMessageType,
+  isWebSocketUpgrade,
+  parseAccessoryPayload,
+  parseBotDifficultyPayload,
+  parseClientMessage,
+  parseCreateRoomPayload,
+  parseJoinRoomPayload,
+  parseMatchRulePayload,
+  parsePromptCategoryPayload,
+  parseReactionPayload,
+  parseReadyPayload,
+  parseRoomCodePayload,
+  parseTypingPayload,
+  isValidTypingPayloadValues,
+  MAX_WEB_SOCKET_MESSAGE_BYTES,
+  getUtf8ByteLength,
+} from "./room-protocol.js";
 import {
   GATEWAY_ROOM_RATE_LIMIT_PATH,
   type RoomRateLimitAction,
@@ -61,56 +76,6 @@ type SocketState = {
 type AttachSocketOptions = {
   clientIp?: string;
   roomCode?: string;
-};
-
-type ParsedClientMessage = {
-  id: string;
-  type: string;
-  payload: unknown;
-};
-
-type CreateRoomPayload = {
-  nickname: string;
-  guestId: string;
-  sessionId: string;
-  deviceKind?: DeviceKind;
-};
-
-type JoinRoomPayload = CreateRoomPayload & {
-  roomCode: string;
-};
-
-type RoomCodePayload = {
-  roomCode: string;
-};
-
-type ReadyPayload = RoomCodePayload & {
-  ready: boolean;
-};
-
-type ReactionPayload = RoomCodePayload & {
-  reaction: QuickReaction;
-};
-
-type AccessoryPayload = RoomCodePayload & {
-  accessoryIndex: number;
-};
-
-type PromptCategoryPayload = RoomCodePayload & {
-  category: PromptCategory;
-};
-
-type BotDifficultyPayload = RoomCodePayload & {
-  difficulty: BotDifficulty;
-};
-
-type MatchRulePayload = RoomCodePayload & {
-  rule: MatchRule;
-};
-
-type TypingPayload = RoomCodePayload & {
-  input: string;
-  sequence: number;
 };
 
 type PersistedRoomSnapshot = {
@@ -202,10 +167,6 @@ const DISCONNECT_GRACE_MS = 30_000;
 const ROOM_PERSIST_DEBOUNCE_MS = 1_000;
 const MAINTENANCE_ALARM_FALLBACK_MS = 5_000;
 const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
-const MAX_WEB_SOCKET_MESSAGE_BYTES = 16 * 1024;
-const MAX_TYPING_INPUT_CHARS = 16;
-const MAX_MESSAGE_ID_LENGTH = 80;
-const MAX_IDENTIFIER_LENGTH = 96;
 const MAX_ROOM_SOCKETS = 16;
 const UNJOINED_SOCKET_IDLE_MS = 30_000;
 const GUEST_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -411,7 +372,7 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    if (byteLength(rawMessage) > MAX_WEB_SOCKET_MESSAGE_BYTES) {
+    if (getUtf8ByteLength(rawMessage) > MAX_WEB_SOCKET_MESSAGE_BYTES) {
       this.closeSocket(socketId, 1009, "Message too large.");
       return;
     }
@@ -2276,40 +2237,6 @@ export class RoomAuthorityDurableObject {
   }
 }
 
-function isWebSocketUpgrade(request: Request): boolean {
-  return request.headers.get("Upgrade")?.toLowerCase() === "websocket";
-}
-
-function parseClientMessage(rawMessage: string): ParsedClientMessage | null {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(rawMessage);
-  } catch {
-    return null;
-  }
-
-  if (
-    !isRecord(parsed) ||
-    typeof parsed.id !== "string" ||
-    parsed.id.length === 0 ||
-    parsed.id.length > MAX_MESSAGE_ID_LENGTH ||
-    typeof parsed.type !== "string"
-  ) {
-    return null;
-  }
-
-  return {
-    id: parsed.id,
-    type: parsed.type,
-    payload: parsed.payload
-  };
-}
-
-function isCloudflareClientMessageType(type: string): type is CloudflareClientMessageType {
-  return (CLOUDFLARE_CLIENT_MESSAGE_TYPES as readonly string[]).includes(type);
-}
-
 function parseRoomRateLimitResult(value: unknown): RoomRateLimitResult | null {
   if (!isRecord(value) || typeof value.ok !== "boolean") {
     return null;
@@ -2327,215 +2254,6 @@ function parseRoomRateLimitResult(value: unknown): RoomRateLimitResult | null {
     ok: false,
     error: value.error
   };
-}
-
-function parseCreateRoomPayload(payload: unknown): CreateRoomPayload | null {
-  if (!isRecord(payload)) {
-    return null;
-  }
-
-  const nickname = readNickname(payload.nickname);
-  const guestId = readIdentifier(payload.guestId);
-  const sessionId = readIdentifier(payload.sessionId);
-  const deviceKind = parseDeviceKind(payload.deviceKind);
-
-  if (!nickname || !guestId || !sessionId) {
-    return null;
-  }
-
-  return {
-    nickname,
-    guestId,
-    sessionId,
-    ...(deviceKind ? { deviceKind } : {})
-  };
-}
-
-function parseJoinRoomPayload(payload: unknown): JoinRoomPayload | null {
-  const base = parseCreateRoomPayload(payload);
-  if (!base || !isRecord(payload)) {
-    return null;
-  }
-
-  const roomCode = readRoomCode(payload.roomCode);
-  if (!roomCode) {
-    return null;
-  }
-
-  return {
-    ...base,
-    roomCode
-  };
-}
-
-function parseRoomCodePayload(payload: unknown): RoomCodePayload | null {
-  if (!isRecord(payload)) {
-    return null;
-  }
-
-  const roomCode = readRoomCode(payload.roomCode);
-  return roomCode ? { roomCode } : null;
-}
-
-function parseReadyPayload(payload: unknown): ReadyPayload | null {
-  if (!isRecord(payload)) {
-    return null;
-  }
-
-  const roomCode = readRoomCode(payload.roomCode);
-  const ready = typeof payload.ready === "boolean" ? payload.ready : null;
-  if (!roomCode || ready === null) {
-    return null;
-  }
-
-  return { roomCode, ready };
-}
-
-function parseReactionPayload(payload: unknown): ReactionPayload | null {
-  if (!isRecord(payload)) {
-    return null;
-  }
-
-  const roomCode = readRoomCode(payload.roomCode);
-  const reaction = typeof payload.reaction === "string" && QUICK_REACTIONS.includes(payload.reaction as QuickReaction)
-    ? payload.reaction as QuickReaction
-    : null;
-
-  if (!roomCode || !reaction) {
-    return null;
-  }
-
-  return { roomCode, reaction };
-}
-
-function parseAccessoryPayload(payload: unknown): AccessoryPayload | null {
-  if (!isRecord(payload)) {
-    return null;
-  }
-
-  const roomCode = readRoomCode(payload.roomCode);
-  const accessoryIndex = typeof payload.accessoryIndex === "number" && Number.isInteger(payload.accessoryIndex)
-    ? payload.accessoryIndex
-    : null;
-
-  if (!roomCode || accessoryIndex === null || accessoryIndex < 0 || accessoryIndex > 3) {
-    return null;
-  }
-
-  return { roomCode, accessoryIndex };
-}
-
-function parsePromptCategoryPayload(payload: unknown): PromptCategoryPayload | null {
-  if (!isRecord(payload)) {
-    return null;
-  }
-
-  const roomCode = readRoomCode(payload.roomCode);
-  const category = parsePromptCategory(payload.category);
-  if (!roomCode || !category) {
-    return null;
-  }
-
-  return { roomCode, category };
-}
-
-function parseBotDifficultyPayload(payload: unknown): BotDifficultyPayload | null {
-  if (!isRecord(payload)) {
-    return null;
-  }
-
-  const roomCode = readRoomCode(payload.roomCode);
-  const difficulty = parseBotDifficulty(payload.difficulty);
-  if (!roomCode || !difficulty) {
-    return null;
-  }
-
-  return { roomCode, difficulty };
-}
-
-function parseMatchRulePayload(payload: unknown): MatchRulePayload | null {
-  if (!isRecord(payload)) {
-    return null;
-  }
-
-  const roomCode = readRoomCode(payload.roomCode);
-  const rule = parseMatchRule(payload.rule);
-  if (!roomCode || !rule) {
-    return null;
-  }
-
-  return { roomCode, rule };
-}
-
-function parseTypingPayload(payload: unknown): TypingPayload | null {
-  if (!isRecord(payload)) {
-    return null;
-  }
-
-  const roomCode = readRoomCode(payload.roomCode);
-  const input = typeof payload.input === "string" ? payload.input : null;
-  const sequence = typeof payload.sequence === "number" ? payload.sequence : null;
-
-  if (!roomCode || input === null || sequence === null || !Number.isSafeInteger(sequence) || sequence < 1) {
-    return null;
-  }
-
-  if (Array.from(input).length > MAX_TYPING_INPUT_CHARS || byteLength(input) > MAX_WEB_SOCKET_MESSAGE_BYTES) {
-    return null;
-  }
-
-  return {
-    roomCode,
-    input,
-    sequence
-  };
-}
-
-function readRoomCode(value: unknown): string | null {
-  const roomCode = readString(value);
-  if (!roomCode || !isValidRoomCode(roomCode)) {
-    return null;
-  }
-
-  return normalizeRoomCode(roomCode);
-}
-
-function readString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function readIdentifier(value: unknown): string | null {
-  const text = readString(value);
-  if (!text || text.length > MAX_IDENTIFIER_LENGTH || !/^[A-Za-z0-9_-]+$/.test(text)) {
-    return null;
-  }
-
-  return text;
-}
-
-function readNickname(value: unknown): string | null {
-  const text = readString(value);
-  if (!text || validateNickname(text)) {
-    return null;
-  }
-
-  return text;
-}
-
-function parseDeviceKind(value: unknown): DeviceKind | null {
-  return value === "mobile" || value === "desktop" ? value : null;
-}
-
-function parsePromptCategory(value: unknown): PromptCategory | null {
-  return value === "short" || value === "standard" || value === "long" ? value : null;
-}
-
-function parseBotDifficulty(value: unknown): BotDifficulty | null {
-  return value === "easy" || value === "normal" || value === "hard" ? value : null;
-}
-
-function parseMatchRule(value: unknown): MatchRule | null {
-  return value === "race" || value === "timeAttack" || value === "hpBattle" ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -3198,17 +2916,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function isValidTypingProgressPayload(payload: TypingProgress): boolean {
-  return (
-    Number.isSafeInteger(payload.sequence) &&
-    payload.sequence >= 1 &&
-    typeof payload.input === "string" &&
-    Array.from(payload.input).length <= MAX_TYPING_INPUT_CHARS &&
-    byteLength(payload.input) <= MAX_WEB_SOCKET_MESSAGE_BYTES
-  );
-}
-
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).length;
+  return isValidTypingPayloadValues(payload.input, payload.sequence);
 }
 
 function createRoomStateFromSnapshot(
