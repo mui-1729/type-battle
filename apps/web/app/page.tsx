@@ -11,20 +11,15 @@ import {
 } from "./_lib/realtime-client";
 import {
   calculateAccuracy,
-  calculateProgress,
   calculateWpm,
-  getDailyChallengeInfo,
   createRoomCode,
   normalizeNickname,
-  pickDailyChallengePrompt,
   validateNickname
 } from "@type-battle/shared";
 import type {
-  DeviceKind,
   MatchRule,
   MatchResult,
   PlayerResult,
-  Prompt,
   PromptCategory,
   QuickReaction,
   RoomState,
@@ -61,9 +56,13 @@ import {
   getCanonicalProgressIndex,
   getRomajiProgressIndexForCanonicalProgress
 } from "./_lib/looping-typing";
+import {
+  getHomePageViewModel,
+  type PracticeSession
+} from "./_lib/home-page-view-model";
 import { detectDeviceKind } from "./_lib/device-kind";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
-import { getProgressSyncLabel, getProgressSyncState } from "./_lib/progress-sync";
+import { getProgressSyncLabel } from "./_lib/progress-sync";
 import {
   getStoredRoomJoinFailureAction,
   getStoredRoomRejoinDelayMs
@@ -102,22 +101,11 @@ import {
   formatMistakeTarget,
   loadMistakeTrendRecord,
   persistMistakeTrendRecord,
-  summarizeMistakeTrendRecord,
   updateMistakeTrendRecord,
   type MistakeTrendRecord
 } from "../lib/mistake-trends";
 
 type ClientSocket = RealtimeSocket;
-
-type PracticeSession = {
-  practiceId: string;
-  prompt: Prompt;
-  startedAt: number;
-  category: PromptCategory;
-  deviceKind: DeviceKind;
-  mode: "practice" | "daily";
-  challengeKey?: string;
-};
 
 type StoredRoomRecoveryState = {
   status: "idle" | "reconnecting" | "failed";
@@ -201,89 +189,52 @@ export default function HomePage() {
     [playerId, room]
   );
   const [dailyChallengeNow, setDailyChallengeNow] = useState(() => new Date());
-  const activePracticePlayer = practiceResult?.players[0] ?? null;
-  const activeResult = result ?? practiceResult;
-  const activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
-  const activePromptText = activePrompt?.text ?? "";
-  const activeInputDeviceKind = room ? currentPlayer?.deviceKind ?? "desktop" : practiceSession?.deviceKind ?? "desktop";
-  const dailyChallengeInfo = useMemo(() => getDailyChallengeInfo(dailyChallengeNow), [dailyChallengeNow]);
-  const dailyChallengePrompt = useMemo(() => pickDailyChallengePrompt(dailyChallengeNow), [dailyChallengeNow]);
-  const visibleDailyChallengeRecord = getVisibleDailyChallengeRecord(
+  const {
+    activeResult,
+    activePrompt,
+    activePromptText,
+    activeInputDeviceKind,
+    dailyChallengeInfo,
+    dailyChallengePrompt,
+    visibleDailyChallengeRecord,
+    activePracticeMode,
+    mistakeTrendSummary,
+    mistakeTrendTotal,
+    activeRomajiTypingPlan,
+    activeTypingText,
+    isRoomPlaying,
+    isPracticePlaying,
+    activeProgress,
+    isTimeAttackPlaying,
+    activeGuideProgressIndex,
+    activeProgressPercent,
+    activeWpm,
+    activeAccuracy,
+    activeResultPlayer,
+    isTimeAttackExpired,
+    activeTimeAttackRemainingSeconds,
+    acceptingTextInput,
+    progressSyncState,
+    displayRoom,
+    typingInputKey
+  } = getHomePageViewModel({
+    now: Date.now(),
+    room,
+    playerId,
+    currentPlayer,
+    result,
+    practiceSession,
+    practiceResult,
+    dailyChallengeNow,
     dailyChallengeRecord,
-    dailyChallengeInfo.challengeKey
-  );
-  const activePracticeMode = practiceSession?.mode ?? "practice";
-  const mistakeTrendSummary = useMemo(() => summarizeMistakeTrendRecord(mistakeTrendRecord), [mistakeTrendRecord]);
-  const mistakeTrendTotal = useMemo(
-    () => (mistakeTrendRecord?.items ?? []).reduce((total, item) => total + item.count, 0),
-    [mistakeTrendRecord]
-  );
-  const activeRomajiTypingPlan =
-    activePrompt && activeInputDeviceKind !== "mobile" ? buildRomajiTypingPlan(activePrompt.typing.hiragana) : null;
-  const activeTypingText = activePrompt
-    ? activeInputDeviceKind === "mobile"
-      ? activePrompt.typing.hiragana
-      : activeRomajiTypingPlan?.guide ?? activePrompt.typing.romaji
-    : "";
-  const isRoomPlaying = room?.status === "playing";
-  const isPracticePlaying = Boolean(practiceSession && !practiceResult && !room);
-  const activeProgress = room ? localProgress : practiceProgress;
-  const isTimeAttackPlaying = Boolean(isRoomPlaying && room?.matchRule === "timeAttack");
-  const activeGuideProgressIndex =
-    isTimeAttackPlaying && activeTypingText.length > 0
-      ? activeProgress.progressIndex % activeTypingText.length
-      : activeProgress.progressIndex;
-  const activeCanonicalProgressIndex =
-    activeInputDeviceKind === "desktop" && activeRomajiTypingPlan
-      ? getCanonicalProgressIndex(activeRomajiTypingPlan, activeProgress.progressIndex)
-      : activeProgress.progressIndex;
-  const activeProgressPercent = calculateProgress(activeGuideProgressIndex, activeTypingText.length);
-  const activeElapsedMs =
-    isRoomPlaying && room?.serverStartAt
-      ? Date.now() - room.serverStartAt
-      : isPracticePlaying && practiceSession
-        ? Date.now() - practiceSession.startedAt
-        : 0;
-  const activeWpm = calculateWpm(activeCanonicalProgressIndex, activeElapsedMs);
-  const activeAccuracy = calculateAccuracy(activeProgress.correctCharacters, activeProgress.totalTypedCharacters);
-  const activeResultPlayer =
-    room?.players.find((player) => player.id === playerId) ?? activePracticePlayer ?? null;
-  const isTimeAttackExpired = Boolean(
-    isTimeAttackPlaying && room?.matchEndsAt && matchTimerMs <= 0 && Date.now() >= room.matchEndsAt
-  );
-  const activeTimeAttackRemainingSeconds = Math.max(matchTimerMs / 1000, 0).toFixed(1);
-  const acceptingTextInput =
-    (isRoomPlaying && connected && !result && !isTimeAttackExpired) || isPracticePlaying;
-  const progressSyncState = room
-    ? getProgressSyncState({
-        connected,
-        localTypedCharacters: activeProgress.totalTypedCharacters,
-        serverTypedCharacters: currentPlayer?.totalTypedCharacters ?? 0,
-        lastSentAt: lastProgressSentAt,
-        now: syncClock
-      })
-    : "synced";
-  const displayRoom = useMemo(() => {
-    if (!room || !currentPlayer) {
-      return room;
-    }
-
-    return {
-      ...room,
-      players: room.players.map((player) =>
-        player.id === currentPlayer.id
-          ? {
-              ...player,
-              progressIndex: Math.max(player.progressIndex, activeCanonicalProgressIndex),
-              correctCharacters: Math.max(player.correctCharacters, activeProgress.correctCharacters),
-              totalTypedCharacters: Math.max(player.totalTypedCharacters, activeProgress.totalTypedCharacters)
-            }
-          : player
-      )
-    };
-  }, [activeCanonicalProgressIndex, activeProgress, currentPlayer, room]);
-  const typingInputKey =
-    String(room?.prompt?.id ?? practiceSession?.practiceId ?? "idle") + ":" + String(activePrompt?.id ?? "none");
+    mistakeTrendRecord,
+    localProgress,
+    practiceProgress,
+    connected,
+    lastProgressSentAt,
+    syncClock,
+    matchTimerMs
+  });
 
   const setPromptCategory = useCallback(
     (category: "short" | "standard" | "long") => {
