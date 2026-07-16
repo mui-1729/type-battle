@@ -32,6 +32,7 @@ import type {
 } from "@type-battle/shared/cloudflare-events";
 import { CLOUDFLARE_CLIENT_MESSAGE_TYPES } from "@type-battle/shared/cloudflare-events";
 import type { RoomEngineHooks } from "@type-battle/shared/room-engine";
+import { readCloudflareClientIp } from "./client-ip.js";
 import { normalizeRoomCode, resolveRoomRoute } from "./room-routing.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
@@ -360,7 +361,7 @@ export class RoomAuthorityDurableObject {
     const server = pair[1];
 
     this.attachSocket(server as unknown as CloudflareSocketLike, {
-      clientIp: readClientIp(request.headers),
+      clientIp: readCloudflareClientIp(request.headers),
       ...(roomCode ? { roomCode } : {})
     });
 
@@ -3339,13 +3340,4 @@ function parseSnapshotInternal(value: unknown): PersistedRoomSnapshot["internal"
     ...(typeof value.finishedAt === "number" && Number.isFinite(value.finishedAt) ? { finishedAt: value.finishedAt } : {}),
     ...(Object.keys(typingState).length > 0 ? { typingState } : {})
   };
-}
-
-function readClientIp(headers: Headers): string {
-  const forwardedFor = headers.get("CF-Connecting-IP") ?? headers.get("X-Forwarded-For");
-  if (!forwardedFor) {
-    return "unknown";
-  }
-
-  return forwardedFor.split(",")[0]?.trim() || "unknown";
 }

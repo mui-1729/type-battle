@@ -8,6 +8,12 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "esbuild": "0.28.1",
+    "next": {
+      "postcss": "8.5.10"
+    }
+  },
   "scripts": {
     "dev": "turbo dev",
     "lint": "turbo lint",
