@@ -67,9 +67,24 @@ export function touchGuestSession(session: GuestSession): GuestSession {
 }
 
 function createSessionId(): string {
-  return typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const cryptoApi = globalThis.crypto;
+
+  return typeof cryptoApi?.randomUUID === "function" ? cryptoApi.randomUUID() : createRandomIdentifier("session_");
 }
 
 function createGuestId(): string {
-  return `guest_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  return createRandomIdentifier("guest_");
+}
+
+function createRandomIdentifier(prefix: string): string {
+  const cryptoApi = globalThis.crypto;
+
+  if (typeof cryptoApi?.getRandomValues !== "function") {
+    throw new Error("Secure random number generation is unavailable.");
+  }
+
+  const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+  const suffix = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+
+  return `${prefix}${suffix}`;
 }

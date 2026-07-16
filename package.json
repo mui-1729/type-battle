@@ -9,6 +9,7 @@
     "packages/*"
   ],
   "overrides": {
+    "esbuild": "0.28.1",
     "next": {
       "postcss": "8.5.10"
     }
