@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Clipboard, Swords, Users } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   createRealtimeSocket,
   getDefaultRealtimeUrl,
@@ -265,7 +265,7 @@ export default function HomePage() {
     typingInputKey
   } = homePageViewModel;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const nextMode = activeInputDeviceKind === "mobile" ? "kana" : "romaji";
     inputModeRef.current = nextMode;
     setInputMode(nextMode);
