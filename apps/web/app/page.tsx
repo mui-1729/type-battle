@@ -994,7 +994,7 @@ export default function HomePage() {
     (input: string, finish: boolean) => {
       const socket = socketRef.current;
 
-      if (!socket || !room || !connected) {
+      if (!socket || !room || !socket.isConnected()) {
         return;
       }
 
@@ -1014,7 +1014,7 @@ export default function HomePage() {
 
       socket.emit("typing:progress", payload);
     },
-    [connected, room]
+    [room]
   );
 
   const handleTypedText = useCallback(
