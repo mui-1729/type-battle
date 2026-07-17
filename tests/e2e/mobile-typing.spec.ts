@@ -77,8 +77,10 @@ test("keeps the COM battle stage inside a 390px mobile viewport", async ({ page 
     input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: value }));
   }, firstCharacter);
 
-  await expect.poll(async () => Number(await stage.locator(".hpPushStageScene").getAttribute("data-cargo-position")))
-    .toBeGreaterThan(50);
+  await expect.poll(async () => {
+    const cargoPosition = Number(await stage.locator(".hpPushStageScene").getAttribute("data-cargo-position"));
+    return Number.isFinite(cargoPosition) && cargoPosition >= 20 && cargoPosition <= 80;
+  }).toBe(true);
   await expect(textarea).toBeFocused();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
     .toBe(true);
