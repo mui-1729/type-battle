@@ -661,10 +661,10 @@ select {
   width: min(470px, calc(100vw - 36px));
   padding: 14px;
   opacity: 1;
-  pointer-events: auto;
+  pointer-events: none;
 }
 .isBattle.hasResult .sidePanel > * { display: none; }
-.isBattle.hasResult .sidePanel > .difficultySelector { display: grid; }
+.isBattle.hasResult .sidePanel > .difficultySelector { display: grid; pointer-events: auto; }
 .typingInput { position: fixed; left: -9999px; width: 1px; height: 1px; min-height: 1px; opacity: .01; }
 
 .battleStage {
@@ -870,7 +870,7 @@ select {
   .gameLogo.isCompact .stickFigure { width: 32px !important; height: 38px !important; }
   .isLobby .lobbyPrepHeader { position: relative; top: auto; margin: -54px 0 12px auto; }
   .lobbyRoomCode { min-width: 0; }
-  .lobbyRoomCode .iconButton:last-child { display: none; }
+  .lobbyRoomCode .iconButton:last-child { display: inline-grid; }
   .lobbyPlayerGrid { grid-template-columns: 1fr; gap: 14px; }
   .lobbyPlayerCard { min-height: 250px; grid-template-columns: 1fr 1.3fr; grid-template-rows: auto 1fr; padding: 16px; }
   .lobbyFigureArea { grid-column: 2; grid-row: 1 / span 2; min-height: 210px; }

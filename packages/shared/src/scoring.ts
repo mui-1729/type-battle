@@ -66,6 +66,11 @@ function comparePlayers(
   matchRule: MatchRule
 ): number {
   const getPromptLength = typeof promptLength === "function" ? promptLength : () => promptLength;
+
+  if (a.forfeited !== b.forfeited) {
+    return a.forfeited ? 1 : -1;
+  }
+
   const aFinished = isPlayerFinished(a, getPromptLength);
   const bFinished = isPlayerFinished(b, getPromptLength);
 
@@ -141,7 +146,7 @@ function isPlayerFinished(
   }
 
   if (player.finishStatus !== undefined) {
-    return player.finishStatus === "finished";
+    return player.finishStatus === "finished" || player.finishStatus === "forfeited";
   }
 
   return player.progressIndex >= getPromptLength(player);

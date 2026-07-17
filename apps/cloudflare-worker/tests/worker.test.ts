@@ -4,6 +4,7 @@ import { resetRoomEngineState } from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
 import worker, { RoomAuthorityDurableObject, RoomDurableObject } from "../src/worker.js";
 import { GATEWAY_ROOM_RATE_LIMIT_PATH } from "../src/realtime-gateway.js";
+import { readCloudflareClientIp } from "../src/client-ip.js";
 
 class FakeStorage {
   readonly values = new Map<string, unknown>();
@@ -295,6 +296,15 @@ afterEach(async () => {
 });
 
 describe("cloudflare gateway", () => {
+  it("uses only the Cloudflare client IP header for rate-limit identity", () => {
+    expect(readCloudflareClientIp(new Headers({ "CF-Connecting-IP": "203.0.113.10" }))).toBe("203.0.113.10");
+    expect(readCloudflareClientIp(new Headers({ "X-Forwarded-For": "198.51.100.10" }))).toBe("unknown");
+    expect(readCloudflareClientIp(new Headers({
+      "CF-Connecting-IP": " 203.0.113.10 ",
+      "X-Forwarded-For": "198.51.100.10"
+    }))).toBe("203.0.113.10");
+  });
+
   it("rejects room lifecycle commands on the root websocket", async () => {
     const gateway = new RoomDurableObject(
       new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
@@ -728,6 +738,101 @@ describe("room authority", () => {
     });
     expect(snapshot?.disconnectedAt?.["guest-alice-disconnect"]).toEqual(expect.any(Number));
     expect(storage.alarmAt).not.toBeNull();
+  });
+
+  it("cleans explicitly forfeited players and lets the remaining player rematch", async () => {
+    const storage = new FakeStorage();
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "EF34GH" });
+    roomAuthority.attachSocket(guestSocket as unknown as WebSocket, { roomCode: "EF34GH" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-explicit-forfeit-cleanup",
+      type: "client:room:create",
+      payload: { nickname: "Alice", guestId: "guest-explicit-forfeit-host", sessionId: "session-explicit-forfeit-host" }
+    }));
+    await flushAsyncWork();
+    guestSocket.receive(JSON.stringify({
+      id: "msg-join-explicit-forfeit-cleanup",
+      type: "client:room:join",
+      payload: {
+        roomCode: "EF34GH",
+        nickname: "Bob",
+        guestId: "guest-explicit-forfeit-guest",
+        sessionId: "session-explicit-forfeit-guest"
+      }
+    }));
+    await flushAsyncWork();
+
+    for (const [socket, id] of [[hostSocket, "host"], [guestSocket, "guest"]] as const) {
+      socket.receive(JSON.stringify({
+        id: `msg-ready-explicit-forfeit-${id}`,
+        type: "client:player:ready",
+        payload: { roomCode: "EF34GH", ready: true }
+      }));
+    }
+    hostSocket.receive(JSON.stringify({
+      id: "msg-start-explicit-forfeit-cleanup",
+      type: "client:match:start",
+      payload: { roomCode: "EF34GH" }
+    }));
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    hostSocket.receive(JSON.stringify({
+      id: "msg-leave-explicit-forfeit-cleanup",
+      type: "client:room:leave",
+      payload: { roomCode: "EF34GH" }
+    }));
+    await flushAsyncWork();
+
+    const resultState = [...parseMessages(guestSocket)]
+      .reverse()
+      .find((message) => message.type === "server:room:state")?.payload as RoomState | undefined;
+    expect(resultState).toMatchObject({
+      status: "finished",
+      players: [
+        expect.objectContaining({ id: "guest-explicit-forfeit-host", forfeited: true, finishStatus: "forfeited" }),
+        expect.objectContaining({ id: "guest-explicit-forfeit-guest" })
+      ]
+    });
+    expect(storage.alarmAt).toEqual(expect.any(Number));
+    vi.setSystemTime(storage.alarmAt! + 1);
+    await roomAuthority.alarm();
+    await flushAsyncWork();
+
+    const waitingState = [...parseMessages(guestSocket)]
+      .reverse()
+      .find((message) => message.type === "server:room:state")?.payload as RoomState | undefined;
+    expect(waitingState).toMatchObject({
+      status: "waiting",
+      hostPlayerId: "guest-explicit-forfeit-guest",
+      players: [expect.objectContaining({ id: "guest-explicit-forfeit-guest", connected: true })]
+    });
+    expect(waitingState?.players).not.toContainEqual(expect.objectContaining({ id: "guest-explicit-forfeit-host" }));
+
+    guestSocket.receive(JSON.stringify({
+      id: "msg-ready-explicit-forfeit-rematch",
+      type: "client:player:ready",
+      payload: { roomCode: "EF34GH", ready: true }
+    }));
+    guestSocket.receive(JSON.stringify({
+      id: "msg-start-explicit-forfeit-rematch",
+      type: "client:match:start",
+      payload: { roomCode: "EF34GH" }
+    }));
+    await flushAsyncWork();
+
+    expect(findLastAck(guestSocket, "client:match:start")).toMatchObject({
+      payload: {
+        ok: true,
+        data: expect.objectContaining({ status: "countdown" })
+      }
+    });
   });
 
   it("closes a socket that remains after leaving a room", async () => {

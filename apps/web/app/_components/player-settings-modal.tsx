@@ -8,7 +8,7 @@ type PlayerSettingsModalProps = {
   setSettings: Dispatch<SetStateAction<PlayerSettings>>;
   setNickname: (nickname: string) => void;
   onClose: () => void;
-  onOpenTutorial: () => void;
+  onOpenTutorial?: () => void;
 };
 
 export function PlayerSettingsModal({ settings, setSettings, setNickname, onClose, onOpenTutorial }: PlayerSettingsModalProps) {
@@ -137,7 +137,9 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
         </div>
 
         <div className="modalActions">
-          <button className="secondaryButton" type="button" onClick={onOpenTutorial}>遊び方を再表示</button>
+          {onOpenTutorial ? (
+            <button className="secondaryButton" type="button" onClick={onOpenTutorial}>遊び方を再表示</button>
+          ) : null}
           <button className="primaryButton" type="button" onClick={onClose}>
             設定を反映
           </button>

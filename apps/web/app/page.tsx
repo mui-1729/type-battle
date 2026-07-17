@@ -11,20 +11,15 @@ import {
 } from "./_lib/realtime-client";
 import {
   calculateAccuracy,
-  calculateProgress,
   calculateWpm,
-  getDailyChallengeInfo,
   createRoomCode,
   normalizeNickname,
-  pickDailyChallengePrompt,
   validateNickname
 } from "@type-battle/shared";
 import type {
-  DeviceKind,
   MatchRule,
   MatchResult,
   PlayerResult,
-  Prompt,
   PromptCategory,
   QuickReaction,
   RoomState,
@@ -35,7 +30,7 @@ import { HomeModeMenu } from "./_components/home-mode-menu";
 import { LobbyPrep } from "./_components/lobby-prep";
 import { BattleStage } from "./_components/battle-stage";
 import { PlayerSettingsModal } from "./_components/player-settings-modal";
-import { TutorialOverlay } from "./_components/tutorial-overlay";
+import { ExitConfirmationModal } from "./_components/exit-confirmation-modal";
 import { MatchSettingsModal } from "./_components/match-settings-modal";
 import { ProgressBlock } from "./_components/progress-block";
 import { ResultPanel } from "./_components/result-panel";
@@ -49,22 +44,23 @@ import { PracticeStage } from "./_components/practice-stage";
 import { SectionHeading, SurfaceCard } from "./_components/ui";
 import {
   createEmptyProgress,
-  advanceProgressWithMistakes,
   type MistakeSample,
   type ProgressState
 } from "./_lib/typing-progress";
 import {
-  advanceRomajiProgressWithMistakes,
   buildRomajiTypingPlan
 } from "./_lib/romaji-typing";
 import {
-  advanceLoopingRomajiProgressWithMistakes,
-  getCanonicalProgressIndex,
-  getRomajiProgressIndexForCanonicalProgress
+  getCanonicalProgressIndex
 } from "./_lib/looping-typing";
+import {
+  getHomePageViewModel,
+  type PracticeSession
+} from "./_lib/home-page-view-model";
 import { detectDeviceKind } from "./_lib/device-kind";
+import { advanceTypingProgress } from "./_lib/typing-input-strategy";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
-import { getProgressSyncLabel, getProgressSyncState } from "./_lib/progress-sync";
+import { getProgressSyncLabel } from "./_lib/progress-sync";
 import {
   getStoredRoomJoinFailureAction,
   getStoredRoomRejoinDelayMs
@@ -84,13 +80,6 @@ import {
   persistPlayerSettings,
   type PlayerSettings
 } from "../lib/player-settings";
-import { getUnlockedAccessoryIndices } from "../lib/player-accessories";
-import {
-  claimPerfectReward,
-  loadPlayerRewards,
-  persistPlayerRewards,
-  type PlayerRewards
-} from "../lib/player-rewards";
 import {
   loadGuestSession,
   persistGuestSession,
@@ -110,22 +99,11 @@ import {
   formatMistakeTarget,
   loadMistakeTrendRecord,
   persistMistakeTrendRecord,
-  summarizeMistakeTrendRecord,
   updateMistakeTrendRecord,
   type MistakeTrendRecord
 } from "../lib/mistake-trends";
 
 type ClientSocket = RealtimeSocket;
-
-type PracticeSession = {
-  practiceId: string;
-  prompt: Prompt;
-  startedAt: number;
-  category: PromptCategory;
-  deviceKind: DeviceKind;
-  mode: "practice" | "daily";
-  challengeKey?: string;
-};
 
 type StoredRoomRecoveryState = {
   status: "idle" | "reconnecting" | "failed";
@@ -133,6 +111,7 @@ type StoredRoomRecoveryState = {
 };
 
 type HomeMode = "battle" | "solo";
+type ExitRequest = "room" | "practice";
 
 const REALTIME_TRANSPORT: RealtimeTransport = "cloudflare";
 const CLOUDFLARE_REALTIME_URL = process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL?.trim() ?? "";
@@ -147,22 +126,15 @@ export default function HomePage() {
   const nicknameInputRef = useRef<HTMLInputElement | null>(null);
   const countdownSecondRef = useRef<number | null>(null);
   const typingInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const exitTriggerRef = useRef<HTMLElement | null>(null);
   const [connected, setConnected] = useState(false);
   const [guestSession, setGuestSession] = useState<GuestSession | null>(null);
   const [playerId, setPlayerId] = useState("");
   const [settings, setSettings] = useState<PlayerSettings>(DEFAULT_PLAYER_SETTINGS);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
-  const [playerRewards, setPlayerRewards] = useState<PlayerRewards>({
-    version: 1,
-    points: 0,
-    unlockedAccessoryIds: ["none", "cap", "headband"],
-    claimedDailyKeys: []
-  });
-  const [rewardNotice, setRewardNotice] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [tutorialOpen, setTutorialOpen] = useState(false);
-  const [tutorialStep, setTutorialStep] = useState(0);
   const [matchSettingsOpen, setMatchSettingsOpen] = useState(false);
+  const [exitRequest, setExitRequest] = useState<ExitRequest | null>(null);
   const [homeMode, setHomeMode] = useState<HomeMode | null>(null);
   const [accessoryIndex, setAccessoryIndex] = useState(0);
   const [joinCode, setJoinCode] = useState("");
@@ -202,7 +174,6 @@ export default function HomePage() {
   const storedRoomJoinInFlightRef = useRef(false);
   const storedRoomJoinAttemptsRef = useRef(0);
   const storedRoomRetryTimerRef = useRef<number | null>(null);
-  const rewardedResultKeyRef = useRef("");
   const autoStartRoomRef = useRef<string | null>(null);
   const attemptStoredRoomJoinRef = useRef<(socket: ClientSocket) => void>(() => undefined);
   const realtimeUrl = CLOUDFLARE_REALTIME_URL || localRealtimeUrl;
@@ -221,98 +192,81 @@ export default function HomePage() {
     [playerId, room]
   );
   const [dailyChallengeNow, setDailyChallengeNow] = useState(() => new Date());
-  const activePracticePlayer = practiceResult?.players[0] ?? null;
-  const activeResult = result ?? practiceResult;
-  const activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
-  const activePromptText = activePrompt?.text ?? "";
-  const activeInputDeviceKind = room ? currentPlayer?.deviceKind ?? "desktop" : practiceSession?.deviceKind ?? "desktop";
-  const dailyChallengeInfo = useMemo(() => getDailyChallengeInfo(dailyChallengeNow), [dailyChallengeNow]);
-  const dailyChallengePrompt = useMemo(() => pickDailyChallengePrompt(dailyChallengeNow), [dailyChallengeNow]);
-  const visibleDailyChallengeRecord = getVisibleDailyChallengeRecord(
-    dailyChallengeRecord,
-    dailyChallengeInfo.challengeKey
-  );
-  const activePracticeMode = practiceSession?.mode ?? "practice";
-  const unlockedAccessoryIndices = useMemo(
-    () => getUnlockedAccessoryIndices(playerRewards.points, playerRewards.unlockedAccessoryIds),
-    [playerRewards.points, playerRewards.unlockedAccessoryIds]
-  );
-  const mistakeTrendSummary = useMemo(() => summarizeMistakeTrendRecord(mistakeTrendRecord), [mistakeTrendRecord]);
-  const mistakeTrendTotal = useMemo(
-    () => (mistakeTrendRecord?.items ?? []).reduce((total, item) => total + item.count, 0),
-    [mistakeTrendRecord]
-  );
-  const activeRomajiTypingPlan = activePrompt ? buildRomajiTypingPlan(activePrompt.typing.hiragana) : null;
-  const activeTypingText = activePrompt
-    ? inputMode === "kana"
-      ? activePrompt.typing.hiragana
-      : activeRomajiTypingPlan?.guide ?? activePrompt.typing.romaji
-    : "";
-  const isRoomPlaying = room?.status === "playing";
-  const isPracticePlaying = Boolean(practiceSession && !practiceResult && !room);
-  const activeProgress = room ? localProgress : practiceProgress;
-  const isTimeAttackPlaying = Boolean(isRoomPlaying && room?.matchRule === "timeAttack");
-  const activeGuideProgressIndex =
-    isTimeAttackPlaying && activeTypingText.length > 0
-      ? activeProgress.progressIndex % activeTypingText.length
-      : activeProgress.progressIndex;
-  const activeCanonicalProgressIndex =
-    inputMode === "romaji" && activeRomajiTypingPlan
-      ? getCanonicalProgressIndex(activeRomajiTypingPlan, activeProgress.progressIndex)
-      : activeProgress.progressIndex;
-  const activeProgressPercent = calculateProgress(activeGuideProgressIndex, activeTypingText.length);
-  const activeElapsedMs =
-    isRoomPlaying && room?.serverStartAt
-      ? Date.now() - room.serverStartAt
-      : isPracticePlaying && practiceSession
-        ? Date.now() - practiceSession.startedAt
-        : 0;
-  const activeWpm = calculateWpm(activeCanonicalProgressIndex, activeElapsedMs);
-  const activeAccuracy = calculateAccuracy(activeProgress.correctCharacters, activeProgress.totalTypedCharacters);
-  const activeResultPlayer =
-    room?.players.find((player) => player.id === playerId) ?? activePracticePlayer ?? null;
-  const isTimeAttackExpired = Boolean(
-    isTimeAttackPlaying && room?.matchEndsAt && matchTimerMs <= 0 && Date.now() >= room.matchEndsAt
-  );
-  const activeTimeAttackRemainingSeconds = Math.max(matchTimerMs / 1000, 0).toFixed(1);
-  const acceptingTextInput =
-    (isRoomPlaying && connected && !result && !isTimeAttackExpired) || isPracticePlaying;
-  const progressSyncState = room
-    ? getProgressSyncState({
+  const homePageViewModel = useMemo(
+    () =>
+      getHomePageViewModel({
+        now: Date.now(),
+        room,
+        playerId,
+        currentPlayer,
+        result,
+        practiceSession,
+        practiceResult,
+        dailyChallengeNow,
+        dailyChallengeRecord,
+        mistakeTrendRecord,
+        localProgress,
+        practiceProgress,
         connected,
-        localTypedCharacters: activeProgress.totalTypedCharacters,
-        serverTypedCharacters: currentPlayer?.totalTypedCharacters ?? 0,
-        lastSentAt: lastProgressSentAt,
-        now: syncClock
-      })
-    : "synced";
+        lastProgressSentAt,
+        syncClock,
+        matchTimerMs
+        ,inputMode
+      }),
+    [
+      room,
+      playerId,
+      currentPlayer,
+      result,
+      practiceSession,
+      practiceResult,
+      dailyChallengeNow,
+      dailyChallengeRecord,
+      mistakeTrendRecord,
+      localProgress,
+      practiceProgress,
+      connected,
+      lastProgressSentAt,
+      syncClock,
+      matchTimerMs,
+      inputMode
+    ]
+  );
+  const {
+    activeResult,
+    activePrompt,
+    activePromptText,
+    activeInputDeviceKind,
+    dailyChallengeInfo,
+    dailyChallengePrompt,
+    visibleDailyChallengeRecord,
+    activePracticeMode,
+    mistakeTrendSummary,
+    mistakeTrendTotal,
+    activeRomajiTypingPlan,
+    activeTypingText,
+    isRoomPlaying,
+    isPracticePlaying,
+    activeProgress,
+    isTimeAttackPlaying,
+    activeGuideProgressIndex,
+    activeProgressPercent,
+    activeWpm,
+    activeAccuracy,
+    activeResultPlayer,
+    isTimeAttackExpired,
+    activeTimeAttackRemainingSeconds,
+    acceptingTextInput,
+    progressSyncState,
+    displayRoom,
+    typingInputKey
+  } = homePageViewModel;
 
   useEffect(() => {
     const nextMode = activeInputDeviceKind === "mobile" ? "kana" : "romaji";
     inputModeRef.current = nextMode;
     setInputMode(nextMode);
   }, [activeInputDeviceKind, activePrompt?.id, practiceSession?.practiceId, room?.roomCode]);
-  const displayRoom = useMemo(() => {
-    if (!room || !currentPlayer) {
-      return room;
-    }
-
-    return {
-      ...room,
-      players: room.players.map((player) =>
-        player.id === currentPlayer.id
-          ? {
-              ...player,
-              progressIndex: Math.max(player.progressIndex, activeCanonicalProgressIndex),
-              correctCharacters: Math.max(player.correctCharacters, activeProgress.correctCharacters),
-              totalTypedCharacters: Math.max(player.totalTypedCharacters, activeProgress.totalTypedCharacters)
-            }
-          : player
-      )
-    };
-  }, [activeCanonicalProgressIndex, activeProgress, currentPlayer, room]);
-  const typingInputKey =
-    String(room?.prompt?.id ?? practiceSession?.practiceId ?? "idle") + ":" + String(activePrompt?.id ?? "none");
 
   const setPromptCategory = useCallback(
     (category: "short" | "standard" | "long") => {
@@ -419,6 +373,10 @@ export default function HomePage() {
 
   const attachSocketHandlers = useCallback((socket: ClientSocket) => {
     socket.on("connect", () => {
+      if (socketRef.current !== socket) {
+        return;
+      }
+
       setConnected(true);
       const currentRoom = roomRef.current;
       const currentSession = guestSessionRef.current;
@@ -455,6 +413,10 @@ export default function HomePage() {
       );
     });
     socket.on("disconnect", () => {
+      if (socketRef.current !== socket) {
+        return;
+      }
+
       setConnected(false);
       if (socketModeRef.current === "room") {
         setStoredRoomRecovery({
@@ -669,9 +631,6 @@ export default function HomePage() {
         setError("");
         setPracticeSession({
           ...response.data,
-          // The server timestamp includes the request/response path. Start the
-          // solo clock when the prompt becomes available on this client.
-          startedAt: Date.now(),
           category: practiceCategory,
           deviceKind,
           mode: "practice"
@@ -731,8 +690,6 @@ export default function HomePage() {
       setError("");
       setPracticeSession({
         ...response.data,
-        // Exclude the WebSocket round trip from the daily challenge result.
-        startedAt: Date.now(),
         category: "standard",
         deviceKind,
         mode: "daily",
@@ -757,11 +714,13 @@ export default function HomePage() {
       }
 
       const finishTimeMs = Date.now() - practiceSession.startedAt;
-      const canonicalProgressIndex = getCanonicalTypingProgressIndex(
-        finalProgress.progressIndex,
-        inputModeRef.current,
-        buildRomajiTypingPlan(practiceSession.prompt.typing.hiragana)
-      );
+      const canonicalProgressIndex =
+        inputModeRef.current === "kana"
+          ? finalProgress.progressIndex
+          : getCanonicalProgressIndex(
+              buildRomajiTypingPlan(practiceSession.prompt.typing.hiragana),
+              finalProgress.progressIndex
+            );
       const player: PlayerResult = {
         id: practiceSession.practiceId,
         nickname: normalizeNickname(nicknameRef.current),
@@ -824,11 +783,8 @@ export default function HomePage() {
     guestSessionRef.current = session;
     setGuestSession(session);
     const loadedSettings = loadPlayerSettings(window.localStorage);
-    const loadedRewards = loadPlayerRewards(window.localStorage);
     nicknameRef.current = loadedSettings.nickname;
     setSettings(loadedSettings);
-    setPlayerRewards(loadedRewards);
-    setTutorialOpen(!loadedSettings.tutorialSeen);
     setSettingsHydrated(true);
 
     if (!realtimeConfigured) {
@@ -867,46 +823,6 @@ export default function HomePage() {
     applyPlayerSettingsToDocument(document, settings);
     settingsRef.current = settings;
   }, [settings, settingsHydrated]);
-
-  useEffect(() => {
-    if (!settingsHydrated) {
-      return;
-    }
-    persistPlayerRewards(window.localStorage, playerRewards);
-  }, [playerRewards, settingsHydrated]);
-
-  useEffect(() => {
-    if (!settingsHydrated) {
-      return;
-    }
-
-    const activeRewardResult = result ?? practiceResult;
-    const localResult = activeRewardResult?.players.find((player) => player.id === playerId) ?? activeRewardResult?.players[0];
-    if (!activeRewardResult || !localResult) {
-      return;
-    }
-
-    const isDaily = !result && practiceResult && activePracticeMode === "daily";
-    const rewardMatchRule = result?.matchRule ?? room?.matchRule;
-    const rewardKey = `${isDaily ? "daily" : "match"}:${activeRewardResult.roomCode}:${activeRewardResult.prompt.id}`;
-    if (rewardedResultKeyRef.current === rewardKey) {
-      return;
-    }
-    rewardedResultKeyRef.current = rewardKey;
-
-    const outcome = claimPerfectReward(playerRewards, {
-      dateKey: isDaily ? dailyChallengeInfo.challengeKey : new Date().toISOString().slice(0, 10),
-      source: isDaily ? "daily" : "match",
-      ...(result && rewardMatchRule ? { matchRule: rewardMatchRule } : {}),
-      officialPreset: isDaily || Boolean(room && room.promptCategory === "standard" && room.botDifficulty === "normal"),
-      perfect: localResult.accuracy === 100 && localResult.mistakes === 0,
-      forfeited: localResult.forfeited === true || localResult.finishStatus === "forfeited"
-    });
-    if (outcome.awarded) {
-      setPlayerRewards(outcome.rewards);
-      setRewardNotice("PERFECT報酬としてポイントを1ポイント獲得しました。");
-    }
-  }, [activePracticeMode, dailyChallengeInfo.challengeKey, playerId, playerRewards, practiceResult, result, room]);
 
   useEffect(() => {
     if (!guestSession) {
@@ -1094,45 +1010,6 @@ export default function HomePage() {
     [room]
   );
 
-  const updateTypingProgress = useCallback(
-    (previous: ProgressState, typedText: string) => {
-      const canonicalText = activePrompt?.typing.hiragana ?? activeTypingText;
-      const nextMode = containsKanaInput(typedText) ? "kana" : "romaji";
-
-      if (!activeRomajiTypingPlan) {
-        return advanceProgressWithMistakes(previous, canonicalText, typedText, isTimeAttackPlaying);
-      }
-
-      let modePrevious = previous;
-      if (inputModeRef.current !== nextMode) {
-        const canonicalProgressIndex =
-          inputModeRef.current === "kana"
-            ? previous.progressIndex
-            : getCanonicalProgressIndex(activeRomajiTypingPlan, previous.progressIndex);
-        modePrevious = {
-          ...previous,
-          progressIndex:
-            nextMode === "kana"
-              ? canonicalProgressIndex
-              : getRomajiProgressIndexForCanonicalProgress(activeRomajiTypingPlan, canonicalProgressIndex),
-          pendingInput: ""
-        };
-        inputModeRef.current = nextMode;
-        setInputMode(nextMode);
-      }
-
-      if (nextMode === "kana") {
-        const next = advanceProgressWithMistakes(modePrevious, canonicalText, typedText, isTimeAttackPlaying);
-        return next;
-      }
-
-      return isTimeAttackPlaying
-        ? advanceLoopingRomajiProgressWithMistakes(modePrevious, activeRomajiTypingPlan, typedText)
-        : advanceRomajiProgressWithMistakes(modePrevious, activeRomajiTypingPlan, typedText);
-    },
-    [activePrompt, activeRomajiTypingPlan, activeTypingText, isTimeAttackPlaying]
-  );
-
   const handleTypedText = useCallback(
     (typedText: string) => {
       if (!typedText) {
@@ -1141,7 +1018,18 @@ export default function HomePage() {
 
       if (room?.status === "playing" && room?.prompt) {
         const previous = localProgressRef.current;
-        const next = updateTypingProgress(previous, typedText);
+        const next = advanceTypingProgress({
+          previous,
+          typedText,
+          deviceKind: activeInputDeviceKind,
+          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
+          displayText: activeTypingText,
+          romajiPlan: activeRomajiTypingPlan,
+          loop: isTimeAttackPlaying,
+          inputMode: inputModeRef.current
+        });
+        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedText) ? "kana" : "romaji";
+        setInputMode(inputModeRef.current);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
 
         setLocalProgress(next.progress);
@@ -1151,15 +1039,28 @@ export default function HomePage() {
         emitProgress(
           typedText,
           !isTimeAttackPlaying &&
-            getCanonicalTypingProgressIndex(next.progress.progressIndex, inputModeRef.current, activeRomajiTypingPlan) >=
-              Array.from(room.prompt.typing.hiragana).length
+            (inputModeRef.current === "kana"
+              ? next.progress.progressIndex
+              : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
+              Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
         );
         return;
       }
 
       if (practiceSession && !practiceResult && !room) {
         const previous = practiceProgressRef.current;
-        const next = updateTypingProgress(previous, typedText);
+        const next = advanceTypingProgress({
+          previous,
+          typedText,
+          deviceKind: activeInputDeviceKind,
+          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
+          displayText: activeTypingText,
+          romajiPlan: activeRomajiTypingPlan,
+          loop: isTimeAttackPlaying,
+          inputMode: inputModeRef.current
+        });
+        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedText) ? "kana" : "romaji";
+        setInputMode(inputModeRef.current);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
 
         setPracticeProgress(next.progress);
@@ -1171,11 +1072,10 @@ export default function HomePage() {
         }
 
         if (
-          getCanonicalTypingProgressIndex(
-            next.progress.progressIndex,
-            inputModeRef.current,
-            activeRomajiTypingPlan
-          ) >= Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
+          (inputModeRef.current === "kana"
+            ? next.progress.progressIndex
+            : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
+          Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
         ) {
           finishPractice(next.progress);
         }
@@ -1185,8 +1085,6 @@ export default function HomePage() {
     },
     [
       activeTypingText,
-      activePrompt,
-      activeRomajiTypingPlan,
       emitProgress,
       isTimeAttackPlaying,
       finishPractice,
@@ -1194,7 +1092,9 @@ export default function HomePage() {
       practiceSession,
       consumeDailyAttempt,
       recordMistakeSamples,
-      updateTypingProgress,
+      activeInputDeviceKind,
+      activePrompt,
+      activeRomajiTypingPlan,
       room
     ]
   );
@@ -1207,7 +1107,7 @@ export default function HomePage() {
         return;
       }
 
-      if (!acceptingTextInput) {
+      if (!acceptingTextInput || exitRequest !== null) {
         return;
       }
 
@@ -1232,7 +1132,18 @@ export default function HomePage() {
 
       if (room?.status === "playing" && room?.prompt) {
         const previous = localProgressRef.current;
-        const next = updateTypingProgress(previous, typedKey);
+        const next = advanceTypingProgress({
+          previous,
+          typedText: typedKey,
+          deviceKind: activeInputDeviceKind,
+          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
+          displayText: activeTypingText,
+          romajiPlan: activeRomajiTypingPlan,
+          loop: isTimeAttackPlaying,
+          inputMode: inputModeRef.current
+        });
+        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedKey) ? "kana" : "romaji";
+        setInputMode(inputModeRef.current);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const soundOptions = settingsRef.current;
 
@@ -1243,7 +1154,9 @@ export default function HomePage() {
         emitProgress(
           typedKey,
           !isTimeAttackPlaying &&
-            getCanonicalTypingProgressIndex(next.progress.progressIndex, inputModeRef.current, activeRomajiTypingPlan) >=
+            (inputModeRef.current === "kana"
+              ? next.progress.progressIndex
+              : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
               Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
         );
         return;
@@ -1251,7 +1164,18 @@ export default function HomePage() {
 
       if (practiceActive && practiceSession) {
         const previous = practiceProgressRef.current;
-        const next = updateTypingProgress(previous, typedKey);
+        const next = advanceTypingProgress({
+          previous,
+          typedText: typedKey,
+          deviceKind: activeInputDeviceKind,
+          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
+          displayText: activeTypingText,
+          romajiPlan: activeRomajiTypingPlan,
+          loop: isTimeAttackPlaying,
+          inputMode: inputModeRef.current
+        });
+        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedKey) ? "kana" : "romaji";
+        setInputMode(inputModeRef.current);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const soundOptions = settingsRef.current;
 
@@ -1264,11 +1188,10 @@ export default function HomePage() {
         }
 
         if (
-          getCanonicalTypingProgressIndex(
-            next.progress.progressIndex,
-            inputModeRef.current,
-            activeRomajiTypingPlan
-          ) >= Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
+          (inputModeRef.current === "kana"
+            ? next.progress.progressIndex
+            : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
+          Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
         ) {
           finishPractice(next.progress);
         }
@@ -1282,8 +1205,6 @@ export default function HomePage() {
   }, [
     activeInputDeviceKind,
     activeTypingText,
-    activePrompt,
-    activeRomajiTypingPlan,
     acceptingTextInput,
     emitProgress,
     finishPractice,
@@ -1292,7 +1213,9 @@ export default function HomePage() {
     practiceResult,
     practiceSession,
     recordMistakeSamples,
-    updateTypingProgress,
+    activePrompt,
+    activeRomajiTypingPlan,
+    exitRequest,
     room
   ]);
 
@@ -1381,22 +1304,29 @@ export default function HomePage() {
     );
   };
 
-  const leaveRoom = () => {
+  const leaveRoom = useCallback(() => {
     const socket = socketRef.current;
 
     if (socket && room) {
       socket.emit("room:leave", { roomCode: room.roomCode });
     }
+    clearStoredRoomRetryTimer();
+    storedRoomCodeRef.current = null;
+    storedRoomJoinAttemptsRef.current = 0;
+    storedRoomJoinInFlightRef.current = false;
+    window.localStorage.removeItem(ROOM_CODE_KEY);
+    setStoredRoomRecovery({ status: "idle", message: "" });
+    socketModeRef.current = "practice";
     setHomeMode(null);
 
     connectPracticeSocket();
     setRoom(null);
     setResult(null);
     setPlayerId("");
-    window.localStorage.removeItem(ROOM_CODE_KEY);
     clearPracticeState();
     resetTyping();
-  };
+    setExitRequest(null);
+  }, [clearPracticeState, clearStoredRoomRetryTimer, connectPracticeSocket, resetTyping, room]);
 
   const setReady = () => {
     if (!realtimeConfigured || !socketRef.current || !room || !currentPlayer) {
@@ -1427,26 +1357,12 @@ export default function HomePage() {
   }, [prepareTypingInput, primeSoundPlayback, realtimeConfigured, room]);
 
   const sendReaction = useCallback((reaction: QuickReaction) => {
-    if (!settings.reactionsEnabled || !socketRef.current || !room) {
+    if (!socketRef.current || !room) {
       return;
     }
 
     socketRef.current.emit("player:reaction", { roomCode: room.roomCode, reaction });
-  }, [room, settings.reactionsEnabled]);
-
-  const closeTutorial = useCallback(() => {
-    setTutorialOpen(false);
-    setTutorialStep(0);
-    setSettings((current) => ({ ...current, tutorialSeen: true }));
-  }, []);
-
-  const advanceTutorial = useCallback(() => {
-    if (tutorialStep >= 2) {
-      closeTutorial();
-      return;
-    }
-    setTutorialStep((current) => current + 1);
-  }, [closeTutorial, tutorialStep]);
+  }, [room]);
 
   useEffect(() => {
     if (!room || room.status !== "waiting") {
@@ -1515,7 +1431,67 @@ export default function HomePage() {
     clearPracticeState();
     resetTyping();
     setHomeMode("solo");
+    setExitRequest(null);
   }, [clearPracticeState, resetTyping]);
+
+  const openExitRequest = useCallback((request: ExitRequest) => {
+    const activeElement = document.activeElement;
+    exitTriggerRef.current = activeElement instanceof HTMLElement ? activeElement : null;
+    setExitRequest(request);
+  }, []);
+
+  const cancelExitRequest = useCallback(() => {
+    const trigger = exitTriggerRef.current;
+    exitTriggerRef.current = null;
+    setExitRequest(null);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (acceptingTextInput) {
+          prepareTypingInput();
+          return;
+        }
+
+        trigger?.focus();
+      });
+    });
+  }, [acceptingTextInput, prepareTypingInput]);
+
+  const requestRoomExit = useCallback(() => {
+    if (!room) {
+      return;
+    }
+
+    if (room.status === "finished") {
+      leaveRoom();
+      return;
+    }
+
+    openExitRequest("room");
+  }, [leaveRoom, openExitRequest, room]);
+
+  const requestPracticeExit = useCallback(() => {
+    if (!practiceSession && !practiceResult) {
+      return;
+    }
+
+    if (practiceResult) {
+      returnToPracticeMenu();
+      return;
+    }
+
+    openExitRequest("practice");
+  }, [openExitRequest, practiceResult, practiceSession, returnToPracticeMenu]);
+
+  const confirmExit = useCallback(() => {
+    if (exitRequest === "room") {
+      leaveRoom();
+      return;
+    }
+
+    if (exitRequest === "practice") {
+      returnToPracticeMenu();
+    }
+  }, [exitRequest, leaveRoom, returnToPracticeMenu]);
 
   const retryPractice = activePracticeMode === "daily" ? startDailyChallenge : repeatPractice;
 
@@ -1527,10 +1503,7 @@ export default function HomePage() {
     await navigator.clipboard.writeText(room.roomCode);
   };
   const shiftAccessory = (direction: -1 | 1) => {
-    const currentPosition = Math.max(0, unlockedAccessoryIndices.indexOf(accessoryIndex));
-    const nextAccessoryIndex = unlockedAccessoryIndices[
-      (currentPosition + direction + unlockedAccessoryIndices.length) % unlockedAccessoryIndices.length
-    ] ?? 0;
+    const nextAccessoryIndex = (accessoryIndex + direction + 4) % 4;
     setAccessoryIndex(nextAccessoryIndex);
     if (socketRef.current && room) {
       socketRef.current.emit("player:accessory", {
@@ -1563,6 +1536,7 @@ export default function HomePage() {
         connected={connected}
         realtimeConfigured={realtimeConfigured}
         onOpenSettings={() => setSettingsOpen(true)}
+        exitAction={room ? { label: room.status === "finished" ? "ルームを退出" : "対戦を退出", onClick: requestRoomExit } : practiceSession || practiceResult ? { label: practiceResult ? "ひとり用メニューへ" : "練習をやめる", onClick: requestPracticeExit } : undefined}
       />
 
       {showHomeModeMenu ? (
@@ -1646,7 +1620,7 @@ export default function HomePage() {
               <button className="iconButton" type="button" onClick={copyRoomCode} title="ルームコードをコピー">
                 <Clipboard size={18} />
               </button>
-              <button className="iconButton" type="button" onClick={leaveRoom} title="ルームを退出">
+              <button className="iconButton" type="button" onClick={requestRoomExit} title="ルームを退出" aria-label="ルームを退出">
                 <Unplug size={18} />
               </button>
             </div>
@@ -1848,13 +1822,13 @@ export default function HomePage() {
                   onPreviousAccessory={() => shiftAccessory(-1)}
                   onNextAccessory={() => shiftAccessory(1)}
                   onCopyRoomCode={copyRoomCode}
-                  onLeave={leaveRoom}
+                  onLeave={requestRoomExit}
                   onToggleReady={setReady}
                   onMatchRuleChange={setMatchRule}
                   onPromptCategoryChange={setPromptCategory}
                   onBotDifficultyChange={setBotDifficulty}
-                  onReaction={settings.reactionsEnabled ? sendReaction : () => undefined}
-                  remoteReaction={settings.reactionsEnabled ? remoteReaction : null}
+                  onReaction={sendReaction}
+                  remoteReaction={remoteReaction}
                 />
               ) : (
                 <>
@@ -1964,14 +1938,15 @@ export default function HomePage() {
                   retryError={rematchError}
                   rematchReady={Boolean(currentPlayer?.ready)}
                   onPracticeNext={!room && activePracticeMode === "practice" ? startPractice : undefined}
-                  onPracticeMenu={!room && activePracticeMode === "practice" ? returnToPracticeMenu : undefined}
-                  rewardNotice={rewardNotice}
+                  onPracticeMenu={!room ? returnToPracticeMenu : undefined}
+                  onExit={room ? requestRoomExit : undefined}
+                  exitLabel={room ? "ルームを退出" : undefined}
                   {...(room ? {
                     accessoryIndex,
                     onPreviousAccessory: () => shiftAccessory(-1),
                     onNextAccessory: () => shiftAccessory(1),
                     onOpenSettings: () => setMatchSettingsOpen(true),
-                    ...(settings.reactionsEnabled ? { onReaction: sendReaction } : {})
+                    onReaction: sendReaction
                   } : {})}
                   {...(room ? { matchRule: activeResult.matchRule ?? room.matchRule } : {})}
                 />
@@ -1995,14 +1970,25 @@ export default function HomePage() {
           setSettings={setSettings}
           setNickname={setNickname}
           onClose={() => setSettingsOpen(false)}
-          onOpenTutorial={() => {
-            setSettingsOpen(false);
-            setTutorialStep(0);
-            setTutorialOpen(true);
-          }}
         />
       ) : null}
-      {tutorialOpen ? <TutorialOverlay step={tutorialStep} onNext={advanceTutorial} onClose={closeTutorial} /> : null}
+      {exitRequest === "room" ? (
+        <ExitConfirmationModal
+          title="ルームを退出しますか？"
+          description={room?.status === "playing" || room?.status === "countdown" ? "試合を退出すると、現在の試合は棄権扱いになります。" : "現在のルームから退出し、ホームへ戻ります。"}
+          confirmLabel="退出する"
+          onCancel={cancelExitRequest}
+          onConfirm={confirmExit}
+        />
+      ) : exitRequest === "practice" ? (
+        <ExitConfirmationModal
+          title="練習をやめますか？"
+          description="現在の入力途中の記録は保存されず、ひとり用メニューへ戻ります。"
+          confirmLabel="練習をやめる"
+          onCancel={cancelExitRequest}
+          onConfirm={confirmExit}
+        />
+      ) : null}
       {matchSettingsOpen && room ? (
         <MatchSettingsModal
           room={room}
@@ -2022,24 +2008,8 @@ export default function HomePage() {
   );
 }
 
-function containsKanaInput(value: string): boolean {
-  return /[\u3040-\u30ff\uff66-\uff9f]/u.test(value);
-}
-
-function getCanonicalTypingProgressIndex(
-  progressIndex: number,
-  inputMode: "kana" | "romaji",
-  plan: ReturnType<typeof buildRomajiTypingPlan> | null
-): number {
-  if (inputMode === "kana" || !plan) {
-    return progressIndex;
-  }
-
-  return getCanonicalProgressIndex(plan, progressIndex);
-}
-
 function isEditableTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && target.matches("input, textarea, select, [contenteditable='true']");
+  return target instanceof HTMLElement && target.matches("input, textarea, select, button, a, [role='button'], [contenteditable='true']");
 }
 
 function getMatchupLabel(players: RoomState["players"]): string {

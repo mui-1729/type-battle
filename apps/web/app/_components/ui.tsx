@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
+import { forwardRef, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode } from "react";
 
 type ButtonVariant = "primary" | "secondary" | "icon";
 
@@ -9,7 +9,10 @@ type ButtonBaseProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label
 type ButtonProps = ButtonBaseProps &
   ({ iconOnly?: false } | { iconOnly: true; "aria-label": string });
 
-export function Button({ variant = "secondary", iconOnly = false, className = "", ...props }: ButtonProps) {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = "secondary", iconOnly = false, className = "", ...props },
+  ref
+) {
   const classes = [
     variant === "primary" ? "primaryButton" : variant === "icon" ? "iconButton" : "secondaryButton",
     "uiButton",
@@ -19,8 +22,8 @@ export function Button({ variant = "secondary", iconOnly = false, className = ""
     .filter(Boolean)
     .join(" ");
 
-  return <button className={classes} {...props} />;
-}
+  return <button ref={ref} className={classes} {...props} />;
+});
 
 type SurfaceCardProps = HTMLAttributes<HTMLDivElement> & {
   children?: ReactNode;

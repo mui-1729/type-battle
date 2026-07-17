@@ -5,6 +5,7 @@ import type {
   CloudflareServerMessage
 } from "@type-battle/shared/cloudflare-events";
 import { CLOUDFLARE_CLIENT_MESSAGE_TYPES } from "@type-battle/shared/cloudflare-events";
+import { readCloudflareClientIp } from "./client-ip.js";
 import { resolveRoomRoute } from "./room-routing.js";
 import { RateLimiter } from "./rate-limiter.js";
 
@@ -270,7 +271,7 @@ export class RealtimeGatewayDurableObject {
     const server = pair[1];
 
     this.attachSocket(server as unknown as CloudflareSocketLike, {
-      clientIp: readClientIp(request.headers)
+      clientIp: readCloudflareClientIp(request.headers)
     });
 
     return new Response(null, {
@@ -530,20 +531,4 @@ function readPromptCategory(value: unknown): PromptCategory | null {
 function normalizeClientIp(clientIp: string | undefined): string {
   const trimmed = clientIp?.trim();
   return trimmed ? trimmed : "unknown";
-}
-
-function readClientIp(headers: Headers): string {
-  const connectingIp = headers.get("cf-connecting-ip");
-
-  if (connectingIp) {
-    return connectingIp;
-  }
-
-  const forwardedFor = headers.get("x-forwarded-for");
-
-  if (forwardedFor) {
-    return forwardedFor.split(",")[0]?.trim() ?? "unknown";
-  }
-
-  return "unknown";
 }

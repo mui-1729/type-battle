@@ -266,6 +266,15 @@ h1 {
   flex-shrink: 0;
 }
 
+.headerExitButton {
+  min-height: 46px;
+  white-space: nowrap;
+}
+
+.exitConfirmationModal {
+  max-width: 520px;
+}
+
 .headerTextLink {
   min-height: 44px;
   display: inline-flex;
