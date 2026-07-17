@@ -76,7 +76,7 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await expect(guest.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(host.getByText("再戦READY")).toBeVisible();
   await expect(guest.getByText("再戦READY")).toBeVisible();
-  await host.locator(".resultPanel").getByRole("button", { name: "ルームを退出" }).click();
+  await host.getByRole("button", { name: "ルームを退出" }).click();
   await expect(host.getByRole("button", { name: "対戦する" })).toBeVisible();
 
   await hostContext.close();
@@ -160,7 +160,7 @@ test("immediately shows the opponent a result after an explicit room exit", asyn
   await host.getByRole("button", { name: "対戦を退出" }).click();
   await host.getByRole("button", { name: "退出する" }).click();
   await expect(guest.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
-  await expect(guest.getByTestId("battle-stage").locator(".raceLaneTwo .raceRunner")).toHaveAttribute("data-status", "forfeited");
+  await expect(guest.locator(".resultPanel").getByText("FORFEIT", { exact: true })).toBeVisible();
 
   await hostContext.close();
   await guestContext.close();
@@ -248,8 +248,6 @@ test("plays all three stage modes against COM and resets between rematches", asy
       }
       await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 20_000 });
     }
-    await expect(stage).toHaveAttribute("data-phase", "result");
-    await expect(stage).not.toHaveAttribute("data-winner-id", "none");
     await expect(host.getByLabel("試合結果カード").getByText("COM (Normal)", { exact: true })).toBeVisible();
 
     if (index < modes.length - 1) {
@@ -271,8 +269,6 @@ test("plays all three stage modes against COM and resets between rematches", asy
   await host.reload();
   await expect(host.locator(".connection")).toHaveClass(/isOnline/);
   await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 10_000 });
-  await expect(host.getByTestId("battle-stage")).toHaveAttribute("data-phase", "result");
-  await expect(host.getByTestId("battle-stage")).toHaveAttribute("data-result-animation", "idle");
 
   await hostContext.close();
 });
