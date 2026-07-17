@@ -1396,8 +1396,17 @@ export default function HomePage() {
     const trigger = exitTriggerRef.current;
     exitTriggerRef.current = null;
     setExitRequest(null);
-    window.requestAnimationFrame(() => trigger?.focus());
-  }, []);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (acceptingTextInput) {
+          prepareTypingInput();
+          return;
+        }
+
+        trigger?.focus();
+      });
+    });
+  }, [acceptingTextInput, prepareTypingInput]);
 
   const requestRoomExit = useCallback(() => {
     if (!room) {

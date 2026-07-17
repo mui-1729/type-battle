@@ -112,6 +112,7 @@ test("does not accept typing while the room exit confirmation is open", async ({
 
   const progress = page.locator(".raceLaneOne [role=progressbar]");
   const progressBeforeModal = await progress.getAttribute("aria-valuenow");
+  const input = page.getByLabel("入力欄");
   const exitButton = page.getByRole("button", { name: "対戦を退出" });
   await exitButton.click();
   await expect(page.getByRole("dialog", { name: "ルームを退出しますか？" })).toBeVisible();
@@ -120,12 +121,16 @@ test("does not accept typing while the room exit confirmation is open", async ({
   await page.keyboard.press(" ");
   await expect(page.getByRole("dialog", { name: "ルームを退出しますか？" })).toBeHidden();
   await expect(progress).toHaveAttribute("aria-valuenow", progressBeforeModal ?? "0");
-  await expect(exitButton).toBeFocused();
+  await expect(input).toBeFocused();
+
+  const guide = await readInputGuide(page);
+  await input.pressSequentially(guide[0] ?? "");
+  await expect.poll(async () => Number(await progress.getAttribute("aria-valuenow"))).toBeGreaterThan(Number(progressBeforeModal ?? "0"));
 
   await exitButton.click();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "ルームを退出しますか？" })).toBeHidden();
-  await expect(exitButton).toBeFocused();
+  await expect(input).toBeFocused();
 });
 
 test("immediately shows the opponent a result after an explicit room exit", async ({ browser }) => {

@@ -2107,7 +2107,7 @@ export class RoomAuthorityDurableObject {
     if (room.status === "playing") {
       player.connected = false;
       player.ready = false;
-      delete player.disconnectedAt;
+      player.disconnectedAt = Date.now();
       player.finishedAt = Date.now();
       delete player.finishTimeMs;
       player.finishStatus = "forfeited";
