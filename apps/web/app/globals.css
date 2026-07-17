@@ -266,6 +266,12 @@ h1 {
   flex-shrink: 0;
 }
 
+.headerBackSlot {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 .headerExitButton {
   min-height: 46px;
   white-space: nowrap;
@@ -410,7 +416,7 @@ textarea::placeholder {
 .joinRow,
 .roomMeta {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 48px 48px;
+  grid-template-columns: minmax(0, 1fr) 48px;
   gap: 10px;
   align-items: center;
 }
@@ -2594,7 +2600,13 @@ textarea::placeholder {
 
 .lobbyPrepHeader,
 .lobbyPlayerCardTop,
-.lobbySettingsHeading,
+.lobbySettingsHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .battleStage[data-mode="hpBattle"] {
   height: 360px;
   grid-template-rows: 54px minmax(0, 1fr);
@@ -2805,7 +2817,7 @@ textarea::placeholder {
 
 .lobbyRoomCode {
   display: grid;
-  grid-template-columns: auto auto 42px 42px;
+  grid-template-columns: auto auto 42px;
   align-items: center;
   gap: 8px;
   padding: 8px 10px 8px 14px;
@@ -2839,11 +2851,42 @@ textarea::placeholder {
 }
 
 .lobbyPlayerCard {
+  position: relative;
   display: grid;
   gap: 14px;
   min-height: 280px;
   padding: 18px;
   overflow: hidden;
+}
+
+.lobbyReactionBubble {
+  position: absolute;
+  z-index: 2;
+  top: 58px;
+  left: 50%;
+  max-width: calc(100% - 36px);
+  padding: 8px 12px;
+  color: var(--text);
+  border: 1px solid var(--accent-2);
+  border-radius: 999px;
+  background: var(--accent-2-soft);
+  box-shadow: var(--shadow-sm);
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  animation: lobbyReactionBubbleIn 2400ms ease both;
+}
+
+@keyframes lobbyReactionBubbleIn {
+  0%, 100% { opacity: 0; transform: translate(-50%, -6px) scale(0.96); }
+  12%, 82% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lobbyReactionBubble {
+    animation: none;
+  }
 }
 
 .lobbyPlayerCard.isEmpty {
@@ -2852,7 +2895,7 @@ textarea::placeholder {
 }
 
 .lobbyPlayerCardTop {
-  align-items: center;
+  min-height: 0;
 }
 
 .lobbyFigureArea {
@@ -2958,7 +3001,7 @@ textarea::placeholder {
 }
 
 .lobbySettingsHeading {
-  align-items: center;
+  min-height: 42px;
 }
 
 .lobbySettingsHeading h3 {
@@ -3332,7 +3375,7 @@ textarea::placeholder {
 
   .lobbyRoomCode {
     justify-self: stretch;
-    grid-template-columns: auto minmax(0, 1fr) 42px 42px;
+    grid-template-columns: auto minmax(0, 1fr) 42px;
   }
 
   .lobbyPrepControls {

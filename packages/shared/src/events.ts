@@ -65,7 +65,10 @@ export type ClientToServerEvents = {
   ) => void;
   "room:leave": (payload: RoomCodePayload) => void;
   "player:ready": (payload: ReadyPayload) => void;
-  "player:reaction": (payload: RoomCodePayload & { reaction: QuickReaction }) => void;
+  "player:reaction": (
+    payload: RoomCodePayload & { reaction: QuickReaction },
+    ack: (response: AckResponse<null>) => void
+  ) => void;
   "player:accessory": (payload: RoomCodePayload & { accessoryIndex: number }) => void;
   "room:setPromptCategory": (
     payload: RoomCodePayload & { category: PromptCategory },

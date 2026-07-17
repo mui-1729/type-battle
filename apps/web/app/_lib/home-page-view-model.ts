@@ -121,7 +121,7 @@ export function getHomePageViewModel({
       : isPracticePlaying && practiceSession
         ? now - practiceSession.startedAt
         : 0;
-  const activeWpm = calculateWpm(activeCanonicalProgressIndex, activeElapsedMs);
+  const activeWpm = calculateWpm(activeProgress.correctCharacters, activeElapsedMs);
   const activeAccuracy = calculateAccuracy(activeProgress.correctCharacters, activeProgress.totalTypedCharacters);
   const activeResultPlayer = room?.players.find((player) => player.id === playerId) ?? activePracticePlayer ?? null;
   const isTimeAttackExpired = Boolean(

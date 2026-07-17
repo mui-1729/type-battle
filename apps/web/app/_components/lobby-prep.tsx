@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, Clipboard, LogOut, MessageCircle } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Clipboard, MessageCircle } from "lucide-react";
 import { useState } from "react";
 import { QUICK_REACTIONS } from "@type-battle/shared";
 import type { BotDifficulty, MatchRule, PlayerState, PromptCategory, QuickReaction, RoomState } from "@type-battle/shared";
@@ -15,12 +15,11 @@ type LobbyPrepProps = {
   onPreviousAccessory: () => void;
   onNextAccessory: () => void;
   onCopyRoomCode: () => void;
-  onLeave: () => void;
   onToggleReady: () => void;
   onMatchRuleChange: (rule: MatchRule) => void;
   onPromptCategoryChange: (category: PromptCategory) => void;
   onBotDifficultyChange: (difficulty: BotDifficulty) => void;
-  onReaction: (reaction: QuickReaction) => void;
+  onReaction: (reaction: QuickReaction) => boolean;
   remoteReaction: { playerId: string; reaction: QuickReaction } | null;
 };
 
@@ -31,7 +30,6 @@ export function LobbyPrep({
   onPreviousAccessory,
   onNextAccessory,
   onCopyRoomCode,
-  onLeave,
   onToggleReady,
   onMatchRuleChange,
   onPromptCategoryChange,
@@ -65,9 +63,6 @@ export function LobbyPrep({
           <Button variant="icon" iconOnly type="button" onClick={onCopyRoomCode} aria-label="ルームコードをコピー" title="ルームコードをコピー">
             <Clipboard size={18} />
           </Button>
-          <Button variant="icon" iconOnly type="button" onClick={onLeave} aria-label="ルームを退出" title="ルームを退出">
-            <LogOut size={18} />
-          </Button>
         </div>
       </div>
 
@@ -79,6 +74,7 @@ export function LobbyPrep({
           isLocal={playerOne?.id === localPlayerId}
           ready={Boolean(playerOne?.ready)}
           accessory={playerOne?.id === localPlayerId ? selectedAccessory : getAccessory(playerOne?.accessoryIndex ?? (playerOne?.isBot ? 1 : 0))}
+          reaction={playerOne?.id === localPlayerId ? reaction : remoteReaction && remoteReaction.playerId === playerOne?.id ? remoteReaction.reaction : ""}
           {...(playerOne?.id === localPlayerId
             ? { onPreviousAccessory, onNextAccessory }
             : {})}
@@ -90,6 +86,7 @@ export function LobbyPrep({
           isLocal={playerTwo?.id === localPlayerId}
           ready={Boolean(playerTwo?.ready)}
           accessory={playerTwo?.id === localPlayerId ? selectedAccessory : getAccessory(playerTwo?.accessoryIndex ?? (playerTwo?.isBot ? 1 : 0))}
+          reaction={playerTwo?.id === localPlayerId ? reaction : remoteReaction && remoteReaction.playerId === playerTwo?.id ? remoteReaction.reaction : ""}
           {...(playerTwo?.id === localPlayerId
             ? { onPreviousAccessory, onNextAccessory }
             : {})}
@@ -215,6 +212,7 @@ type LobbyPlayerCardProps = {
   accessory: PlayerAccessory;
   onPreviousAccessory?: () => void;
   onNextAccessory?: () => void;
+  reaction?: QuickReaction | "";
 };
 
 function LobbyPlayerCard({
@@ -225,7 +223,8 @@ function LobbyPlayerCard({
   ready,
   accessory,
   onPreviousAccessory,
-  onNextAccessory
+  onNextAccessory,
+  reaction = ""
 }: LobbyPlayerCardProps) {
   const kind = player?.isBot ? "com" : isLocal ? "you" : slot === "1P" ? "one" : "two";
 
@@ -240,6 +239,7 @@ function LobbyPlayerCard({
         />
         <span className={ready ? "readyBadge active" : "readyBadge"}>{ready ? "READY" : "WAITING"}</span>
       </div>
+      {reaction ? <span className="lobbyReactionBubble" role="status" aria-live="polite">{reaction}</span> : null}
       <div className="lobbyFigureArea">
         {player ? (
           <>
@@ -267,8 +267,8 @@ function LobbyPlayerCard({
   );
 }
 
-function useReactionCooldown(onReaction: (reaction: QuickReaction) => void): [string, (reaction: QuickReaction) => void] {
-  const [reaction, setReactionState] = useState("");
+function useReactionCooldown(onReaction: (reaction: QuickReaction) => boolean): [QuickReaction | "", (reaction: QuickReaction) => void] {
+  const [reaction, setReactionState] = useState<QuickReaction | "">("");
   const [cooldownUntil, setCooldownUntil] = useState(0);
 
   const setReaction = (nextReaction: QuickReaction) => {
@@ -276,8 +276,11 @@ function useReactionCooldown(onReaction: (reaction: QuickReaction) => void): [st
       return;
     }
 
+    if (!onReaction(nextReaction)) {
+      return;
+    }
+
     setReactionState(nextReaction);
-    onReaction(nextReaction);
     setCooldownUntil(Date.now() + 3_000);
     window.setTimeout(() => setReactionState(""), 2_400);
   };

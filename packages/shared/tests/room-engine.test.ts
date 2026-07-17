@@ -164,6 +164,32 @@ describe("room engine config", () => {
     expect(getRoom(created.room.roomCode)?.players[1]?.hp).toBeLessThan(hpAfterFirstCycle);
   });
 
+  it("continues after a dropped progress packet without reapplying duplicates", () => {
+    const created = createRoom({ nickname: "Alice", guestId: "guest_alice_dropped_packet", socketId: "socket_alice_dropped_packet" });
+    setReady("socket_alice_dropped_packet", created.room.roomCode, true);
+    const started = startMatch("socket_alice_dropped_packet", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    if ("error" in started) return;
+
+    markPlaying(created.room.roomCode);
+    const input = started.room.prompt?.typing.romaji[0] ?? "a";
+    expect(updateProgress("socket_alice_dropped_packet", {
+      roomCode: created.room.roomCode,
+      input,
+      sequence: 3
+    })).not.toBeNull();
+
+    const afterFirstPacket = getRoom(created.room.roomCode)?.players[0];
+    expect(afterFirstPacket?.totalTypedCharacters).toBe(1);
+
+    expect(updateProgress("socket_alice_dropped_packet", {
+      roomCode: created.room.roomCode,
+      input,
+      sequence: 3
+    })).toBeNull();
+    expect(getRoom(created.room.roomCode)?.players[0]?.totalTypedCharacters).toBe(1);
+  });
+
   it("applies the same attack and self-damage rules to COM input", () => {
     const created = createRoom({ nickname: "Alice", guestId: "guest_alice_bot_hp", socketId: "socket_alice_bot_hp" });
     setMatchRule("socket_alice_bot_hp", created.room.roomCode, "hpBattle");

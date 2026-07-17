@@ -131,4 +131,26 @@ describe("getHomePageViewModel", () => {
     expect(view.activeProgressPercent).toBeGreaterThan(0);
     expect(view.typingInputKey).toBe("practice-1:prompt-1");
   });
+
+  it("calculates WPM from correct keystrokes instead of canonical progress", () => {
+    const view = getHomePageViewModel(createInput({
+      now: 61_000,
+      practiceSession: {
+        practiceId: "practice-wpm",
+        prompt,
+        startedAt: 1_000,
+        category: "short",
+        deviceKind: "desktop",
+        mode: "practice"
+      },
+      practiceProgress: {
+        ...createEmptyProgress(),
+        progressIndex: 2,
+        correctCharacters: 1,
+        totalTypedCharacters: 2
+      }
+    }));
+
+    expect(view.activeWpm).toBe(0.2);
+  });
 });
