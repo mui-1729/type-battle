@@ -153,4 +153,18 @@ describe("getHomePageViewModel", () => {
 
     expect(view.activeWpm).toBe(0.2);
   });
+
+  it("resets a stale input mode when a new mobile match has no typed characters", () => {
+    const player = createPlayer({ deviceKind: "mobile" });
+    const view = getHomePageViewModel(createInput({
+      room: createRoom(player),
+      playerId: player.id,
+      currentPlayer: player,
+      connected: true,
+      inputMode: "romaji",
+      inputModeInitialized: true
+    }));
+
+    expect(view.activeTypingText).toBe(prompt.typing.hiragana);
+  });
 });

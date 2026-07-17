@@ -83,9 +83,11 @@ export function getHomePageViewModel({
   const activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
   const activePromptText = activePrompt?.text ?? "";
   const activeInputDeviceKind = room ? currentPlayer?.deviceKind ?? "desktop" : practiceSession?.deviceKind ?? "desktop";
+  const activeProgress = room ? localProgress : practiceProgress;
+  const deviceInputMode = activeInputDeviceKind === "mobile" ? "kana" : "romaji";
   const effectiveInputMode =
-    inputModeInitialized === false
-      ? activeInputDeviceKind === "mobile" ? "kana" : "romaji"
+    inputModeInitialized === false || activeProgress.totalTypedCharacters === 0
+      ? deviceInputMode
       : inputMode ?? (activeInputDeviceKind === "mobile" ? "kana" : "romaji");
   const dailyChallengeInfo = getDailyChallengeInfo(dailyChallengeNow);
   const dailyChallengePrompt = pickDailyChallengePrompt(dailyChallengeNow);
@@ -104,7 +106,6 @@ export function getHomePageViewModel({
     : "";
   const isRoomPlaying = room?.status === "playing";
   const isPracticePlaying = Boolean(practiceSession && !practiceResult && !room);
-  const activeProgress = room ? localProgress : practiceProgress;
   const isTimeAttackPlaying = Boolean(isRoomPlaying && room?.matchRule === "timeAttack");
   const activeGuideProgressIndex =
     isTimeAttackPlaying && activeTypingText.length > 0
