@@ -53,8 +53,6 @@ select {
   z-index: -2;
   content: "";
   background:
-    radial-gradient(ellipse at 14% 25%, #236f1c 0 3%, transparent 3.2%),
-    radial-gradient(ellipse at 82% 20%, #1d6f24 0 4%, transparent 4.2%),
     radial-gradient(circle at 12% 54%, #fff 0 2px, #ffd724 2px 5px, transparent 6px),
     radial-gradient(circle at 30% 42%, #fff 0 3px, #ffd724 3px 6px, transparent 7px),
     radial-gradient(circle at 66% 55%, #fff 0 3px, #ffd724 3px 6px, transparent 7px),
