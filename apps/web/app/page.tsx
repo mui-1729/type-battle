@@ -363,6 +363,10 @@ export default function HomePage() {
 
   const attachSocketHandlers = useCallback((socket: ClientSocket) => {
     socket.on("connect", () => {
+      if (socketRef.current !== socket) {
+        return;
+      }
+
       setConnected(true);
       const currentRoom = roomRef.current;
       const currentSession = guestSessionRef.current;
@@ -399,6 +403,10 @@ export default function HomePage() {
       );
     });
     socket.on("disconnect", () => {
+      if (socketRef.current !== socket) {
+        return;
+      }
+
       setConnected(false);
       if (socketModeRef.current === "room") {
         setStoredRoomRecovery({

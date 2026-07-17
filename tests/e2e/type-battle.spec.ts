@@ -107,6 +107,7 @@ test("does not accept typing while the room exit confirmation is open", async ({
   await selectBattleMode(page);
   await setNickname(page, "KeyboardHost");
   await page.getByRole("button", { name: "ルームを作成" }).click();
+  await page.getByRole("button", { name: /^タイムアタック/ }).click();
   await page.getByRole("button", { name: "READYにする" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
@@ -124,7 +125,7 @@ test("does not accept typing while the room exit confirmation is open", async ({
   await expect(input).toBeFocused();
 
   const guide = await readInputGuide(page);
-  await input.pressSequentially(guide[0] ?? "");
+  await input.fill(guide.slice(0, 5));
   await expect.poll(async () => Number(await progress.getAttribute("aria-valuenow"))).toBeGreaterThan(Number(progressBeforeModal ?? "0"));
 
   await exitButton.click();
