@@ -169,6 +169,7 @@ export default function HomePage() {
   const dailyAttemptConsumedRef = useRef(false);
   const inputSequenceRef = useRef(0);
   const roomRef = useRef<RoomState | null>(null);
+  const resultRef = useRef<MatchResult | null>(null);
   const guestSessionRef = useRef<GuestSession | null>(null);
   const socketModeRef = useRef<"practice" | "room" | null>(null);
   const storedRoomCodeRef = useRef<string | null>(null);
@@ -339,6 +340,7 @@ export default function HomePage() {
     setLocalProgress(createEmptyProgress());
     localProgressRef.current = createEmptyProgress();
     inputSequenceRef.current = 0;
+    resultRef.current = null;
     setResult(null);
     setLastProgressSentAt(null);
   }, []);
@@ -363,9 +365,10 @@ export default function HomePage() {
     });
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     roomRef.current = room;
-  }, [room]);
+    resultRef.current = result;
+  }, [result, room]);
 
   useEffect(() => {
     guestSessionRef.current = guestSession;
@@ -376,6 +379,18 @@ export default function HomePage() {
   }, [socketMode]);
 
   const attachSocketHandlers = useCallback((socket: ClientSocket) => {
+    const applyRoomSnapshot = (nextRoom: RoomState) => {
+      const nextResult = nextRoom.result ?? null;
+      roomRef.current = nextRoom;
+      resultRef.current = nextResult;
+      setRoom(nextRoom);
+      setResult(nextResult);
+
+      if (nextRoom.status === "finished" || nextResult) {
+        typingInputRef.current?.blur();
+      }
+    };
+
     socket.on("connect", () => {
       if (socketRef.current !== socket) {
         return;
@@ -411,8 +426,7 @@ export default function HomePage() {
 
           resetTyping();
           setPlayerId(response.data.playerId);
-          setRoom(response.data.room);
-          setResult(response.data.room.result ?? null);
+          applyRoomSnapshot(response.data.room);
         }
       );
     });
@@ -430,37 +444,36 @@ export default function HomePage() {
       }
     });
     socket.on("room:state", (nextRoom) => {
-      setRoom(nextRoom);
-      setResult(nextRoom.result ?? null);
+      applyRoomSnapshot(nextRoom);
     });
     socket.on("player:progress", (nextRoom) => {
-      setRoom(nextRoom);
-      setResult(nextRoom.result ?? null);
+      applyRoomSnapshot(nextRoom);
     });
     socket.on("match:countdown", ({ room: nextRoom, serverStartAt }) => {
       resetTyping();
-      setRoom(nextRoom);
-      setResult(nextRoom.result ?? null);
+      applyRoomSnapshot(nextRoom);
       setCountdownMs(Math.max(serverStartAt - Date.now(), 0));
     });
     socket.on("match:started", (nextRoom) => {
       resetTyping();
       setCountdownMs(0);
-      setRoom(nextRoom);
-      setResult(nextRoom.result ?? null);
+      applyRoomSnapshot(nextRoom);
     });
     socket.on("match:result", (nextResult) => {
+      resultRef.current = nextResult;
       setResult(nextResult);
       setCountdownMs(0);
-      setRoom((current) =>
-        current && current.roomCode === nextResult.roomCode
-          ? {
-              ...current,
-              status: "finished",
-              result: nextResult
-            }
-          : current
-      );
+      const currentRoom = roomRef.current;
+      if (currentRoom && currentRoom.roomCode === nextResult.roomCode) {
+        const finishedRoom = {
+          ...currentRoom,
+          status: "finished" as const,
+          result: nextResult
+        };
+        roomRef.current = finishedRoom;
+        setRoom(finishedRoom);
+      }
+      typingInputRef.current?.blur();
     });
     socket.on("match:error", ({ message }) => {
       setError(message);
@@ -993,13 +1006,14 @@ export default function HomePage() {
   const emitProgress = useCallback(
     (input: string, finish: boolean) => {
       const socket = socketRef.current;
+      const currentRoom = roomRef.current;
 
-      if (!socket || !room || !socket.isConnected()) {
+      if (!socket || !currentRoom || !socket.isConnected()) {
         return;
       }
 
       const payload: TypingProgress = {
-        roomCode: room.roomCode,
+        roomCode: currentRoom.roomCode,
         input,
         sequence: inputSequenceRef.current + 1
       };
@@ -1014,7 +1028,7 @@ export default function HomePage() {
 
       socket.emit("typing:progress", payload);
     },
-    [room]
+    []
   );
 
   const handleTypedText = useCallback(
@@ -1023,7 +1037,9 @@ export default function HomePage() {
         return;
       }
 
-      if (room?.status === "playing" && room?.prompt) {
+      const currentRoom = roomRef.current;
+
+      if (currentRoom?.status === "playing" && currentRoom.prompt && !resultRef.current) {
         const previous = localProgressRef.current;
         const next = advanceTypingProgress({
           previous,
@@ -1402,12 +1418,18 @@ export default function HomePage() {
       return;
     }
 
-    if (room.status === "finished") {
+    const hasHumanOpponent = room.players.some((player) => player.id !== currentPlayer.id && !player.isBot);
+
+    if (room.status === "finished" && hasHumanOpponent) {
       socketRef.current.emit("player:ready", {
         roomCode: room.roomCode,
         ready: !currentPlayer.ready
       });
       setRematchError("");
+      return;
+    }
+
+    if (room.status !== "finished") {
       return;
     }
 
