@@ -1,21 +1,11 @@
-import Link from "next/link";
-import { ArrowLeft, BookOpen, Keyboard, Swords } from "lucide-react";
+import { BookOpen, Keyboard, Swords } from "lucide-react";
+import { PageHeader } from "../_components/page-header";
 import { SectionHeading, SurfaceCard } from "../_components/ui";
 
 export default function HowToPlayPage() {
   return (
     <main className="appShell">
-      <section className="topBar" aria-label="遊び方">
-        <div className="brandBlock">
-          <p className="eyebrow">TYPE BATTLE</p>
-          <h1>遊び方</h1>
-          <p className="topBarCopy">短く入力して、先にゴールへたどり着こう。</p>
-        </div>
-        <Link className="secondaryButton" href="/">
-          <ArrowLeft size={18} aria-hidden="true" />
-          ホームへ戻る
-        </Link>
-      </section>
+      <PageHeader ariaLabel="遊び方" eyebrow="TYPE BATTLE" title="遊び方" description="短く入力して、先にゴールへたどり着こう。" backLabel="ホームへ戻る" />
 
       <section className="howToPlayGrid" aria-label="ゲームの遊び方">
         <SurfaceCard>

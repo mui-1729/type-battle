@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Clipboard, Swords, Unplug, Users } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Clipboard, Swords, Users } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   createRealtimeSocket,
   getDefaultRealtimeUrl,
@@ -265,7 +265,7 @@ export default function HomePage() {
     typingInputKey
   } = homePageViewModel;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const nextMode = activeInputDeviceKind === "mobile" ? "kana" : "romaji";
     inputModeRef.current = nextMode;
     setInputMode(nextMode);
@@ -469,6 +469,9 @@ export default function HomePage() {
     });
     socket.on("player:reaction", (payload) => {
       setRemoteReaction(payload);
+      window.setTimeout(() => {
+        setRemoteReaction((current) => current?.playerId === payload.playerId && current.reaction === payload.reaction ? null : current);
+      }, 2_400);
     });
   }, [resetTyping]);
 
@@ -738,7 +741,7 @@ export default function HomePage() {
         mistakes: finalProgress.mistakes,
         maxStreak: finalProgress.maxStreak,
         currentStreak: finalProgress.currentStreak,
-        wpm: calculateWpm(canonicalProgressIndex, finishTimeMs),
+        wpm: calculateWpm(finalProgress.correctCharacters, finishTimeMs),
         accuracy: calculateAccuracy(finalProgress.correctCharacters, finalProgress.totalTypedCharacters),
         finishedAt: Date.now(),
         finishTimeMs,
@@ -991,7 +994,7 @@ export default function HomePage() {
     (input: string, finish: boolean) => {
       const socket = socketRef.current;
 
-      if (!socket || !room) {
+      if (!socket || !room || !socket.isConnected()) {
         return;
       }
 
@@ -1361,12 +1364,18 @@ export default function HomePage() {
   }, [prepareTypingInput, primeSoundPlayback, realtimeConfigured, room]);
 
   const sendReaction = useCallback((reaction: QuickReaction) => {
-    if (!socketRef.current || !room) {
-      return;
+    if (!socketRef.current || !room || !connected) {
+      setError("Realtimeに接続していないため、リアクションを送信できません。");
+      return false;
     }
 
-    socketRef.current.emit("player:reaction", { roomCode: room.roomCode, reaction });
-  }, [room]);
+    socketRef.current.emit("player:reaction", { roomCode: room.roomCode, reaction }, (response) => {
+      if (!response.ok) {
+        setError(response.error);
+      }
+    });
+    return true;
+  }, [connected, room]);
 
   useEffect(() => {
     if (!room || room.status !== "waiting") {
@@ -1540,7 +1549,7 @@ export default function HomePage() {
         connected={connected}
         realtimeConfigured={realtimeConfigured}
         onOpenSettings={() => setSettingsOpen(true)}
-        exitAction={room ? { label: room.status === "finished" ? "ルームを退出" : "対戦を退出", onClick: requestRoomExit } : practiceSession || practiceResult ? { label: practiceResult ? "ひとり用メニューへ" : "練習をやめる", onClick: requestPracticeExit } : undefined}
+        exitAction={room ? { label: room.status === "finished" ? "ルームを退出" : "対戦を退出", onClick: requestRoomExit } : practiceSession || practiceResult ? { label: practiceResult ? "ひとり用メニューへ" : "練習をやめる", onClick: requestPracticeExit } : showModeSetup ? { label: "モード選択へ", onClick: () => setHomeMode(null) } : undefined}
       />
 
       {showHomeModeMenu ? (
@@ -1623,9 +1632,6 @@ export default function HomePage() {
               </div>
               <button className="iconButton" type="button" onClick={copyRoomCode} title="ルームコードをコピー">
                 <Clipboard size={18} />
-              </button>
-              <button className="iconButton" type="button" onClick={requestRoomExit} title="ルームを退出" aria-label="ルームを退出">
-                <Unplug size={18} />
               </button>
             </div>
           ) : null}
@@ -1826,13 +1832,34 @@ export default function HomePage() {
                   onPreviousAccessory={() => shiftAccessory(-1)}
                   onNextAccessory={() => shiftAccessory(1)}
                   onCopyRoomCode={copyRoomCode}
-                  onLeave={requestRoomExit}
                   onToggleReady={setReady}
                   onMatchRuleChange={setMatchRule}
                   onPromptCategoryChange={setPromptCategory}
                   onBotDifficultyChange={setBotDifficulty}
                   onReaction={sendReaction}
                   remoteReaction={remoteReaction}
+                />
+              ) : activeResult ? (
+                <ResultPanel
+                  result={activeResult}
+                  localPlayerId={playerId}
+                  isRoomResult={Boolean(room)}
+                  onRetry={room ? rematch : retryPractice}
+                  practiceMode={activePracticeMode}
+                  canRetry={!room || Boolean(currentPlayer?.connected)}
+                  retryPending={rematchPending}
+                  retryError={rematchError}
+                  rematchReady={Boolean(currentPlayer?.ready)}
+                  onPracticeNext={!room && activePracticeMode === "practice" ? startPractice : undefined}
+                  onPracticeMenu={!room ? returnToPracticeMenu : undefined}
+                  {...(room ? {
+                    accessoryIndex,
+                    onPreviousAccessory: () => shiftAccessory(-1),
+                    onNextAccessory: () => shiftAccessory(1),
+                    onOpenSettings: () => setMatchSettingsOpen(true),
+                    onReaction: sendReaction
+                  } : {})}
+                  {...(room ? { matchRule: activeResult.matchRule ?? room.matchRule } : {})}
                 />
               ) : (
                 <>
@@ -1930,31 +1957,6 @@ export default function HomePage() {
                 ) : null}
               </section>
 
-              {activeResult ? (
-                <ResultPanel
-                  result={activeResult}
-                  localPlayerId={playerId}
-                  isRoomResult={Boolean(room)}
-                  onRetry={room ? rematch : retryPractice}
-                  practiceMode={activePracticeMode}
-                  canRetry={!room || Boolean(currentPlayer?.connected)}
-                  retryPending={rematchPending}
-                  retryError={rematchError}
-                  rematchReady={Boolean(currentPlayer?.ready)}
-                  onPracticeNext={!room && activePracticeMode === "practice" ? startPractice : undefined}
-                  onPracticeMenu={!room ? returnToPracticeMenu : undefined}
-                  onExit={room ? requestRoomExit : undefined}
-                  exitLabel={room ? "ルームを退出" : undefined}
-                  {...(room ? {
-                    accessoryIndex,
-                    onPreviousAccessory: () => shiftAccessory(-1),
-                    onNextAccessory: () => shiftAccessory(1),
-                    onOpenSettings: () => setMatchSettingsOpen(true),
-                    onReaction: sendReaction
-                  } : {})}
-                  {...(room ? { matchRule: activeResult.matchRule ?? room.matchRule } : {})}
-                />
-              ) : null}
                 </>
               )}
             </>

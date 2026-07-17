@@ -119,7 +119,6 @@ describe("shared UI foundation", () => {
         onPreviousAccessory: vi.fn(),
         onNextAccessory: vi.fn(),
         onCopyRoomCode: vi.fn(),
-        onLeave: vi.fn(),
         onToggleReady: vi.fn(),
         onMatchRuleChange: vi.fn(),
         onPromptCategoryChange: vi.fn(),
@@ -138,5 +137,6 @@ describe("shared UI foundation", () => {
     expect(markup.match(/aria-label="次のアクセサリ"/g)).toHaveLength(1);
     expect(markup).toContain("両者READYで開始します");
     expect(markup).toContain("Bob: 「よろしく」");
+    expect(markup.match(/lobbyReactionBubble/g)).toHaveLength(1);
   });
 });

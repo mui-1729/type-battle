@@ -23,6 +23,7 @@ type ClientEmitArgs<K extends keyof ClientToServerEvents> = Parameters<ClientToS
     : never;
 
 export type RealtimeSocket = {
+  isConnected(): boolean;
   on<K extends RealtimeEventName>(event: K, handler: RealtimeEventHandler<K>): void;
   off<K extends RealtimeEventName>(event: K, handler?: RealtimeEventHandler<K>): void;
   emit<K extends keyof ClientToServerEvents>(event: K, ...args: ClientEmitArgs<K>): void;
@@ -265,6 +266,9 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
   connect();
 
   return {
+    isConnected() {
+      return socket?.readyState === WebSocket.OPEN;
+    },
     on(event, handler) {
       const eventListeners = listeners.get(event) ?? new Set<AnyListener>();
       eventListeners.add(handler as AnyListener);

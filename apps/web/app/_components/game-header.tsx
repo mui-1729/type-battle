@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BookOpen, LogOut, Settings } from "lucide-react";
+import { ArrowLeft, BookOpen, Settings } from "lucide-react";
 import { GameLogo } from "./game-logo";
 
 type GameHeaderProps = {
@@ -12,6 +12,14 @@ type GameHeaderProps = {
 export function GameHeader({ connected, realtimeConfigured, onOpenSettings, exitAction }: GameHeaderProps) {
   return (
     <section className="topBar" aria-label="ゲーム状態">
+      {exitAction ? (
+        <div className="headerBackSlot">
+          <button className="secondaryButton headerBackButton" type="button" onClick={exitAction.onClick}>
+            <ArrowLeft size={17} aria-hidden="true" />
+            {exitAction.label}
+          </button>
+        </div>
+      ) : null}
       <div className="brandBlock">
         <GameLogo compact />
       </div>
@@ -21,12 +29,6 @@ export function GameHeader({ connected, realtimeConfigured, onOpenSettings, exit
           <span />
           {connected ? "接続中" : realtimeConfigured ? "未接続" : "Realtime 未設定"}
         </div>
-        {exitAction ? (
-          <button className="secondaryButton headerExitButton" type="button" onClick={exitAction.onClick}>
-            <LogOut size={17} aria-hidden="true" />
-            {exitAction.label}
-          </button>
-        ) : null}
         <button className="iconButton" type="button" onClick={onOpenSettings} title="設定を開く" aria-label="設定を開く">
           <Settings size={18} />
         </button>

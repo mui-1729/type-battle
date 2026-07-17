@@ -403,7 +403,7 @@ export class RoomAuthorityDurableObject {
         await this.handleSetReady(socketId, message.payload);
         return;
       case "client:player:reaction":
-        await this.handlePlayerReaction(socketId, message.payload);
+        await this.handlePlayerReaction(socketId, message.id, message.payload);
         return;
       case "client:player:accessory":
         await this.handlePlayerAccessory(socketId, message.payload);
@@ -609,16 +609,18 @@ export class RoomAuthorityDurableObject {
     void this.persistRoom(room.roomCode);
   }
 
-  private async handlePlayerReaction(socketId: string, payload: unknown): Promise<void> {
+  private async handlePlayerReaction(socketId: string, messageId: string, payload: unknown): Promise<void> {
     const parsedPayload = parseReactionPayload(payload);
     const socketState = this.socketStates.get(socketId);
 
     if (!parsedPayload || !socketState?.playerId || !socketState.roomCode) {
+      this.sendAck(socketId, messageId, "client:player:reaction", { ok: false, error: INVALID_MESSAGE_ERROR });
       this.sendError(socketId, INVALID_MESSAGE_ERROR);
       return;
     }
 
     if (normalizeRoomCode(parsedPayload.roomCode) !== normalizeRoomCode(socketState.roomCode)) {
+      this.sendAck(socketId, messageId, "client:player:reaction", { ok: false, error: "ルームに参加していません。" });
       this.sendError(socketId, "ルームに参加していません。");
       return;
     }
@@ -626,6 +628,7 @@ export class RoomAuthorityDurableObject {
     const now = Date.now();
     const previous = this.reactionTimestamps.get(socketState.playerId) ?? 0;
     if (now - previous < 3_000) {
+      this.sendAck(socketId, messageId, "client:player:reaction", { ok: false, error: "リアクションは3秒に1回送信できます。" });
       return;
     }
 
@@ -638,6 +641,7 @@ export class RoomAuthorityDurableObject {
         reaction: parsedPayload.reaction
       }
     });
+    this.sendAck(socketId, messageId, "client:player:reaction", { ok: true, data: null });
   }
 
   private async handlePlayerAccessory(socketId: string, payload: unknown): Promise<void> {
@@ -2507,13 +2511,13 @@ function abortCountdown(room: InternalRoom): void {
   room.lastActivityAt = Date.now();
 }
 function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): boolean {
-  if (!isValidTypingProgressPayload(payload) || payload.sequence !== player.lastInputSequence + 1) {
+  if (!isValidTypingProgressPayload(payload) || payload.sequence <= player.lastInputSequence) {
     console.warn(JSON.stringify({
       event: "typing_progress_rejected",
       roomCode: room.roomCode,
       playerId: player.id,
       receivedSequence: payload.sequence,
-      expectedSequence: player.lastInputSequence + 1
+      lastAcceptedSequence: player.lastInputSequence
     }));
     return false;
   }
@@ -2580,7 +2584,7 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
   if (!loopingMatch) {
     player.progressIndex = clamp(player.progressIndex, 0, promptLength);
   }
-  player.wpm = calculateWpm(player.progressIndex, now - startedAt);
+  player.wpm = calculateWpm(player.correctCharacters, now - startedAt);
   player.accuracy = calculateAccuracy(player.correctCharacters, player.totalTypedCharacters);
 
   if (room.matchRule === "hpBattle") {
@@ -2705,7 +2709,7 @@ function applyBotProgress(
     bot.mistakeGuards = Math.min((bot.mistakeGuards ?? 0) + Math.max(earned, 0), MAX_MISTAKE_GUARDS);
   }
 
-  bot.wpm = calculateWpm(bot.progressIndex, now - startedAt);
+  bot.wpm = calculateWpm(bot.correctCharacters, now - startedAt);
   bot.accuracy = calculateAccuracy(bot.correctCharacters, bot.totalTypedCharacters);
 }
 

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { PageHeader } from "../_components/page-header";
 
 const FEEDBACK_ISSUE_URL =
   process.env.NEXT_PUBLIC_FEEDBACK_ISSUE_URL ??
@@ -7,16 +7,7 @@ const FEEDBACK_ISSUE_URL =
 export default function FeedbackPage() {
   return (
     <main className="appShell">
-      <section className="topBar" aria-label="フィードバック">
-        <div className="brandBlock">
-          <p className="eyebrow">TYPE BATTLE</p>
-          <h1>フィードバック</h1>
-          <p className="topBarCopy">不具合と改善要望を分けて送るための導線です。</p>
-        </div>
-        <Link className="secondaryButton" href="/">
-          ゲームに戻る
-        </Link>
-      </section>
+      <PageHeader ariaLabel="フィードバック" eyebrow="TYPE BATTLE" title="フィードバック" description="不具合と改善要望を分けて送るための導線です。" backLabel="ゲームに戻る" />
 
       <section className="workspace">
         <aside className="sidePanel">
@@ -59,9 +50,6 @@ export default function FeedbackPage() {
                 <small>UX、アクセシビリティ、Private Beta の改善提案に使います。</small>
               </div>
             </div>
-            <Link className="secondaryButton" href="/">
-              対戦に戻る
-            </Link>
           </div>
         </section>
       </section>

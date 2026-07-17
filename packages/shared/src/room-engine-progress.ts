@@ -12,7 +12,7 @@ const MAX_MISTAKE_GUARDS = 3;
 type ProgressState = ReturnType<typeof createProgressState>;
 
 export function applyProgress(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): boolean {
-  if (!isValidTypingProgressPayload(payload) || payload.sequence !== player.lastInputSequence + 1) {
+  if (!isValidTypingProgressPayload(payload) || payload.sequence <= player.lastInputSequence) {
     return false;
   }
 
@@ -69,7 +69,7 @@ export function applyProgress(player: InternalPlayer, room: InternalRoom, payloa
   if (!loopingMatch) {
     player.progressIndex = clamp(player.progressIndex, 0, promptLength);
   }
-  player.wpm = calculateWpm(player.progressIndex, now - startedAt);
+  player.wpm = calculateWpm(player.correctCharacters, now - startedAt);
   player.accuracy = calculateAccuracy(player.correctCharacters, player.totalTypedCharacters);
 
   if (room.matchRule !== "hpBattle") {
@@ -149,7 +149,7 @@ export function applyBotProgress(
     bot.mistakeGuards = Math.min((bot.mistakeGuards ?? 0) + Math.max(earned, 0), MAX_MISTAKE_GUARDS);
   }
 
-  bot.wpm = calculateWpm(bot.progressIndex, now - startedAt);
+  bot.wpm = calculateWpm(bot.correctCharacters, now - startedAt);
   bot.accuracy = calculateAccuracy(bot.correctCharacters, bot.totalTypedCharacters);
 }
 
