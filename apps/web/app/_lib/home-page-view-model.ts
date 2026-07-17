@@ -54,6 +54,8 @@ export type HomePageViewModelInput = {
   lastProgressSentAt: number | null;
   syncClock: number;
   matchTimerMs: number;
+  inputMode?: "kana" | "romaji";
+  inputModeInitialized?: boolean;
 };
 
 export function getHomePageViewModel({
@@ -72,13 +74,19 @@ export function getHomePageViewModel({
   connected,
   lastProgressSentAt,
   syncClock,
-  matchTimerMs
+  matchTimerMs,
+  inputMode,
+  inputModeInitialized
 }: HomePageViewModelInput) {
   const activePracticePlayer = practiceResult?.players[0] ?? null;
   const activeResult = result ?? practiceResult;
   const activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
   const activePromptText = activePrompt?.text ?? "";
   const activeInputDeviceKind = room ? currentPlayer?.deviceKind ?? "desktop" : practiceSession?.deviceKind ?? "desktop";
+  const effectiveInputMode =
+    inputModeInitialized === false
+      ? activeInputDeviceKind === "mobile" ? "kana" : "romaji"
+      : inputMode ?? (activeInputDeviceKind === "mobile" ? "kana" : "romaji");
   const dailyChallengeInfo = getDailyChallengeInfo(dailyChallengeNow);
   const dailyChallengePrompt = pickDailyChallengePrompt(dailyChallengeNow);
   const visibleDailyChallengeRecord = getVisibleDailyChallengeRecord(
@@ -88,10 +96,9 @@ export function getHomePageViewModel({
   const activePracticeMode = practiceSession?.mode ?? "practice";
   const mistakeTrendSummary = summarizeMistakeTrendRecord(mistakeTrendRecord);
   const mistakeTrendTotal = (mistakeTrendRecord?.items ?? []).reduce((total, item) => total + item.count, 0);
-  const activeRomajiTypingPlan =
-    activePrompt && activeInputDeviceKind !== "mobile" ? buildRomajiTypingPlan(activePrompt.typing.hiragana) : null;
+  const activeRomajiTypingPlan = activePrompt ? buildRomajiTypingPlan(activePrompt.typing.hiragana) : null;
   const activeTypingText = activePrompt
-    ? activeInputDeviceKind === "mobile"
+    ? effectiveInputMode === "kana"
       ? activePrompt.typing.hiragana
       : activeRomajiTypingPlan?.guide ?? activePrompt.typing.romaji
     : "";
@@ -104,7 +111,7 @@ export function getHomePageViewModel({
       ? activeProgress.progressIndex % activeTypingText.length
       : activeProgress.progressIndex;
   const activeCanonicalProgressIndex =
-    activeInputDeviceKind === "desktop" && activeRomajiTypingPlan
+    effectiveInputMode === "romaji" && activeRomajiTypingPlan
       ? getCanonicalProgressIndex(activeRomajiTypingPlan, activeProgress.progressIndex)
       : activeProgress.progressIndex;
   const activeProgressPercent = calculateProgress(activeGuideProgressIndex, activeTypingText.length);

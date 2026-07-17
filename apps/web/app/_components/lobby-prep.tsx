@@ -2,17 +2,11 @@ import { Check, ChevronLeft, ChevronRight, Clipboard, LogOut, MessageCircle } fr
 import { useState } from "react";
 import { QUICK_REACTIONS } from "@type-battle/shared";
 import type { BotDifficulty, MatchRule, PlayerState, PromptCategory, QuickReaction, RoomState } from "@type-battle/shared";
+import { getAccessory, type PlayerAccessory } from "../../lib/player-accessories";
 import { BOT_DIFFICULTY_LABELS, MATCH_RULE_DETAILS, PROMPT_CATEGORY_LABELS } from "../_lib/ui-labels";
 import { PlayerIdentity } from "./player-identity";
 import { StickFigure } from "./stick-figure";
 import { Button, SectionHeading, SurfaceCard } from "./ui";
-
-const ACCESSORIES = [
-  { id: "none", label: "なし", glyph: "·" },
-  { id: "cap", label: "キャップ", glyph: "⌒" },
-  { id: "headband", label: "ハチマキ", glyph: "═" },
-  { id: "glasses", label: "サングラス", glyph: "▰" }
-] as const;
 
 type LobbyPrepProps = {
   room: RoomState;
@@ -53,7 +47,7 @@ export function LobbyPrep({
     ? room.players.find((player) => player.id === remoteReaction.playerId) ?? null
     : null;
   const isHost = Boolean(localPlayer?.isHost);
-  const selectedAccessory = ACCESSORIES[localPlayer?.accessoryIndex ?? accessoryIndex] ?? ACCESSORIES[0];
+  const selectedAccessory = getAccessory(localPlayer?.accessoryIndex ?? accessoryIndex);
   const [reaction, setReaction] = useReactionCooldown(onReaction);
 
   return (
@@ -84,7 +78,7 @@ export function LobbyPrep({
           slot="1P"
           isLocal={playerOne?.id === localPlayerId}
           ready={Boolean(playerOne?.ready)}
-          accessory={playerOne?.id === localPlayerId ? selectedAccessory : ACCESSORIES[playerOne?.accessoryIndex ?? (playerOne?.isBot ? 1 : 0)] ?? ACCESSORIES[0]}
+          accessory={playerOne?.id === localPlayerId ? selectedAccessory : getAccessory(playerOne?.accessoryIndex ?? (playerOne?.isBot ? 1 : 0))}
           {...(playerOne?.id === localPlayerId
             ? { onPreviousAccessory, onNextAccessory }
             : {})}
@@ -95,7 +89,7 @@ export function LobbyPrep({
           slot="2P"
           isLocal={playerTwo?.id === localPlayerId}
           ready={Boolean(playerTwo?.ready)}
-          accessory={playerTwo?.id === localPlayerId ? selectedAccessory : ACCESSORIES[playerTwo?.accessoryIndex ?? (playerTwo?.isBot ? 1 : 0)] ?? ACCESSORIES[0]}
+          accessory={playerTwo?.id === localPlayerId ? selectedAccessory : getAccessory(playerTwo?.accessoryIndex ?? (playerTwo?.isBot ? 1 : 0))}
           {...(playerTwo?.id === localPlayerId
             ? { onPreviousAccessory, onNextAccessory }
             : {})}
@@ -218,7 +212,7 @@ type LobbyPlayerCardProps = {
   slot: "1P" | "2P";
   isLocal?: boolean;
   ready: boolean;
-  accessory: (typeof ACCESSORIES)[number];
+  accessory: PlayerAccessory;
   onPreviousAccessory?: () => void;
   onNextAccessory?: () => void;
 };

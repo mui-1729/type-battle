@@ -22,6 +22,7 @@ export type TypingInputStrategy = {
   displayText: string;
   romajiPlan: RomajiTypingPlan | null;
   loop: boolean;
+  inputMode?: "kana" | "romaji";
 };
 
 export function advanceTypingProgress({
@@ -31,17 +32,31 @@ export function advanceTypingProgress({
   canonicalText,
   displayText,
   romajiPlan,
-  loop
+  loop,
+  inputMode = deviceKind === "mobile" ? "kana" : "romaji"
 }: TypingInputStrategy): ProgressUpdate {
-  if (deviceKind === "mobile") {
-    return advanceProgressWithMistakes(previous, canonicalText, typedText, loop);
+  const nextMode = containsKanaInput(typedText) ? "kana" : "romaji";
+  let modePrevious = previous;
+
+  if (romajiPlan && inputMode !== nextMode) {
+    const canonicalProgressIndex =
+      inputMode === "kana" ? previous.progressIndex : getCanonicalProgressIndex(romajiPlan, previous.progressIndex);
+    modePrevious = {
+      ...previous,
+      progressIndex:
+        nextMode === "kana"
+          ? canonicalProgressIndex
+          : getRomajiProgressIndexForCanonicalProgress(romajiPlan, canonicalProgressIndex),
+      pendingInput: ""
+    };
+  }
+
+  if (nextMode === "kana") {
+    return advanceProgressWithMistakes(modePrevious, canonicalText, typedText, loop);
   }
 
   if (romajiPlan && containsKanaInput(typedText)) {
-    const canonicalPrevious = {
-      ...previous,
-      progressIndex: getCanonicalProgressIndex(romajiPlan, previous.progressIndex)
-    };
+    const canonicalPrevious = modePrevious;
     const next = advanceProgressWithMistakes(canonicalPrevious, canonicalText, typedText, loop);
 
     return {
@@ -58,8 +73,8 @@ export function advanceTypingProgress({
 
   if (romajiPlan) {
     return loop
-      ? advanceLoopingRomajiProgressWithMistakes(previous, romajiPlan, typedText)
-      : advanceRomajiProgressWithMistakes(previous, romajiPlan, typedText);
+      ? advanceLoopingRomajiProgressWithMistakes(modePrevious, romajiPlan, typedText)
+      : advanceRomajiProgressWithMistakes(modePrevious, romajiPlan, typedText);
   }
 
   return advanceProgressWithMistakes(previous, displayText, typedText, loop);

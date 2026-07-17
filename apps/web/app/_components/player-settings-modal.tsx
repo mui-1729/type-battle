@@ -8,9 +8,10 @@ type PlayerSettingsModalProps = {
   setSettings: Dispatch<SetStateAction<PlayerSettings>>;
   setNickname: (nickname: string) => void;
   onClose: () => void;
+  onOpenTutorial?: () => void;
 };
 
-export function PlayerSettingsModal({ settings, setSettings, setNickname, onClose }: PlayerSettingsModalProps) {
+export function PlayerSettingsModal({ settings, setSettings, setNickname, onClose, onOpenTutorial }: PlayerSettingsModalProps) {
   return (
     <div className="modalBackdrop" onClick={onClose}>
       <div className="modalContent" onClick={(event) => event.stopPropagation()}>
@@ -78,6 +79,15 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                 />
                 アニメーションを減らす
               </label>
+              <label className="toggleLabel">
+                <input
+                  type="checkbox"
+                  checked={settings.reactionsEnabled}
+                  onChange={(event) => setSettings((current) => ({ ...current, reactionsEnabled: event.target.checked }))}
+                  suppressHydrationWarning
+                />
+                相手の定型リアクションを表示
+              </label>
             </div>
           </div>
 
@@ -127,6 +137,9 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
         </div>
 
         <div className="modalActions">
+          {onOpenTutorial ? (
+            <button className="secondaryButton" type="button" onClick={onOpenTutorial}>遊び方を再表示</button>
+          ) : null}
           <button className="primaryButton" type="button" onClick={onClose}>
             設定を反映
           </button>

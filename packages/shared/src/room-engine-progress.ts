@@ -27,7 +27,7 @@ export function applyProgress(player: InternalPlayer, room: InternalRoom, payloa
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
   const loopingMatch = room.matchRule === "timeAttack" || room.matchRule === "hpBattle";
-  const kanaInput = player.deviceKind === "mobile" || containsKana(payload.input);
+  const kanaInput = containsKana(payload.input);
   let attackDamageDelta = 0;
 
   if (kanaInput) {
@@ -41,9 +41,7 @@ export function applyProgress(player: InternalPlayer, room: InternalRoom, payloa
       attackDamageDelta += completedCharacters;
     }
 
-    if (player.deviceKind === "desktop") {
-      player.typingProgressIndex = getRomajiProgressIndexForCanonicalProgress(room.prompt, player.progressIndex, loopingMatch);
-    }
+    player.typingProgressIndex = getRomajiProgressIndexForCanonicalProgress(room.prompt, player.progressIndex, loopingMatch);
   } else {
     const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
     const guideLength = plan.guide.length;
@@ -219,9 +217,6 @@ function applyProgressState(player: InternalPlayer, progress: ProgressState): vo
   player.maxStreak = progress.maxStreak;
   player.pendingInput = progress.pendingInput;
 
-  if (player.deviceKind === "mobile") {
-    player.progressIndex = progress.progressIndex;
-  }
 }
 
 function applyGuardedProgress(player: InternalPlayer, before: ProgressState, after: ProgressState): void {

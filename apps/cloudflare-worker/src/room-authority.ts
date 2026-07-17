@@ -2234,6 +2234,11 @@ export class RoomAuthorityDurableObject {
       }
     }
 
+    if (room.matchRule === "race" && [...room.players.values()].some((player) => player.finishStatus === "finished")) {
+      finalizeUnfinishedRacePlayers(room);
+      return this.finalizeRoom(room);
+    }
+
     if (areHumansFinished(room)) {
       finalizeUnfinishedBots(room);
       return this.finalizeRoom(room);
@@ -2529,7 +2534,7 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
   const loopingMatch = room.matchRule === "timeAttack" || room.matchRule === "hpBattle";
-  const kanaInput = player.deviceKind === "mobile" || containsKana(payload.input);
+  const kanaInput = containsKana(payload.input);
   let attackDamageDelta = 0;
 
   if (kanaInput) {
@@ -2543,10 +2548,8 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
       attackDamageDelta += completedCharacters;
     }
 
-    if (player.deviceKind === "desktop") {
-      const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
-        player.typingProgressIndex = getRomajiProgressIndexForCanonicalProgress(plan, player.progressIndex, loopingMatch);
-    }
+    const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
+    player.typingProgressIndex = getRomajiProgressIndexForCanonicalProgress(plan, player.progressIndex, loopingMatch);
   } else {
     const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
     const guideLength = plan.guide.length;
@@ -2643,6 +2646,17 @@ function finalizeUnfinishedBots(room: InternalRoom): void {
       delete bot.finishTimeMs;
       bot.finishStatus = "unfinished";
     }
+  }
+}
+
+function finalizeUnfinishedRacePlayers(room: InternalRoom): void {
+  for (const player of room.players.values()) {
+    if (player.finishStatus === "finished" || player.progressIndex >= getTypingLength(room, player)) {
+      continue;
+    }
+    player.finishedAt = Date.now();
+    delete player.finishTimeMs;
+    player.finishStatus = "unfinished";
   }
 }
 
@@ -2900,9 +2914,6 @@ function applyProgressState(player: InternalPlayer, progress: ReturnType<typeof 
   player.maxStreak = progress.maxStreak;
   player.pendingInput = progress.pendingInput;
 
-  if (player.deviceKind === "mobile") {
-    player.progressIndex = progress.progressIndex;
-  }
 }
 
 function applyGuardedProgress(

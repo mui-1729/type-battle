@@ -160,9 +160,12 @@ export default function HomePage() {
   const [lastProgressSentAt, setLastProgressSentAt] = useState<number | null>(null);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
+  const [inputMode, setInputMode] = useState<"kana" | "romaji">("romaji");
+  const [inputModeInitialized, setInputModeInitialized] = useState(false);
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
   const localProgressRef = useRef<ProgressState>(createEmptyProgress());
   const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
+  const inputModeRef = useRef<"kana" | "romaji">("romaji");
   const dailyAttemptConsumedRef = useRef(false);
   const inputSequenceRef = useRef(0);
   const roomRef = useRef<RoomState | null>(null);
@@ -208,7 +211,9 @@ export default function HomePage() {
         connected,
         lastProgressSentAt,
         syncClock,
-        matchTimerMs
+        matchTimerMs,
+        inputMode,
+        inputModeInitialized
       }),
     [
       room,
@@ -225,7 +230,9 @@ export default function HomePage() {
       connected,
       lastProgressSentAt,
       syncClock,
-      matchTimerMs
+      matchTimerMs,
+      inputMode,
+      inputModeInitialized
     ]
   );
   const {
@@ -257,6 +264,13 @@ export default function HomePage() {
     displayRoom,
     typingInputKey
   } = homePageViewModel;
+
+  useEffect(() => {
+    const nextMode = activeInputDeviceKind === "mobile" ? "kana" : "romaji";
+    inputModeRef.current = nextMode;
+    setInputMode(nextMode);
+    setInputModeInitialized(true);
+  }, [activeInputDeviceKind, activePrompt?.id, practiceSession?.practiceId, room?.roomCode]);
 
   const setPromptCategory = useCallback(
     (category: "short" | "standard" | "long") => {
@@ -705,7 +719,7 @@ export default function HomePage() {
 
       const finishTimeMs = Date.now() - practiceSession.startedAt;
       const canonicalProgressIndex =
-        practiceSession.deviceKind === "mobile"
+        inputModeRef.current === "kana"
           ? finalProgress.progressIndex
           : getCanonicalProgressIndex(
               buildRomajiTypingPlan(practiceSession.prompt.typing.hiragana),
@@ -1015,8 +1029,11 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isTimeAttackPlaying
+          loop: isTimeAttackPlaying,
+          inputMode: inputModeRef.current
         });
+        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedText) ? "kana" : "romaji";
+        setInputMode(inputModeRef.current);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
 
         setLocalProgress(next.progress);
@@ -1025,7 +1042,11 @@ export default function HomePage() {
         void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
         emitProgress(
           typedText,
-          !isTimeAttackPlaying && next.progress.progressIndex >= activeTypingText.length
+          !isTimeAttackPlaying &&
+            (inputModeRef.current === "kana"
+              ? next.progress.progressIndex
+              : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
+              Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
         );
         return;
       }
@@ -1039,8 +1060,11 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isTimeAttackPlaying
+          loop: isTimeAttackPlaying,
+          inputMode: inputModeRef.current
         });
+        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedText) ? "kana" : "romaji";
+        setInputMode(inputModeRef.current);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
 
         setPracticeProgress(next.progress);
@@ -1051,7 +1075,12 @@ export default function HomePage() {
           consumeDailyAttempt();
         }
 
-        if (next.progress.progressIndex >= activeTypingText.length) {
+        if (
+          (inputModeRef.current === "kana"
+            ? next.progress.progressIndex
+            : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
+          Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
+        ) {
           finishPractice(next.progress);
         }
 
@@ -1114,8 +1143,11 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isTimeAttackPlaying
+          loop: isTimeAttackPlaying,
+          inputMode: inputModeRef.current
         });
+        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedKey) ? "kana" : "romaji";
+        setInputMode(inputModeRef.current);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const soundOptions = settingsRef.current;
 
@@ -1125,7 +1157,11 @@ export default function HomePage() {
         void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
         emitProgress(
           typedKey,
-          !isTimeAttackPlaying && next.progress.progressIndex >= activeTypingText.length
+          !isTimeAttackPlaying &&
+            (inputModeRef.current === "kana"
+              ? next.progress.progressIndex
+              : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
+              Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
         );
         return;
       }
@@ -1139,8 +1175,11 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isTimeAttackPlaying
+          loop: isTimeAttackPlaying,
+          inputMode: inputModeRef.current
         });
+        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedKey) ? "kana" : "romaji";
+        setInputMode(inputModeRef.current);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const soundOptions = settingsRef.current;
 
@@ -1152,7 +1191,12 @@ export default function HomePage() {
           consumeDailyAttempt();
         }
 
-        if (next.progress.progressIndex >= activeTypingText.length) {
+        if (
+          (inputModeRef.current === "kana"
+            ? next.progress.progressIndex
+            : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
+          Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
+        ) {
           finishPractice(next.progress);
         }
 

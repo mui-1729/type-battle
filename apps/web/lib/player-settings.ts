@@ -3,9 +3,11 @@ export type PlayerSettings = {
   theme: "system" | "light" | "dark";
   soundEnabled: boolean;
   countdownSoundEnabled: boolean;
+  reactionsEnabled: boolean;
   inputGuideEnabled: boolean;
   reducedMotion: boolean;
   fontSize: "small" | "normal" | "large";
+  tutorialSeen: boolean;
 };
 
 export const PLAYER_SETTINGS_STORAGE_KEY = "type-battle:settings";
@@ -15,9 +17,11 @@ export const DEFAULT_PLAYER_SETTINGS: PlayerSettings = {
   theme: "system",
   soundEnabled: true,
   countdownSoundEnabled: true,
+  reactionsEnabled: true,
   inputGuideEnabled: true,
   reducedMotion: false,
-  fontSize: "normal"
+  fontSize: "normal",
+  tutorialSeen: false
 };
 
 export function loadPlayerSettings(storage: Pick<Storage, "getItem">): PlayerSettings {
@@ -44,6 +48,10 @@ export function loadPlayerSettings(storage: Pick<Storage, "getItem">): PlayerSet
         typeof parsedSettings.countdownSoundEnabled === "boolean"
           ? parsedSettings.countdownSoundEnabled
           : DEFAULT_PLAYER_SETTINGS.countdownSoundEnabled,
+      reactionsEnabled:
+        typeof parsedSettings.reactionsEnabled === "boolean"
+          ? parsedSettings.reactionsEnabled
+          : DEFAULT_PLAYER_SETTINGS.reactionsEnabled,
       inputGuideEnabled:
         typeof parsedSettings.inputGuideEnabled === "boolean"
           ? parsedSettings.inputGuideEnabled
@@ -52,7 +60,11 @@ export function loadPlayerSettings(storage: Pick<Storage, "getItem">): PlayerSet
         typeof parsedSettings.reducedMotion === "boolean"
           ? parsedSettings.reducedMotion
           : DEFAULT_PLAYER_SETTINGS.reducedMotion,
-      fontSize: isFontSize(parsedSettings.fontSize) ? parsedSettings.fontSize : DEFAULT_PLAYER_SETTINGS.fontSize
+      fontSize: isFontSize(parsedSettings.fontSize) ? parsedSettings.fontSize : DEFAULT_PLAYER_SETTINGS.fontSize,
+      tutorialSeen:
+        typeof parsedSettings.tutorialSeen === "boolean"
+          ? parsedSettings.tutorialSeen
+          : DEFAULT_PLAYER_SETTINGS.tutorialSeen
     };
   } catch {
     return { ...DEFAULT_PLAYER_SETTINGS };

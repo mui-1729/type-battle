@@ -669,6 +669,17 @@ function finalizeUnfinishedBots(room: InternalRoom): void {
   }
 }
 
+function finalizeUnfinishedRacePlayers(room: InternalRoom): void {
+  for (const player of room.players.values()) {
+    if (player.finishStatus === "finished" || player.progressIndex >= getTypingLength(room, player)) {
+      continue;
+    }
+    player.finishedAt = Date.now();
+    delete player.finishTimeMs;
+    player.finishStatus = "unfinished";
+  }
+}
+
 export function advanceBot(roomCode: string): BotTickOutcome | null {
   const room = rooms.get(roomCode.toUpperCase());
 
@@ -1248,6 +1259,11 @@ function maybeFinalizeRoom(room: InternalRoom): MatchResult | null {
     if (hasElimination) {
       return finalizeRoom(room);
     }
+  }
+
+  if (room.matchRule === "race" && [...room.players.values()].some((player) => player.finishStatus === "finished")) {
+    finalizeUnfinishedRacePlayers(room);
+    return finalizeRoom(room);
   }
 
   if (areHumansFinished(room)) {
