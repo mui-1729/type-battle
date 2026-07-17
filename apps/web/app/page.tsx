@@ -126,6 +126,7 @@ export default function HomePage() {
   const nicknameInputRef = useRef<HTMLInputElement | null>(null);
   const countdownSecondRef = useRef<number | null>(null);
   const typingInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const exitTriggerRef = useRef<HTMLElement | null>(null);
   const [connected, setConnected] = useState(false);
   const [guestSession, setGuestSession] = useState<GuestSession | null>(null);
   const [playerId, setPlayerId] = useState("");
@@ -1073,7 +1074,7 @@ export default function HomePage() {
         return;
       }
 
-      if (!acceptingTextInput) {
+      if (!acceptingTextInput || exitRequest !== null) {
         return;
       }
 
@@ -1166,6 +1167,7 @@ export default function HomePage() {
     recordMistakeSamples,
     activePrompt,
     activeRomajiTypingPlan,
+    exitRequest,
     room
   ]);
 
@@ -1384,6 +1386,19 @@ export default function HomePage() {
     setExitRequest(null);
   }, [clearPracticeState, resetTyping]);
 
+  const openExitRequest = useCallback((request: ExitRequest) => {
+    const activeElement = document.activeElement;
+    exitTriggerRef.current = activeElement instanceof HTMLElement ? activeElement : null;
+    setExitRequest(request);
+  }, []);
+
+  const cancelExitRequest = useCallback(() => {
+    const trigger = exitTriggerRef.current;
+    exitTriggerRef.current = null;
+    setExitRequest(null);
+    window.requestAnimationFrame(() => trigger?.focus());
+  }, []);
+
   const requestRoomExit = useCallback(() => {
     if (!room) {
       return;
@@ -1394,8 +1409,8 @@ export default function HomePage() {
       return;
     }
 
-    setExitRequest("room");
-  }, [leaveRoom, room]);
+    openExitRequest("room");
+  }, [leaveRoom, openExitRequest, room]);
 
   const requestPracticeExit = useCallback(() => {
     if (!practiceSession && !practiceResult) {
@@ -1407,8 +1422,8 @@ export default function HomePage() {
       return;
     }
 
-    setExitRequest("practice");
-  }, [practiceResult, practiceSession, returnToPracticeMenu]);
+    openExitRequest("practice");
+  }, [openExitRequest, practiceResult, practiceSession, returnToPracticeMenu]);
 
   const confirmExit = useCallback(() => {
     if (exitRequest === "room") {
@@ -1905,7 +1920,7 @@ export default function HomePage() {
           title="ルームを退出しますか？"
           description={room?.status === "playing" || room?.status === "countdown" ? "試合を退出すると、現在の試合は棄権扱いになります。" : "現在のルームから退出し、ホームへ戻ります。"}
           confirmLabel="退出する"
-          onCancel={() => setExitRequest(null)}
+          onCancel={cancelExitRequest}
           onConfirm={confirmExit}
         />
       ) : exitRequest === "practice" ? (
@@ -1913,7 +1928,7 @@ export default function HomePage() {
           title="練習をやめますか？"
           description="現在の入力途中の記録は保存されず、ひとり用メニューへ戻ります。"
           confirmLabel="練習をやめる"
-          onCancel={() => setExitRequest(null)}
+          onCancel={cancelExitRequest}
           onConfirm={confirmExit}
         />
       ) : null}
@@ -1937,7 +1952,7 @@ export default function HomePage() {
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && target.matches("input, textarea, select, [contenteditable='true']");
+  return target instanceof HTMLElement && target.matches("input, textarea, select, button, a, [role='button'], [contenteditable='true']");
 }
 
 function getMatchupLabel(players: RoomState["players"]): string {

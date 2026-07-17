@@ -102,6 +102,64 @@ test("keeps room exit available on mobile and confirms before leaving", async ({
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem("type-battle:room-code"))).toBeNull();
 });
 
+test("does not accept typing while the room exit confirmation is open", async ({ page }) => {
+  await page.goto("/");
+  await selectBattleMode(page);
+  await setNickname(page, "KeyboardHost");
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+  await page.getByRole("button", { name: "READYにする" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const progress = page.locator(".raceLaneOne [role=progressbar]");
+  const progressBeforeModal = await progress.getAttribute("aria-valuenow");
+  const exitButton = page.getByRole("button", { name: "対戦を退出" });
+  await exitButton.click();
+  await expect(page.getByRole("dialog", { name: "ルームを退出しますか？" })).toBeVisible();
+  await page.keyboard.press("a");
+  await page.getByRole("button", { name: "キャンセル" }).focus();
+  await page.keyboard.press(" ");
+  await expect(page.getByRole("dialog", { name: "ルームを退出しますか？" })).toBeHidden();
+  await expect(progress).toHaveAttribute("aria-valuenow", progressBeforeModal ?? "0");
+  await expect(exitButton).toBeFocused();
+
+  await exitButton.click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "ルームを退出しますか？" })).toBeHidden();
+  await expect(exitButton).toBeFocused();
+});
+
+test("immediately shows the opponent a result after an explicit room exit", async ({ browser }) => {
+  const hostContext = await browser.newContext();
+  const guestContext = await browser.newContext();
+  const host = await hostContext.newPage();
+  const guest = await guestContext.newPage();
+
+  await host.goto("/");
+  await selectBattleMode(host);
+  await setNickname(host, "ExitHost");
+  await host.getByRole("button", { name: "ルームを作成" }).click();
+  const roomCode = await host.locator(".roomMeta strong").innerText();
+
+  await guest.goto("/");
+  await selectBattleMode(guest);
+  await setNickname(guest, "ExitGuest");
+  await guest.getByLabel("ルームコード").fill(roomCode);
+  await guest.getByTitle("ルームに参加").click();
+  await expect(host.getByTestId("lobby-prep").getByText("ExitGuest")).toBeVisible();
+  await host.getByRole("button", { name: "READYにする" }).click();
+  await guest.getByRole("button", { name: "READYにする" }).click();
+  await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expect(guest.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  await host.getByRole("button", { name: "対戦を退出" }).click();
+  await host.getByRole("button", { name: "退出する" }).click();
+  await expect(guest.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
+  await expect(guest.getByTestId("battle-stage").locator(".raceLaneTwo .raceRunner")).toHaveAttribute("data-status", "forfeited");
+
+  await hostContext.close();
+  await guestContext.close();
+});
+
 test("rejoins the room after reload", async ({ browser }) => {
   const hostContext = await browser.newContext();
   const host = await hostContext.newPage();

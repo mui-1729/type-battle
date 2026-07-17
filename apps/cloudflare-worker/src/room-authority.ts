@@ -2104,7 +2104,30 @@ export class RoomAuthorityDurableObject {
       return null;
     }
 
-    if (room.status === "playing" || room.status === "countdown") {
+    if (room.status === "playing") {
+      player.connected = false;
+      player.ready = false;
+      delete player.disconnectedAt;
+      player.finishedAt = Date.now();
+      delete player.finishTimeMs;
+      player.finishStatus = "forfeited";
+      player.forfeited = true;
+      room.lastActivityAt = Date.now();
+
+      if (record.playerId === room.hostPlayerId) {
+        const nextHost = [...room.players.values()].find((candidate) => candidate.id !== player.id && candidate.connected && !candidate.isBot)
+          ?? [...room.players.values()].find((candidate) => candidate.id !== player.id && !candidate.isBot);
+        if (nextHost) {
+          room.hostPlayerId = nextHost.id;
+        }
+      }
+
+      finalizeUnfinishedBots(room);
+      this.finalizeRoom(room);
+      return toPublicRoom(room);
+    }
+
+    if (room.status === "countdown") {
       return this.leaveBySocket(socketId);
     }
 

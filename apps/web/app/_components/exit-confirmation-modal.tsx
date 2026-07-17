@@ -1,4 +1,5 @@
 import { LogOut, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { Button } from "./ui";
 
 type ExitConfirmationModalProps = {
@@ -16,6 +17,52 @@ export function ExitConfirmationModal({
   onCancel,
   onConfirm
 }: ExitConfirmationModalProps) {
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    cancelButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+        return;
+      }
+
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const dialog = event.currentTarget instanceof Window
+        ? event.currentTarget.document.querySelector<HTMLElement>(".exitConfirmationModal")
+        : null;
+      const focusableElements = dialog
+        ? Array.from(dialog.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"))
+        : [];
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusableElements[0];
+      const last = focusableElements.at(-1);
+      if (!first || !last) {
+        return;
+      }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+
   return (
     <div className="modalBackdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) {
@@ -34,7 +81,7 @@ export function ExitConfirmationModal({
         </div>
         <p className="modalCopy">{description}</p>
         <div className="modalActions">
-          <Button variant="secondary" type="button" onClick={onCancel}>キャンセル</Button>
+          <Button ref={cancelButtonRef} variant="secondary" type="button" onClick={onCancel}>キャンセル</Button>
           <Button variant="primary" type="button" onClick={onConfirm}><LogOut size={17} /> {confirmLabel}</Button>
         </div>
       </section>
