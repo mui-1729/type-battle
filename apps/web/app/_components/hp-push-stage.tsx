@@ -43,7 +43,7 @@ function HpBattlePlayerCard({ player, view, advantage, eliminated }: HpBattlePla
       <div className="hpBattleMeta"><span>ミス {player.mistakes}</span><span className="hpBattleGuards" aria-label={`ミスガード ${player.mistakeGuards}個`}>ガード {renderGuards(player.mistakeGuards)}</span></div>
       <div className="hpBattleFigure" data-pose={getHpPose(player, view, eliminated)}>
         <span className="hpBattleAttackBurst" data-attack={player.currentStreak > 0 ? "active" : "idle"} key={`${player.id}-${player.progressRatio}-${player.mistakes}`} aria-hidden="true"><span /><span /><span /></span>
-        <StickFigure side={player.side} pose={getHpPose(player, view, eliminated)} status={player.status} />
+        <StickFigure side={player.side} pose={getHpPose(player, view, eliminated)} status={player.status} accessoryIndex={player.accessoryIndex} />
       </div>
     </article>
   );

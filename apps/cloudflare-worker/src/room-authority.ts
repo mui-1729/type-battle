@@ -2241,6 +2241,13 @@ export class RoomAuthorityDurableObject {
       return null;
     }
 
+    // Race results are decided by the first valid finisher. Waiting for every
+    // human here leaves the winner blocked by a player who stopped typing.
+    if (room.matchRule === "race" && [...room.players.values()].some((player) => player.finishStatus === "finished")) {
+      finalizeUnfinishedRacePlayers(room);
+      return this.finalizeRoom(room);
+    }
+
     if (room.matchRule === "hpBattle") {
       const hasElimination = [...room.players.values()].some((player) => (player.hp ?? 1) <= 0);
 
@@ -2417,7 +2424,7 @@ function parseAccessoryPayload(payload: unknown): AccessoryPayload | null {
     ? payload.accessoryIndex
     : null;
 
-  if (!roomCode || accessoryIndex === null || accessoryIndex < 0 || accessoryIndex > 3) {
+  if (!roomCode || accessoryIndex === null || accessoryIndex < 0 || accessoryIndex > 8) {
     return null;
   }
 
@@ -2787,7 +2794,7 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
   const loopingMatch = room.matchRule === "timeAttack" || room.matchRule === "hpBattle";
-  const kanaInput = player.deviceKind === "mobile" || containsKana(payload.input);
+  const kanaInput = containsKana(payload.input);
   let attackDamageDelta = 0;
 
   if (kanaInput) {
@@ -2801,10 +2808,8 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
       attackDamageDelta += completedCharacters;
     }
 
-    if (player.deviceKind === "desktop") {
-      const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
-        player.typingProgressIndex = getRomajiProgressIndexForCanonicalProgress(plan, player.progressIndex, loopingMatch);
-    }
+    const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
+    player.typingProgressIndex = getRomajiProgressIndexForCanonicalProgress(plan, player.progressIndex, loopingMatch);
   } else {
     const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
     const guideLength = plan.guide.length;
@@ -2901,6 +2906,17 @@ function finalizeUnfinishedBots(room: InternalRoom): void {
       delete bot.finishTimeMs;
       bot.finishStatus = "unfinished";
     }
+  }
+}
+
+function finalizeUnfinishedRacePlayers(room: InternalRoom): void {
+  for (const player of room.players.values()) {
+    if (player.finishStatus === "finished" || player.progressIndex >= getTypingLength(room, player)) {
+      continue;
+    }
+    player.finishedAt = Date.now();
+    delete player.finishTimeMs;
+    player.finishStatus = "unfinished";
   }
 }
 
@@ -3158,9 +3174,6 @@ function applyProgressState(player: InternalPlayer, progress: ReturnType<typeof 
   player.maxStreak = progress.maxStreak;
   player.pendingInput = progress.pendingInput;
 
-  if (player.deviceKind === "mobile") {
-    player.progressIndex = progress.progressIndex;
-  }
 }
 
 function applyGuardedProgress(
@@ -3217,6 +3230,8 @@ function createRoomStateFromSnapshot(
   internal: PersistedRoomSnapshot["internal"] = {}
 ): InternalRoom {
   const normalizedRoomCode = normalizeRoomCode(room.roomCode);
+  const restoredAt = Date.now();
+  const shouldRestoreDisconnectGrace = room.status === "countdown" || room.status === "playing";
   const typingState = internal?.typingState ?? {};
   const internalRoom: InternalRoom = {
     roomCode: normalizedRoomCode,
@@ -3239,7 +3254,11 @@ function createRoomStateFromSnapshot(
           typingProgressIndex: typingState[player.id]?.typingProgressIndex ?? 0,
           pendingInput: typingState[player.id]?.pendingInput ?? "",
           lastInputSequence: typingState[player.id]?.lastInputSequence ?? 0,
-          ...(disconnectedAt[player.id] !== undefined ? { disconnectedAt: disconnectedAt[player.id] } : {})
+          ...(!player.isBot && shouldRestoreDisconnectGrace
+            ? { disconnectedAt: disconnectedAt[player.id] ?? restoredAt }
+            : disconnectedAt[player.id] !== undefined
+              ? { disconnectedAt: disconnectedAt[player.id] }
+              : {})
         } as InternalPlayer
       ])
     ),

@@ -1135,6 +1135,14 @@ textarea::placeholder {
   stroke-dasharray: 5 4;
 }
 
+.stickFigureAccessory {
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .stickFigure[data-status="forfeited"] {
   opacity: 0.34;
 }
@@ -2279,6 +2287,49 @@ textarea::placeholder {
   box-shadow: var(--shadow-lg);
 }
 
+.tutorialCard {
+  position: relative;
+  width: min(460px, calc(100vw - 32px));
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.tutorialCard h2 {
+  margin: 10px 0;
+}
+
+.tutorialCard p:not(.eyebrow) {
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+.tutorialClose {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.tutorialDots {
+  display: flex;
+  gap: 8px;
+  margin: 24px 0;
+}
+
+.tutorialDots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.tutorialDots span.active {
+  width: 24px;
+  background: var(--accent);
+}
+
 .modalHeader {
   display: flex;
   align-items: start;
@@ -3197,7 +3248,7 @@ textarea::placeholder {
   left: -13px;
   width: 18px;
   border-top: 2px solid currentColor;
-  opacity: 0.32;
+  opacity: 0;
   transform: rotate(-8deg);
 }
 .raceSpeedLines::before,
@@ -3213,6 +3264,16 @@ textarea::placeholder {
 .raceRunner[data-streak="hot"] .raceSpeedLines {
   opacity: 0.9;
   animation: raceSpeedLinePulse 260ms ease-in-out infinite alternate;
+}
+.raceRunner[data-pose="run"] .raceSpeedLines {
+  opacity: 0.32;
+}
+.raceRunner[data-pose="run"][data-streak="hot"] .raceSpeedLines {
+  opacity: 0.9;
+}
+.raceRunner:not([data-pose="run"]) .raceSpeedLines {
+  opacity: 0;
+  animation: none;
 }
 .raceLane[data-outcome="winner"] { border-color: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
 .raceLane[data-outcome="loser"] { opacity: 0.7; }

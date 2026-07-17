@@ -280,7 +280,7 @@ export function advanceRomajiProgress(
       totalTypedCharacters: previous.totalTypedCharacters + 1,
       mistakes: previous.mistakes + 1,
       currentStreak: 0,
-      pendingInput: ""
+      pendingInput: previous.pendingInput
     };
   }
 

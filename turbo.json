@@ -8,7 +8,12 @@
     "dev": {
       "dependsOn": ["^build"],
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "env": [
+        "PORT",
+        "CLOUDFLARE_WORKER_PORT",
+        "NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL"
+      ]
     },
     "lint": {
       "outputs": []

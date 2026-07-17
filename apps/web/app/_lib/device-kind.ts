@@ -13,10 +13,9 @@ export function detectDeviceKind(): DeviceKind {
     return "mobile";
   }
 
-  if (window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768) {
+  if (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)) {
     return "mobile";
   }
 
   return "desktop";
 }
-

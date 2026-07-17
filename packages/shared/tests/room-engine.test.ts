@@ -39,6 +39,7 @@ describe("room engine config", () => {
       socketId: "socket_alice_mistake_guard",
       deviceKind: "mobile"
     });
+    setPromptCategory("socket_alice_mistake_guard", created.room.roomCode, "long");
     setReady("socket_alice_mistake_guard", created.room.roomCode, true);
     const started = startMatch("socket_alice_mistake_guard", created.room.roomCode);
     expect("error" in started).toBe(false);
@@ -161,6 +162,56 @@ describe("room engine config", () => {
     });
 
     expect(getRoom(created.room.roomCode)?.players[1]?.hp).toBeLessThan(hpAfterFirstCycle);
+  });
+
+  it("applies the same attack and self-damage rules to COM input", () => {
+    const created = createRoom({ nickname: "Alice", guestId: "guest_alice_bot_hp", socketId: "socket_alice_bot_hp" });
+    setMatchRule("socket_alice_bot_hp", created.room.roomCode, "hpBattle");
+    setReady("socket_alice_bot_hp", created.room.roomCode, true);
+    const started = startMatch("socket_alice_bot_hp", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    if ("error" in started) return;
+    markPlaying(created.room.roomCode);
+
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.99);
+    advanceBot(created.room.roomCode);
+    const afterAttack = getRoom(created.room.roomCode);
+    const humanAfterAttack = afterAttack?.players.find((player) => !player.isBot);
+    const botAfterAttack = afterAttack?.players.find((player) => player.isBot);
+    expect(humanAfterAttack?.hp).toBeLessThan(100);
+
+    random.mockReturnValue(0);
+    advanceBot(created.room.roomCode);
+    const afterMistake = getRoom(created.room.roomCode);
+    expect(afterMistake?.players.find((player) => player.id === botAfterAttack?.id)?.hp).toBeLessThan(botAfterAttack?.hp ?? 100);
+    random.mockRestore();
+  });
+
+  it("finishes a race as soon as the first human completes", () => {
+    const created = createRoom({ nickname: "Alice", guestId: "guest_alice_race_first", socketId: "socket_alice_race_first" });
+    const joined = joinRoom({ roomCode: created.room.roomCode, nickname: "Bob", guestId: "guest_bob_race_first", socketId: "socket_bob_race_first" });
+    expect("error" in joined).toBe(false);
+    setReady("socket_alice_race_first", created.room.roomCode, true);
+    setReady("socket_bob_race_first", created.room.roomCode, true);
+    const started = startMatch("socket_alice_race_first", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    if ("error" in started) return;
+
+    markPlaying(created.room.roomCode);
+    const prompt = started.room.prompt?.typing.romaji ?? "a";
+    let outcome: ReturnType<typeof finishTyping> = null;
+    for (let offset = 0, sequence = 1; offset < prompt.length; offset += 16, sequence += 1) {
+      outcome = finishTyping("socket_alice_race_first", {
+        roomCode: created.room.roomCode,
+        input: prompt.slice(offset, offset + 16),
+        sequence
+      });
+      if (outcome && !("status" in outcome)) break;
+    }
+
+    expect(outcome).toMatchObject({ roomCode: created.room.roomCode });
+    expect(getRoom(created.room.roomCode)?.status).toBe("finished");
+    expect(getRoom(created.room.roomCode)?.players.find((player) => player.id === "guest_bob_race_first")?.finishStatus).toBe("unfinished");
   });
 
   it("does not start until every connected human is ready", () => {

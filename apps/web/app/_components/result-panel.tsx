@@ -23,6 +23,7 @@ type ResultPanelProps = {
   rematchReady?: boolean;
   onPracticeNext?: (() => void) | undefined;
   onPracticeMenu?: (() => void) | undefined;
+  rewardNotice?: string;
 };
 
 export function ResultPanel({
@@ -42,7 +43,8 @@ export function ResultPanel({
   onReaction,
   rematchReady = false,
   onPracticeNext,
-  onPracticeMenu
+  onPracticeMenu,
+  rewardNotice = ""
 }: ResultPanelProps) {
   const rule = result.matchRule ?? matchRule;
   const doubleKo = isRoomResult && result.players.length > 1 && result.players.every((player) => (player.hp ?? 1) <= 0);
@@ -114,6 +116,7 @@ export function ResultPanel({
       ) : null}
 
       <div className="resultActions">
+        {rewardNotice ? <p className="infoText" role="status">{rewardNotice}</p> : null}
         {!isRoomResult && onPracticeNext && onPracticeMenu ? (
           <div className="practiceResultActions">
             <Button variant="secondary" type="button" onClick={onPracticeNext}>次の文章</Button>

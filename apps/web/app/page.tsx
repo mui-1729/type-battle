@@ -35,6 +35,7 @@ import { HomeModeMenu } from "./_components/home-mode-menu";
 import { LobbyPrep } from "./_components/lobby-prep";
 import { BattleStage } from "./_components/battle-stage";
 import { PlayerSettingsModal } from "./_components/player-settings-modal";
+import { TutorialOverlay } from "./_components/tutorial-overlay";
 import { MatchSettingsModal } from "./_components/match-settings-modal";
 import { ProgressBlock } from "./_components/progress-block";
 import { ResultPanel } from "./_components/result-panel";
@@ -83,6 +84,13 @@ import {
   persistPlayerSettings,
   type PlayerSettings
 } from "../lib/player-settings";
+import { getUnlockedAccessoryIndices } from "../lib/player-accessories";
+import {
+  claimPerfectReward,
+  loadPlayerRewards,
+  persistPlayerRewards,
+  type PlayerRewards
+} from "../lib/player-rewards";
 import {
   loadGuestSession,
   persistGuestSession,
@@ -144,7 +152,16 @@ export default function HomePage() {
   const [playerId, setPlayerId] = useState("");
   const [settings, setSettings] = useState<PlayerSettings>(DEFAULT_PLAYER_SETTINGS);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
+  const [playerRewards, setPlayerRewards] = useState<PlayerRewards>({
+    version: 1,
+    points: 0,
+    unlockedAccessoryIds: ["none", "cap", "headband"],
+    claimedDailyKeys: []
+  });
+  const [rewardNotice, setRewardNotice] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
   const [matchSettingsOpen, setMatchSettingsOpen] = useState(false);
   const [homeMode, setHomeMode] = useState<HomeMode | null>(null);
   const [accessoryIndex, setAccessoryIndex] = useState(0);
@@ -171,9 +188,11 @@ export default function HomePage() {
   const [lastProgressSentAt, setLastProgressSentAt] = useState<number | null>(null);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
+  const [inputMode, setInputMode] = useState<"kana" | "romaji">("romaji");
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
   const localProgressRef = useRef<ProgressState>(createEmptyProgress());
   const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
+  const inputModeRef = useRef<"kana" | "romaji">("romaji");
   const dailyAttemptConsumedRef = useRef(false);
   const inputSequenceRef = useRef(0);
   const roomRef = useRef<RoomState | null>(null);
@@ -183,6 +202,7 @@ export default function HomePage() {
   const storedRoomJoinInFlightRef = useRef(false);
   const storedRoomJoinAttemptsRef = useRef(0);
   const storedRoomRetryTimerRef = useRef<number | null>(null);
+  const rewardedResultKeyRef = useRef("");
   const autoStartRoomRef = useRef<string | null>(null);
   const attemptStoredRoomJoinRef = useRef<(socket: ClientSocket) => void>(() => undefined);
   const realtimeUrl = CLOUDFLARE_REALTIME_URL || localRealtimeUrl;
@@ -213,15 +233,18 @@ export default function HomePage() {
     dailyChallengeInfo.challengeKey
   );
   const activePracticeMode = practiceSession?.mode ?? "practice";
+  const unlockedAccessoryIndices = useMemo(
+    () => getUnlockedAccessoryIndices(playerRewards.points, playerRewards.unlockedAccessoryIds),
+    [playerRewards.points, playerRewards.unlockedAccessoryIds]
+  );
   const mistakeTrendSummary = useMemo(() => summarizeMistakeTrendRecord(mistakeTrendRecord), [mistakeTrendRecord]);
   const mistakeTrendTotal = useMemo(
     () => (mistakeTrendRecord?.items ?? []).reduce((total, item) => total + item.count, 0),
     [mistakeTrendRecord]
   );
-  const activeRomajiTypingPlan =
-    activePrompt && activeInputDeviceKind !== "mobile" ? buildRomajiTypingPlan(activePrompt.typing.hiragana) : null;
+  const activeRomajiTypingPlan = activePrompt ? buildRomajiTypingPlan(activePrompt.typing.hiragana) : null;
   const activeTypingText = activePrompt
-    ? activeInputDeviceKind === "mobile"
+    ? inputMode === "kana"
       ? activePrompt.typing.hiragana
       : activeRomajiTypingPlan?.guide ?? activePrompt.typing.romaji
     : "";
@@ -234,7 +257,7 @@ export default function HomePage() {
       ? activeProgress.progressIndex % activeTypingText.length
       : activeProgress.progressIndex;
   const activeCanonicalProgressIndex =
-    activeInputDeviceKind === "desktop" && activeRomajiTypingPlan
+    inputMode === "romaji" && activeRomajiTypingPlan
       ? getCanonicalProgressIndex(activeRomajiTypingPlan, activeProgress.progressIndex)
       : activeProgress.progressIndex;
   const activeProgressPercent = calculateProgress(activeGuideProgressIndex, activeTypingText.length);
@@ -263,6 +286,12 @@ export default function HomePage() {
         now: syncClock
       })
     : "synced";
+
+  useEffect(() => {
+    const nextMode = activeInputDeviceKind === "mobile" ? "kana" : "romaji";
+    inputModeRef.current = nextMode;
+    setInputMode(nextMode);
+  }, [activeInputDeviceKind, activePrompt?.id, practiceSession?.practiceId, room?.roomCode]);
   const displayRoom = useMemo(() => {
     if (!room || !currentPlayer) {
       return room;
@@ -640,6 +669,9 @@ export default function HomePage() {
         setError("");
         setPracticeSession({
           ...response.data,
+          // The server timestamp includes the request/response path. Start the
+          // solo clock when the prompt becomes available on this client.
+          startedAt: Date.now(),
           category: practiceCategory,
           deviceKind,
           mode: "practice"
@@ -699,6 +731,8 @@ export default function HomePage() {
       setError("");
       setPracticeSession({
         ...response.data,
+        // Exclude the WebSocket round trip from the daily challenge result.
+        startedAt: Date.now(),
         category: "standard",
         deviceKind,
         mode: "daily",
@@ -723,13 +757,11 @@ export default function HomePage() {
       }
 
       const finishTimeMs = Date.now() - practiceSession.startedAt;
-      const canonicalProgressIndex =
-        practiceSession.deviceKind === "mobile"
-          ? finalProgress.progressIndex
-          : getCanonicalProgressIndex(
-              buildRomajiTypingPlan(practiceSession.prompt.typing.hiragana),
-              finalProgress.progressIndex
-            );
+      const canonicalProgressIndex = getCanonicalTypingProgressIndex(
+        finalProgress.progressIndex,
+        inputModeRef.current,
+        buildRomajiTypingPlan(practiceSession.prompt.typing.hiragana)
+      );
       const player: PlayerResult = {
         id: practiceSession.practiceId,
         nickname: normalizeNickname(nicknameRef.current),
@@ -792,8 +824,11 @@ export default function HomePage() {
     guestSessionRef.current = session;
     setGuestSession(session);
     const loadedSettings = loadPlayerSettings(window.localStorage);
+    const loadedRewards = loadPlayerRewards(window.localStorage);
     nicknameRef.current = loadedSettings.nickname;
     setSettings(loadedSettings);
+    setPlayerRewards(loadedRewards);
+    setTutorialOpen(!loadedSettings.tutorialSeen);
     setSettingsHydrated(true);
 
     if (!realtimeConfigured) {
@@ -832,6 +867,46 @@ export default function HomePage() {
     applyPlayerSettingsToDocument(document, settings);
     settingsRef.current = settings;
   }, [settings, settingsHydrated]);
+
+  useEffect(() => {
+    if (!settingsHydrated) {
+      return;
+    }
+    persistPlayerRewards(window.localStorage, playerRewards);
+  }, [playerRewards, settingsHydrated]);
+
+  useEffect(() => {
+    if (!settingsHydrated) {
+      return;
+    }
+
+    const activeRewardResult = result ?? practiceResult;
+    const localResult = activeRewardResult?.players.find((player) => player.id === playerId) ?? activeRewardResult?.players[0];
+    if (!activeRewardResult || !localResult) {
+      return;
+    }
+
+    const isDaily = !result && practiceResult && activePracticeMode === "daily";
+    const rewardMatchRule = result?.matchRule ?? room?.matchRule;
+    const rewardKey = `${isDaily ? "daily" : "match"}:${activeRewardResult.roomCode}:${activeRewardResult.prompt.id}`;
+    if (rewardedResultKeyRef.current === rewardKey) {
+      return;
+    }
+    rewardedResultKeyRef.current = rewardKey;
+
+    const outcome = claimPerfectReward(playerRewards, {
+      dateKey: isDaily ? dailyChallengeInfo.challengeKey : new Date().toISOString().slice(0, 10),
+      source: isDaily ? "daily" : "match",
+      ...(result && rewardMatchRule ? { matchRule: rewardMatchRule } : {}),
+      officialPreset: isDaily || Boolean(room && room.promptCategory === "standard" && room.botDifficulty === "normal"),
+      perfect: localResult.accuracy === 100 && localResult.mistakes === 0,
+      forfeited: localResult.forfeited === true || localResult.finishStatus === "forfeited"
+    });
+    if (outcome.awarded) {
+      setPlayerRewards(outcome.rewards);
+      setRewardNotice("PERFECT報酬としてポイントを1ポイント獲得しました。");
+    }
+  }, [activePracticeMode, dailyChallengeInfo.challengeKey, playerId, playerRewards, practiceResult, result, room]);
 
   useEffect(() => {
     if (!guestSession) {
@@ -1022,44 +1097,40 @@ export default function HomePage() {
   const updateTypingProgress = useCallback(
     (previous: ProgressState, typedText: string) => {
       const canonicalText = activePrompt?.typing.hiragana ?? activeTypingText;
+      const nextMode = containsKanaInput(typedText) ? "kana" : "romaji";
 
-      if (activeInputDeviceKind === "mobile") {
+      if (!activeRomajiTypingPlan) {
         return advanceProgressWithMistakes(previous, canonicalText, typedText, isTimeAttackPlaying);
       }
 
-      if (activeRomajiTypingPlan && containsKanaInput(typedText)) {
-        const canonicalPrevious = {
+      let modePrevious = previous;
+      if (inputModeRef.current !== nextMode) {
+        const canonicalProgressIndex =
+          inputModeRef.current === "kana"
+            ? previous.progressIndex
+            : getCanonicalProgressIndex(activeRomajiTypingPlan, previous.progressIndex);
+        modePrevious = {
           ...previous,
-          progressIndex: getCanonicalProgressIndex(activeRomajiTypingPlan, previous.progressIndex)
+          progressIndex:
+            nextMode === "kana"
+              ? canonicalProgressIndex
+              : getRomajiProgressIndexForCanonicalProgress(activeRomajiTypingPlan, canonicalProgressIndex),
+          pendingInput: ""
         };
-        const next = advanceProgressWithMistakes(
-          canonicalPrevious,
-          canonicalText,
-          typedText,
-          isTimeAttackPlaying
-        );
-
-        return {
-          ...next,
-          progress: {
-            ...next.progress,
-            progressIndex: getRomajiProgressIndexForCanonicalProgress(
-              activeRomajiTypingPlan,
-              next.progress.progressIndex
-            )
-          }
-        };
+        inputModeRef.current = nextMode;
+        setInputMode(nextMode);
       }
 
-      if (activeRomajiTypingPlan) {
-        return isTimeAttackPlaying
-          ? advanceLoopingRomajiProgressWithMistakes(previous, activeRomajiTypingPlan, typedText)
-          : advanceRomajiProgressWithMistakes(previous, activeRomajiTypingPlan, typedText);
+      if (nextMode === "kana") {
+        const next = advanceProgressWithMistakes(modePrevious, canonicalText, typedText, isTimeAttackPlaying);
+        return next;
       }
 
-      return advanceProgressWithMistakes(previous, activeTypingText, typedText, isTimeAttackPlaying);
+      return isTimeAttackPlaying
+        ? advanceLoopingRomajiProgressWithMistakes(modePrevious, activeRomajiTypingPlan, typedText)
+        : advanceRomajiProgressWithMistakes(modePrevious, activeRomajiTypingPlan, typedText);
     },
-    [activeInputDeviceKind, activePrompt, activeRomajiTypingPlan, activeTypingText, isTimeAttackPlaying]
+    [activePrompt, activeRomajiTypingPlan, activeTypingText, isTimeAttackPlaying]
   );
 
   const handleTypedText = useCallback(
@@ -1079,7 +1150,9 @@ export default function HomePage() {
         void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
         emitProgress(
           typedText,
-          !isTimeAttackPlaying && next.progress.progressIndex >= activeTypingText.length
+          !isTimeAttackPlaying &&
+            getCanonicalTypingProgressIndex(next.progress.progressIndex, inputModeRef.current, activeRomajiTypingPlan) >=
+              Array.from(room.prompt.typing.hiragana).length
         );
         return;
       }
@@ -1097,7 +1170,13 @@ export default function HomePage() {
           consumeDailyAttempt();
         }
 
-        if (next.progress.progressIndex >= activeTypingText.length) {
+        if (
+          getCanonicalTypingProgressIndex(
+            next.progress.progressIndex,
+            inputModeRef.current,
+            activeRomajiTypingPlan
+          ) >= Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
+        ) {
           finishPractice(next.progress);
         }
 
@@ -1106,6 +1185,8 @@ export default function HomePage() {
     },
     [
       activeTypingText,
+      activePrompt,
+      activeRomajiTypingPlan,
       emitProgress,
       isTimeAttackPlaying,
       finishPractice,
@@ -1161,7 +1242,9 @@ export default function HomePage() {
         void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
         emitProgress(
           typedKey,
-          !isTimeAttackPlaying && next.progress.progressIndex >= activeTypingText.length
+          !isTimeAttackPlaying &&
+            getCanonicalTypingProgressIndex(next.progress.progressIndex, inputModeRef.current, activeRomajiTypingPlan) >=
+              Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
         );
         return;
       }
@@ -1180,7 +1263,13 @@ export default function HomePage() {
           consumeDailyAttempt();
         }
 
-        if (next.progress.progressIndex >= activeTypingText.length) {
+        if (
+          getCanonicalTypingProgressIndex(
+            next.progress.progressIndex,
+            inputModeRef.current,
+            activeRomajiTypingPlan
+          ) >= Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
+        ) {
           finishPractice(next.progress);
         }
 
@@ -1193,6 +1282,8 @@ export default function HomePage() {
   }, [
     activeInputDeviceKind,
     activeTypingText,
+    activePrompt,
+    activeRomajiTypingPlan,
     acceptingTextInput,
     emitProgress,
     finishPractice,
@@ -1336,12 +1427,26 @@ export default function HomePage() {
   }, [prepareTypingInput, primeSoundPlayback, realtimeConfigured, room]);
 
   const sendReaction = useCallback((reaction: QuickReaction) => {
-    if (!socketRef.current || !room) {
+    if (!settings.reactionsEnabled || !socketRef.current || !room) {
       return;
     }
 
     socketRef.current.emit("player:reaction", { roomCode: room.roomCode, reaction });
-  }, [room]);
+  }, [room, settings.reactionsEnabled]);
+
+  const closeTutorial = useCallback(() => {
+    setTutorialOpen(false);
+    setTutorialStep(0);
+    setSettings((current) => ({ ...current, tutorialSeen: true }));
+  }, []);
+
+  const advanceTutorial = useCallback(() => {
+    if (tutorialStep >= 2) {
+      closeTutorial();
+      return;
+    }
+    setTutorialStep((current) => current + 1);
+  }, [closeTutorial, tutorialStep]);
 
   useEffect(() => {
     if (!room || room.status !== "waiting") {
@@ -1422,7 +1527,10 @@ export default function HomePage() {
     await navigator.clipboard.writeText(room.roomCode);
   };
   const shiftAccessory = (direction: -1 | 1) => {
-    const nextAccessoryIndex = (accessoryIndex + direction + 4) % 4;
+    const currentPosition = Math.max(0, unlockedAccessoryIndices.indexOf(accessoryIndex));
+    const nextAccessoryIndex = unlockedAccessoryIndices[
+      (currentPosition + direction + unlockedAccessoryIndices.length) % unlockedAccessoryIndices.length
+    ] ?? 0;
     setAccessoryIndex(nextAccessoryIndex);
     if (socketRef.current && room) {
       socketRef.current.emit("player:accessory", {
@@ -1745,8 +1853,8 @@ export default function HomePage() {
                   onMatchRuleChange={setMatchRule}
                   onPromptCategoryChange={setPromptCategory}
                   onBotDifficultyChange={setBotDifficulty}
-                  onReaction={sendReaction}
-                  remoteReaction={remoteReaction}
+                  onReaction={settings.reactionsEnabled ? sendReaction : () => undefined}
+                  remoteReaction={settings.reactionsEnabled ? remoteReaction : null}
                 />
               ) : (
                 <>
@@ -1857,12 +1965,13 @@ export default function HomePage() {
                   rematchReady={Boolean(currentPlayer?.ready)}
                   onPracticeNext={!room && activePracticeMode === "practice" ? startPractice : undefined}
                   onPracticeMenu={!room && activePracticeMode === "practice" ? returnToPracticeMenu : undefined}
+                  rewardNotice={rewardNotice}
                   {...(room ? {
                     accessoryIndex,
                     onPreviousAccessory: () => shiftAccessory(-1),
                     onNextAccessory: () => shiftAccessory(1),
                     onOpenSettings: () => setMatchSettingsOpen(true),
-                    onReaction: sendReaction
+                    ...(settings.reactionsEnabled ? { onReaction: sendReaction } : {})
                   } : {})}
                   {...(room ? { matchRule: activeResult.matchRule ?? room.matchRule } : {})}
                 />
@@ -1886,8 +1995,14 @@ export default function HomePage() {
           setSettings={setSettings}
           setNickname={setNickname}
           onClose={() => setSettingsOpen(false)}
+          onOpenTutorial={() => {
+            setSettingsOpen(false);
+            setTutorialStep(0);
+            setTutorialOpen(true);
+          }}
         />
       ) : null}
+      {tutorialOpen ? <TutorialOverlay step={tutorialStep} onNext={advanceTutorial} onClose={closeTutorial} /> : null}
       {matchSettingsOpen && room ? (
         <MatchSettingsModal
           room={room}
@@ -1909,6 +2024,18 @@ export default function HomePage() {
 
 function containsKanaInput(value: string): boolean {
   return /[\u3040-\u30ff\uff66-\uff9f]/u.test(value);
+}
+
+function getCanonicalTypingProgressIndex(
+  progressIndex: number,
+  inputMode: "kana" | "romaji",
+  plan: ReturnType<typeof buildRomajiTypingPlan> | null
+): number {
+  if (inputMode === "kana" || !plan) {
+    return progressIndex;
+  }
+
+  return getCanonicalProgressIndex(plan, progressIndex);
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

@@ -45,6 +45,17 @@ describe("romaji typing", () => {
     expect(wrong.mistakeSamples).toEqual([{ expectedChar: "し", typedChar: "x" }]);
   });
 
+  it("keeps a valid prefix after a single wrong character", () => {
+    const plan = buildRomajiTypingPlan("ち");
+    const result = advanceRomajiProgressWithMistakes(createEmptyProgress(), plan, "toi");
+
+    expect(result.progress.progressIndex).toBe(plan.guide.length);
+    expect(result.progress.pendingInput).toBe("");
+    expect(result.progress.correctCharacters).toBe(2);
+    expect(result.progress.mistakes).toBe(1);
+    expect(result.mistakeSamples).toEqual([{ expectedChar: "ち", typedChar: "o" }]);
+  });
+
   it("accepts multiple romaji paths for しゅうちゅう", () => {
     const plan = buildRomajiTypingPlan("しゅうちゅう。");
     const progress = advanceRomajiProgressByText(createEmptyProgress(), plan, "syuuchyuu.");

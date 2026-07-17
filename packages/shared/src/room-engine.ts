@@ -667,6 +667,17 @@ function finalizeUnfinishedBots(room: InternalRoom): void {
   }
 }
 
+function finalizeUnfinishedRacePlayers(room: InternalRoom): void {
+  for (const player of room.players.values()) {
+    if (player.finishStatus === "finished" || player.progressIndex >= getTypingLength(room, player)) {
+      continue;
+    }
+    player.finishedAt = Date.now();
+    delete player.finishTimeMs;
+    player.finishStatus = "unfinished";
+  }
+}
+
 export function advanceBot(roomCode: string): BotTickOutcome | null {
   const room = rooms.get(roomCode.toUpperCase());
 
@@ -914,7 +925,7 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
   const loopingMatch = room.matchRule === "timeAttack" || room.matchRule === "hpBattle";
-  const kanaInput = player.deviceKind === "mobile" || containsKana(payload.input);
+  const kanaInput = containsKana(payload.input);
   let attackDamageDelta = 0;
 
   if (kanaInput) {
@@ -928,9 +939,7 @@ function applyProgress(player: InternalPlayer, room: InternalRoom, payload: Typi
       attackDamageDelta += completedCharacters;
     }
 
-    if (player.deviceKind === "desktop") {
-      player.typingProgressIndex = getRomajiProgressIndexForCanonicalProgress(room.prompt, player.progressIndex, loopingMatch);
-    }
+    player.typingProgressIndex = getRomajiProgressIndexForCanonicalProgress(room.prompt, player.progressIndex, loopingMatch);
   } else {
     const plan = buildRomajiTypingPlan(room.prompt.typing.hiragana);
     const guideLength = plan.guide.length;
@@ -1017,9 +1026,6 @@ function applyProgressState(player: InternalPlayer, progress: ReturnType<typeof 
   player.maxStreak = progress.maxStreak;
   player.pendingInput = progress.pendingInput;
 
-  if (player.deviceKind === "mobile") {
-    player.progressIndex = progress.progressIndex;
-  }
 }
 
 function applyGuardedProgress(
@@ -1555,6 +1561,11 @@ function isValidTypingProgressPayload(payload: TypingProgress): boolean {
 function maybeFinalizeRoom(room: InternalRoom): MatchResult | null {
   if (room.matchRule === "timeAttack") {
     return null;
+  }
+
+  if (room.matchRule === "race" && [...room.players.values()].some((player) => player.finishStatus === "finished")) {
+    finalizeUnfinishedRacePlayers(room);
+    return finalizeRoom(room);
   }
 
   if (room.matchRule === "hpBattle") {
