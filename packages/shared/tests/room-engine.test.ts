@@ -8,6 +8,7 @@ import {
   joinRoom,
   leaveBySocket,
   markPlaying,
+  rematch,
   resetRoomEngineState,
   restoreRoomState,
   setBotDifficulty,
@@ -226,7 +227,9 @@ describe("room engine config", () => {
     markPlaying(created.room.roomCode);
     const prompt = started.room.prompt?.typing.romaji ?? "a";
     let outcome: ReturnType<typeof finishTyping> = null;
+    let finalSequence = 0;
     for (let offset = 0, sequence = 1; offset < prompt.length; offset += 16, sequence += 1) {
+      finalSequence = sequence;
       outcome = finishTyping("socket_alice_race_first", {
         roomCode: created.room.roomCode,
         input: prompt.slice(offset, offset + 16),
@@ -238,6 +241,47 @@ describe("room engine config", () => {
     expect(outcome).toMatchObject({ roomCode: created.room.roomCode });
     expect(getRoom(created.room.roomCode)?.status).toBe("finished");
     expect(getRoom(created.room.roomCode)?.players.find((player) => player.id === "guest_bob_race_first")?.finishStatus).toBe("unfinished");
+
+    const totalTypedCharacters = getRoom(created.room.roomCode)?.players.find((player) => player.id === "guest_alice_race_first")?.totalTypedCharacters;
+    expect(updateProgress("socket_alice_race_first", {
+      roomCode: created.room.roomCode,
+      input: "a",
+      sequence: finalSequence + 1
+    })).toBeNull();
+    expect(getRoom(created.room.roomCode)?.players.find((player) => player.id === "guest_alice_race_first")?.totalTypedCharacters)
+      .toBe(totalTypedCharacters);
+  });
+
+  it("starts a COM rematch directly from a finished round", () => {
+    const created = createRoom({ nickname: "Alice", guestId: "guest_alice_com_rematch", socketId: "socket_alice_com_rematch" });
+    setReady("socket_alice_com_rematch", created.room.roomCode, true);
+    const started = startMatch("socket_alice_com_rematch", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    if ("error" in started) return;
+
+    markPlaying(created.room.roomCode);
+    const prompt = started.room.prompt?.typing.romaji ?? "";
+    let finished: ReturnType<typeof finishTyping> = null;
+    for (let offset = 0, sequence = 1; offset < prompt.length; offset += 16, sequence += 1) {
+      finished = finishTyping("socket_alice_com_rematch", {
+        roomCode: created.room.roomCode,
+        input: prompt.slice(offset, offset + 16),
+        sequence
+      });
+      if (finished && !("status" in finished)) {
+        break;
+      }
+    }
+    expect(finished).toMatchObject({ roomCode: created.room.roomCode });
+    expect(getRoom(created.room.roomCode)?.status).toBe("finished");
+
+    const nextRound = rematch("socket_alice_com_rematch", created.room.roomCode);
+    expect("error" in nextRound).toBe(false);
+    if ("error" in nextRound) return;
+
+    expect(nextRound.room.status).toBe("countdown");
+    expect(nextRound.room.round).toBe((created.room.round ?? 0) + 1);
+    expect(nextRound.room.result).toBeUndefined();
   });
 
   it("does not start until every connected human is ready", () => {

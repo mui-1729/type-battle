@@ -76,7 +76,15 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await expect(guest.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(host.getByText("再戦READY")).toBeVisible();
   await expect(guest.getByText("再戦READY")).toBeVisible();
-  await host.getByRole("button", { name: "ルームを退出" }).click();
+  await host.getByRole("button", { name: "再戦READY" }).click();
+  await expect(host.getByRole("button", { name: "READYを取り消す" })).toBeVisible();
+  await guest.getByRole("button", { name: "再戦READY" }).click();
+  await expect(host.locator(".status-countdown")).toBeVisible({ timeout: 5_000 });
+  await expect(guest.locator(".status-countdown")).toBeVisible({ timeout: 5_000 });
+  await expect(host.locator(".resultPanel")).toBeHidden();
+  await host.getByRole("button", { name: "対戦を退出" }).click();
+  await expect(host.getByRole("dialog", { name: "ルームを退出しますか？" })).toBeVisible();
+  await host.getByRole("button", { name: "退出する" }).click();
   await expect(host.getByRole("button", { name: "対戦する" })).toBeVisible();
 
   await hostContext.close();
