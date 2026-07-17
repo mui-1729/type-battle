@@ -7,6 +7,25 @@ import {
   typeInputGuide
 } from "./helpers";
 
+test("shows only one back action on every menu page", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: /戻る|戻す|選び直す/ })).toHaveCount(0);
+
+  for (const mode of ["対戦する", "ひとりで遊ぶ"] as const) {
+    await page.getByRole("button", { name: mode }).click();
+    await expect(page.getByRole("button", { name: "モード選択へ" })).toHaveCount(1);
+    await expect(page.locator(".headerBackSlot").getByRole("button")).toHaveCount(1);
+    await expect(page.locator(".modeBackButton")).toHaveCount(0);
+    await page.getByRole("button", { name: "モード選択へ" }).click();
+  }
+
+  for (const route of ["/how-to-play", "/feedback"] as const) {
+    await page.goto(route);
+    await expect(page.getByRole("link", { name: /戻る/ })).toHaveCount(1);
+    await expect(page.getByRole("button", { name: /戻る|戻す|選び直す/ })).toHaveCount(0);
+  }
+});
+
 test("creates a room and lets a second player join", async ({ browser }) => {
   const hostContext = await browser.newContext();
   const guestContext = await browser.newContext();
