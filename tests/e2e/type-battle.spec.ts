@@ -28,8 +28,9 @@ test("shows only one back action on every menu page", async ({ page }) => {
 
 test("keeps the how-to-play steps readable across screen sizes", async ({ page }) => {
   for (const viewport of [
-    { width: 1440, height: 900 },
-    { width: 390, height: 844 }
+    { width: 1440, height: 900, expectedColumnCount: 3 },
+    { width: 1050, height: 900, expectedColumnCount: 1 },
+    { width: 390, height: 844, expectedColumnCount: 1 }
   ]) {
     await page.setViewportSize(viewport);
     await page.goto("/how-to-play");
@@ -38,6 +39,11 @@ test("keeps the how-to-play steps readable across screen sizes", async ({ page }
     await expect(page.getByRole("heading", { level: 1, name: "遊び方" })).toBeVisible();
     await expect(page.getByRole("link", { name: "ホームへ戻る" })).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+    const gridColumnCount = await page.locator(".howToPlayGrid").evaluate((element) =>
+      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length
+    );
+    expect(gridColumnCount).toBe(viewport.expectedColumnCount);
 
     const bodyFontSizes = await page.locator(".howToPlayCard > p").evaluateAll((elements) =>
       elements.map((element) => Number.parseFloat(getComputedStyle(element).fontSize))
