@@ -161,6 +161,7 @@ export default function HomePage() {
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
   const [inputMode, setInputMode] = useState<"kana" | "romaji">("romaji");
+  const [inputModeInitialized, setInputModeInitialized] = useState(false);
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
   const localProgressRef = useRef<ProgressState>(createEmptyProgress());
   const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
@@ -210,8 +211,9 @@ export default function HomePage() {
         connected,
         lastProgressSentAt,
         syncClock,
-        matchTimerMs
-        ,inputMode
+        matchTimerMs,
+        inputMode,
+        inputModeInitialized
       }),
     [
       room,
@@ -229,7 +231,8 @@ export default function HomePage() {
       lastProgressSentAt,
       syncClock,
       matchTimerMs,
-      inputMode
+      inputMode,
+      inputModeInitialized
     ]
   );
   const {
@@ -266,6 +269,7 @@ export default function HomePage() {
     const nextMode = activeInputDeviceKind === "mobile" ? "kana" : "romaji";
     inputModeRef.current = nextMode;
     setInputMode(nextMode);
+    setInputModeInitialized(true);
   }, [activeInputDeviceKind, activePrompt?.id, practiceSession?.practiceId, room?.roomCode]);
 
   const setPromptCategory = useCallback(

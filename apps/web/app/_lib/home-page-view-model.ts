@@ -55,6 +55,7 @@ export type HomePageViewModelInput = {
   syncClock: number;
   matchTimerMs: number;
   inputMode?: "kana" | "romaji";
+  inputModeInitialized?: boolean;
 };
 
 export function getHomePageViewModel({
@@ -74,14 +75,18 @@ export function getHomePageViewModel({
   lastProgressSentAt,
   syncClock,
   matchTimerMs,
-  inputMode
+  inputMode,
+  inputModeInitialized
 }: HomePageViewModelInput) {
   const activePracticePlayer = practiceResult?.players[0] ?? null;
   const activeResult = result ?? practiceResult;
   const activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
   const activePromptText = activePrompt?.text ?? "";
   const activeInputDeviceKind = room ? currentPlayer?.deviceKind ?? "desktop" : practiceSession?.deviceKind ?? "desktop";
-  const effectiveInputMode = inputMode ?? (activeInputDeviceKind === "mobile" ? "kana" : "romaji");
+  const effectiveInputMode =
+    inputModeInitialized === false
+      ? activeInputDeviceKind === "mobile" ? "kana" : "romaji"
+      : inputMode ?? (activeInputDeviceKind === "mobile" ? "kana" : "romaji");
   const dailyChallengeInfo = getDailyChallengeInfo(dailyChallengeNow);
   const dailyChallengePrompt = pickDailyChallengePrompt(dailyChallengeNow);
   const visibleDailyChallengeRecord = getVisibleDailyChallengeRecord(
