@@ -2490,19 +2490,6 @@ textarea::placeholder {
   border-color: var(--accent);
 }
 
-.modeBackButton {
-  align-self: flex-start;
-  min-height: 40px;
-  padding: 8px 0;
-  color: var(--muted);
-  font-weight: 800;
-}
-
-.modeBackButton:hover,
-.modeBackButton:focus-visible {
-  color: var(--accent);
-}
-
 .modeCardButton {
   width: 100%;
   min-height: 190px;

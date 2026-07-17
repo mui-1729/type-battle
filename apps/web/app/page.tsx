@@ -1582,11 +1582,6 @@ export default function HomePage() {
       ) : (
       <section className={showModeSetup ? "workspace modeWorkspace" : "workspace"}>
         <aside className="sidePanel" aria-label="ルーム操作">
-          {showModeSetup ? (
-            <button className="modeBackButton" type="button" onClick={() => setHomeMode(null)}>
-              ← モードを選び直す
-            </button>
-          ) : null}
           {!realtimeConfigured ? (
             <p className="infoText">
               Realtime の接続先が未設定のため、今は Vercel への web deploy はできますが対戦は使えません。
