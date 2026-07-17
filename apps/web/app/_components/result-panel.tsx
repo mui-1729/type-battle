@@ -23,6 +23,8 @@ type ResultPanelProps = {
   rematchReady?: boolean;
   onPracticeNext?: (() => void) | undefined;
   onPracticeMenu?: (() => void) | undefined;
+  onExit?: (() => void) | undefined;
+  exitLabel?: string | undefined;
 };
 
 export function ResultPanel({
@@ -42,7 +44,9 @@ export function ResultPanel({
   onReaction,
   rematchReady = false,
   onPracticeNext,
-  onPracticeMenu
+  onPracticeMenu,
+  onExit,
+  exitLabel = "ホームへ戻る"
 }: ResultPanelProps) {
   const rule = result.matchRule ?? matchRule;
   const doubleKo = isRoomResult && result.players.length > 1 && result.players.every((player) => (player.hp ?? 1) <= 0);
@@ -114,13 +118,14 @@ export function ResultPanel({
       ) : null}
 
       <div className="resultActions">
-        {!isRoomResult && onPracticeNext && onPracticeMenu ? (
+        {!isRoomResult && onPracticeMenu ? (
           <div className="practiceResultActions">
-            <Button variant="secondary" type="button" onClick={onPracticeNext}>次の文章</Button>
+            {onPracticeNext ? <Button variant="secondary" type="button" onClick={onPracticeNext}>次の文章</Button> : null}
             <Button variant="secondary" type="button" onClick={onPracticeMenu}>ひとり用メニューへ</Button>
           </div>
         ) : null}
         {isRoomResult && onOpenSettings ? <Button variant="secondary" type="button" onClick={onOpenSettings}><Settings size={17} /> 次の試合設定</Button> : null}
+        {onExit ? <Button variant="secondary" type="button" onClick={onExit}>{exitLabel}</Button> : null}
         {canRetry ? (
           <Button variant="primary" type="button" onClick={onRetry} disabled={retryPending} aria-busy={retryPending}>
             <RotateCcw size={18} />

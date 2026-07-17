@@ -30,6 +30,7 @@ import { HomeModeMenu } from "./_components/home-mode-menu";
 import { LobbyPrep } from "./_components/lobby-prep";
 import { BattleStage } from "./_components/battle-stage";
 import { PlayerSettingsModal } from "./_components/player-settings-modal";
+import { ExitConfirmationModal } from "./_components/exit-confirmation-modal";
 import { MatchSettingsModal } from "./_components/match-settings-modal";
 import { ProgressBlock } from "./_components/progress-block";
 import { ResultPanel } from "./_components/result-panel";
@@ -110,6 +111,7 @@ type StoredRoomRecoveryState = {
 };
 
 type HomeMode = "battle" | "solo";
+type ExitRequest = "room" | "practice";
 
 const REALTIME_TRANSPORT: RealtimeTransport = "cloudflare";
 const CLOUDFLARE_REALTIME_URL = process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL?.trim() ?? "";
@@ -124,6 +126,7 @@ export default function HomePage() {
   const nicknameInputRef = useRef<HTMLInputElement | null>(null);
   const countdownSecondRef = useRef<number | null>(null);
   const typingInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const exitTriggerRef = useRef<HTMLElement | null>(null);
   const [connected, setConnected] = useState(false);
   const [guestSession, setGuestSession] = useState<GuestSession | null>(null);
   const [playerId, setPlayerId] = useState("");
@@ -131,6 +134,7 @@ export default function HomePage() {
   const [settingsHydrated, setSettingsHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [matchSettingsOpen, setMatchSettingsOpen] = useState(false);
+  const [exitRequest, setExitRequest] = useState<ExitRequest | null>(null);
   const [homeMode, setHomeMode] = useState<HomeMode | null>(null);
   const [accessoryIndex, setAccessoryIndex] = useState(0);
   const [joinCode, setJoinCode] = useState("");
@@ -359,6 +363,10 @@ export default function HomePage() {
 
   const attachSocketHandlers = useCallback((socket: ClientSocket) => {
     socket.on("connect", () => {
+      if (socketRef.current !== socket) {
+        return;
+      }
+
       setConnected(true);
       const currentRoom = roomRef.current;
       const currentSession = guestSessionRef.current;
@@ -395,6 +403,10 @@ export default function HomePage() {
       );
     });
     socket.on("disconnect", () => {
+      if (socketRef.current !== socket) {
+        return;
+      }
+
       setConnected(false);
       if (socketModeRef.current === "room") {
         setStoredRoomRecovery({
@@ -1070,7 +1082,7 @@ export default function HomePage() {
         return;
       }
 
-      if (!acceptingTextInput) {
+      if (!acceptingTextInput || exitRequest !== null) {
         return;
       }
 
@@ -1163,6 +1175,7 @@ export default function HomePage() {
     recordMistakeSamples,
     activePrompt,
     activeRomajiTypingPlan,
+    exitRequest,
     room
   ]);
 
@@ -1251,22 +1264,29 @@ export default function HomePage() {
     );
   };
 
-  const leaveRoom = () => {
+  const leaveRoom = useCallback(() => {
     const socket = socketRef.current;
 
     if (socket && room) {
       socket.emit("room:leave", { roomCode: room.roomCode });
     }
+    clearStoredRoomRetryTimer();
+    storedRoomCodeRef.current = null;
+    storedRoomJoinAttemptsRef.current = 0;
+    storedRoomJoinInFlightRef.current = false;
+    window.localStorage.removeItem(ROOM_CODE_KEY);
+    setStoredRoomRecovery({ status: "idle", message: "" });
+    socketModeRef.current = "practice";
     setHomeMode(null);
 
     connectPracticeSocket();
     setRoom(null);
     setResult(null);
     setPlayerId("");
-    window.localStorage.removeItem(ROOM_CODE_KEY);
     clearPracticeState();
     resetTyping();
-  };
+    setExitRequest(null);
+  }, [clearPracticeState, clearStoredRoomRetryTimer, connectPracticeSocket, resetTyping, room]);
 
   const setReady = () => {
     if (!realtimeConfigured || !socketRef.current || !room || !currentPlayer) {
@@ -1371,7 +1391,67 @@ export default function HomePage() {
     clearPracticeState();
     resetTyping();
     setHomeMode("solo");
+    setExitRequest(null);
   }, [clearPracticeState, resetTyping]);
+
+  const openExitRequest = useCallback((request: ExitRequest) => {
+    const activeElement = document.activeElement;
+    exitTriggerRef.current = activeElement instanceof HTMLElement ? activeElement : null;
+    setExitRequest(request);
+  }, []);
+
+  const cancelExitRequest = useCallback(() => {
+    const trigger = exitTriggerRef.current;
+    exitTriggerRef.current = null;
+    setExitRequest(null);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        if (acceptingTextInput) {
+          prepareTypingInput();
+          return;
+        }
+
+        trigger?.focus();
+      });
+    });
+  }, [acceptingTextInput, prepareTypingInput]);
+
+  const requestRoomExit = useCallback(() => {
+    if (!room) {
+      return;
+    }
+
+    if (room.status === "finished") {
+      leaveRoom();
+      return;
+    }
+
+    openExitRequest("room");
+  }, [leaveRoom, openExitRequest, room]);
+
+  const requestPracticeExit = useCallback(() => {
+    if (!practiceSession && !practiceResult) {
+      return;
+    }
+
+    if (practiceResult) {
+      returnToPracticeMenu();
+      return;
+    }
+
+    openExitRequest("practice");
+  }, [openExitRequest, practiceResult, practiceSession, returnToPracticeMenu]);
+
+  const confirmExit = useCallback(() => {
+    if (exitRequest === "room") {
+      leaveRoom();
+      return;
+    }
+
+    if (exitRequest === "practice") {
+      returnToPracticeMenu();
+    }
+  }, [exitRequest, leaveRoom, returnToPracticeMenu]);
 
   const retryPractice = activePracticeMode === "daily" ? startDailyChallenge : repeatPractice;
 
@@ -1416,6 +1496,7 @@ export default function HomePage() {
         connected={connected}
         realtimeConfigured={realtimeConfigured}
         onOpenSettings={() => setSettingsOpen(true)}
+        exitAction={room ? { label: room.status === "finished" ? "ルームを退出" : "対戦を退出", onClick: requestRoomExit } : practiceSession || practiceResult ? { label: practiceResult ? "ひとり用メニューへ" : "練習をやめる", onClick: requestPracticeExit } : undefined}
       />
 
       {showHomeModeMenu ? (
@@ -1499,7 +1580,7 @@ export default function HomePage() {
               <button className="iconButton" type="button" onClick={copyRoomCode} title="ルームコードをコピー">
                 <Clipboard size={18} />
               </button>
-              <button className="iconButton" type="button" onClick={leaveRoom} title="ルームを退出">
+              <button className="iconButton" type="button" onClick={requestRoomExit} title="ルームを退出" aria-label="ルームを退出">
                 <Unplug size={18} />
               </button>
             </div>
@@ -1701,7 +1782,7 @@ export default function HomePage() {
                   onPreviousAccessory={() => shiftAccessory(-1)}
                   onNextAccessory={() => shiftAccessory(1)}
                   onCopyRoomCode={copyRoomCode}
-                  onLeave={leaveRoom}
+                  onLeave={requestRoomExit}
                   onToggleReady={setReady}
                   onMatchRuleChange={setMatchRule}
                   onPromptCategoryChange={setPromptCategory}
@@ -1817,7 +1898,9 @@ export default function HomePage() {
                   retryError={rematchError}
                   rematchReady={Boolean(currentPlayer?.ready)}
                   onPracticeNext={!room && activePracticeMode === "practice" ? startPractice : undefined}
-                  onPracticeMenu={!room && activePracticeMode === "practice" ? returnToPracticeMenu : undefined}
+                  onPracticeMenu={!room ? returnToPracticeMenu : undefined}
+                  onExit={room ? requestRoomExit : undefined}
+                  exitLabel={room ? "ルームを退出" : undefined}
                   {...(room ? {
                     accessoryIndex,
                     onPreviousAccessory: () => shiftAccessory(-1),
@@ -1849,6 +1932,23 @@ export default function HomePage() {
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}
+      {exitRequest === "room" ? (
+        <ExitConfirmationModal
+          title="ルームを退出しますか？"
+          description={room?.status === "playing" || room?.status === "countdown" ? "試合を退出すると、現在の試合は棄権扱いになります。" : "現在のルームから退出し、ホームへ戻ります。"}
+          confirmLabel="退出する"
+          onCancel={cancelExitRequest}
+          onConfirm={confirmExit}
+        />
+      ) : exitRequest === "practice" ? (
+        <ExitConfirmationModal
+          title="練習をやめますか？"
+          description="現在の入力途中の記録は保存されず、ひとり用メニューへ戻ります。"
+          confirmLabel="練習をやめる"
+          onCancel={cancelExitRequest}
+          onConfirm={confirmExit}
+        />
+      ) : null}
       {matchSettingsOpen && room ? (
         <MatchSettingsModal
           room={room}
@@ -1869,7 +1969,7 @@ export default function HomePage() {
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && target.matches("input, textarea, select, [contenteditable='true']");
+  return target instanceof HTMLElement && target.matches("input, textarea, select, button, a, [role='button'], [contenteditable='true']");
 }
 
 function getMatchupLabel(players: RoomState["players"]): string {

@@ -76,6 +76,91 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await expect(guest.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(host.getByText("再戦READY")).toBeVisible();
   await expect(guest.getByText("再戦READY")).toBeVisible();
+  await host.locator(".resultPanel").getByRole("button", { name: "ルームを退出" }).click();
+  await expect(host.getByRole("button", { name: "対戦する" })).toBeVisible();
+
+  await hostContext.close();
+  await guestContext.close();
+});
+
+test("keeps room exit available on mobile and confirms before leaving", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await selectBattleMode(page);
+  await setNickname(page, "MobileHost");
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+
+  await expect(page.getByRole("button", { name: "対戦を退出" })).toBeVisible();
+  await page.getByRole("button", { name: "対戦を退出" }).click();
+  await expect(page.getByRole("dialog", { name: "ルームを退出しますか？" })).toBeVisible();
+  await page.getByRole("button", { name: "キャンセル" }).click();
+  await expect(page.getByTestId("lobby-prep")).toBeVisible();
+
+  await page.getByRole("button", { name: "対戦を退出" }).click();
+  await page.getByRole("button", { name: "退出する" }).click();
+  await expect(page.getByRole("button", { name: "対戦する" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("type-battle:room-code"))).toBeNull();
+});
+
+test("does not accept typing while the room exit confirmation is open", async ({ page }) => {
+  await page.goto("/");
+  await selectBattleMode(page);
+  await setNickname(page, "KeyboardHost");
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+  await page.getByRole("button", { name: /^タイムアタック/ }).click();
+  await page.getByRole("button", { name: "READYにする" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const progress = page.locator(".raceLaneOne [role=progressbar]");
+  const progressBeforeModal = await progress.getAttribute("aria-valuenow");
+  const input = page.getByLabel("入力欄");
+  const exitButton = page.getByRole("button", { name: "対戦を退出" });
+  await exitButton.click();
+  await expect(page.getByRole("dialog", { name: "ルームを退出しますか？" })).toBeVisible();
+  await page.keyboard.press("a");
+  await page.getByRole("button", { name: "キャンセル" }).focus();
+  await page.keyboard.press(" ");
+  await expect(page.getByRole("dialog", { name: "ルームを退出しますか？" })).toBeHidden();
+  await expect(progress).toHaveAttribute("aria-valuenow", progressBeforeModal ?? "0");
+  await expect(input).toBeFocused();
+
+  const guide = await readInputGuide(page);
+  await input.fill(guide.slice(0, 5));
+  await expect.poll(async () => Number(await progress.getAttribute("aria-valuenow"))).toBeGreaterThan(Number(progressBeforeModal ?? "0"));
+
+  await exitButton.click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "ルームを退出しますか？" })).toBeHidden();
+  await expect(input).toBeFocused();
+});
+
+test("immediately shows the opponent a result after an explicit room exit", async ({ browser }) => {
+  const hostContext = await browser.newContext();
+  const guestContext = await browser.newContext();
+  const host = await hostContext.newPage();
+  const guest = await guestContext.newPage();
+
+  await host.goto("/");
+  await selectBattleMode(host);
+  await setNickname(host, "ExitHost");
+  await host.getByRole("button", { name: "ルームを作成" }).click();
+  const roomCode = await host.locator(".roomMeta strong").innerText();
+
+  await guest.goto("/");
+  await selectBattleMode(guest);
+  await setNickname(guest, "ExitGuest");
+  await guest.getByLabel("ルームコード").fill(roomCode);
+  await guest.getByTitle("ルームに参加").click();
+  await expect(host.getByTestId("lobby-prep").getByText("ExitGuest")).toBeVisible();
+  await host.getByRole("button", { name: "READYにする" }).click();
+  await guest.getByRole("button", { name: "READYにする" }).click();
+  await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expect(guest.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  await host.getByRole("button", { name: "対戦を退出" }).click();
+  await host.getByRole("button", { name: "退出する" }).click();
+  await expect(guest.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
+  await expect(guest.getByTestId("battle-stage").locator(".raceLaneTwo .raceRunner")).toHaveAttribute("data-status", "forfeited");
 
   await hostContext.close();
   await guestContext.close();
@@ -268,6 +353,36 @@ test("completes a practice session", async ({ browser }) => {
   await expect(page.locator(".resultPanel").getByText("もう一度練習")).toBeVisible();
 
   await context.close();
+});
+
+test("can cancel and confirm leaving an active practice session", async ({ page }) => {
+  await page.goto("/");
+  await selectSoloMode(page);
+  await setNickname(page, "PracticePlayer");
+  await page.getByRole("button", { name: "練習を開始" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  await page.getByRole("button", { name: "練習をやめる" }).click();
+  await expect(page.getByRole("dialog", { name: "練習をやめますか？" })).toBeVisible();
+  await page.getByRole("button", { name: "キャンセル" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible();
+
+  await page.getByRole("button", { name: "練習をやめる" }).click();
+  await page.getByRole("button", { name: "練習をやめる" }).last().click();
+  await expect(page.getByRole("button", { name: "練習を開始" })).toBeVisible();
+});
+
+test("returns to the solo menu from a daily challenge result", async ({ page }) => {
+  await page.goto("/");
+  await selectSoloMode(page);
+  await setNickname(page, "DailyPlayer");
+  await page.getByRole("button", { name: "今日の挑戦を開始" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  await typeInputGuide(page, await readInputGuide(page));
+  await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
+  await page.locator(".resultPanel").getByRole("button", { name: "ひとり用メニューへ" }).click();
+  await expect(page.getByRole("button", { name: "今日の挑戦を開始" })).toBeVisible();
 });
 
 test("disables stage motion for the player setting and OS preference", async ({ browser }) => {
