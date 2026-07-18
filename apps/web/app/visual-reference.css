@@ -7,15 +7,97 @@
   --game-green: #168b1b;
   --game-yellow: #ffca18;
   --game-ink: #07122f;
+  --game-logo-ink: #05060a;
+  --game-logo-stroke: #fff;
+  --game-card-title-battle: #073baf;
+  --game-card-title-solo: #087c13;
+  --game-scene-background:
+    radial-gradient(ellipse at 0 39%, rgba(255,255,255,.98) 0 2.5%, transparent 6%),
+    radial-gradient(ellipse at 100% 32%, rgba(255,255,255,.95) 0 3%, transparent 7%),
+    radial-gradient(ellipse at 7% 53%, rgba(255,255,255,.85) 0 3%, transparent 8%),
+    radial-gradient(ellipse at 88% 50%, rgba(255,255,255,.7) 0 2%, transparent 8%),
+    linear-gradient(180deg, #0752c8 0%, #119cf4 38%, #8ddcf6 61%, #6fc72f 61.5%, #2d9f19 100%);
+  --game-scene-ground:
+    radial-gradient(circle at 12% 54%, #fff 0 2px, #ffd724 2px 5px, transparent 6px),
+    radial-gradient(circle at 30% 42%, #fff 0 3px, #ffd724 3px 6px, transparent 7px),
+    radial-gradient(circle at 66% 55%, #fff 0 3px, #ffd724 3px 6px, transparent 7px),
+    radial-gradient(circle at 89% 32%, #fff 0 2px, #ffd724 2px 5px, transparent 6px),
+    repeating-linear-gradient(104deg, transparent 0 20px, rgba(255,255,255,.14) 21px 23px, transparent 24px 41px),
+    linear-gradient(180deg, rgba(173,232,88,.82), rgba(30,139,17,.96));
+  --game-scene-overlay:
+    linear-gradient(132deg, transparent 9%, rgba(255,255,255,.12) 9.2% 9.5%, transparent 9.7%),
+    linear-gradient(140deg, transparent 81%, rgba(255,255,255,.10) 81.2% 81.5%, transparent 81.7%),
+    radial-gradient(ellipse at 50% 84%, rgba(255,230,100,.2), transparent 38%);
   --game-card: rgba(255, 255, 255, 0.96);
+  --game-card-border: rgba(255,255,255,.9);
   --game-card-shadow: 0 16px 36px rgba(0, 67, 133, 0.24), inset 0 1px 0 #fff;
+}
+
+html.theme-dark {
+  --game-ink: #eef6ff;
+  --game-logo-ink: #eef6ff;
+  --game-logo-stroke: #0a1735;
+  --game-card-title-battle: #9fc5ff;
+  --game-card-title-solo: #8be69b;
+  --game-scene-background:
+    radial-gradient(circle at 83% 14%, rgba(255,244,190,.98) 0 1.2%, rgba(255,244,190,.2) 1.8%, transparent 5%),
+    radial-gradient(circle at 12% 18%, rgba(187,218,255,.9) 0 1px, transparent 2px),
+    radial-gradient(circle at 34% 9%, rgba(255,255,255,.85) 0 1px, transparent 2px),
+    radial-gradient(circle at 58% 27%, rgba(187,218,255,.8) 0 1px, transparent 2px),
+    radial-gradient(circle at 91% 38%, rgba(255,255,255,.75) 0 1px, transparent 2px),
+    linear-gradient(180deg, #06102d 0%, #102b5a 38%, #1b4462 61%, #1d3b2b 61.5%, #10251b 100%);
+  --game-scene-ground:
+    radial-gradient(circle at 12% 54%, rgba(193,224,255,.9) 0 2px, transparent 4px),
+    radial-gradient(circle at 30% 42%, rgba(255,244,190,.95) 0 2px, transparent 4px),
+    radial-gradient(circle at 66% 55%, rgba(193,224,255,.9) 0 2px, transparent 4px),
+    radial-gradient(circle at 89% 32%, rgba(255,244,190,.9) 0 2px, transparent 4px),
+    repeating-linear-gradient(104deg, transparent 0 20px, rgba(140,196,148,.1) 21px 23px, transparent 24px 41px),
+    linear-gradient(180deg, rgba(52,112,63,.75), rgba(11,35,23,.98));
+  --game-scene-overlay:
+    radial-gradient(circle at 83% 14%, rgba(255,247,197,.18), transparent 8%),
+    linear-gradient(132deg, transparent 9%, rgba(155,205,255,.08) 9.2% 9.5%, transparent 9.7%),
+    linear-gradient(140deg, transparent 81%, rgba(155,205,255,.06) 81.2% 81.5%, transparent 81.7%);
+  --game-card: rgba(14, 30, 54, 0.94);
+  --game-card-border: rgba(170, 211, 255, .28);
+  --game-card-shadow: 0 18px 40px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(220,240,255,.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not(.theme-light) {
+    --game-ink: #eef6ff;
+    --game-logo-ink: #eef6ff;
+    --game-logo-stroke: #0a1735;
+    --game-card-title-battle: #9fc5ff;
+    --game-card-title-solo: #8be69b;
+    --game-scene-background:
+      radial-gradient(circle at 83% 14%, rgba(255,244,190,.98) 0 1.2%, rgba(255,244,190,.2) 1.8%, transparent 5%),
+      radial-gradient(circle at 12% 18%, rgba(187,218,255,.9) 0 1px, transparent 2px),
+      radial-gradient(circle at 34% 9%, rgba(255,255,255,.85) 0 1px, transparent 2px),
+      radial-gradient(circle at 58% 27%, rgba(187,218,255,.8) 0 1px, transparent 2px),
+      radial-gradient(circle at 91% 38%, rgba(255,255,255,.75) 0 1px, transparent 2px),
+      linear-gradient(180deg, #06102d 0%, #102b5a 38%, #1b4462 61%, #1d3b2b 61.5%, #10251b 100%);
+    --game-scene-ground:
+      radial-gradient(circle at 12% 54%, rgba(193,224,255,.9) 0 2px, transparent 4px),
+      radial-gradient(circle at 30% 42%, rgba(255,244,190,.95) 0 2px, transparent 4px),
+      radial-gradient(circle at 66% 55%, rgba(193,224,255,.9) 0 2px, transparent 4px),
+      radial-gradient(circle at 89% 32%, rgba(255,244,190,.9) 0 2px, transparent 4px),
+      repeating-linear-gradient(104deg, transparent 0 20px, rgba(140,196,148,.1) 21px 23px, transparent 24px 41px),
+      linear-gradient(180deg, rgba(52,112,63,.75), rgba(11,35,23,.98));
+    --game-scene-overlay:
+      radial-gradient(circle at 83% 14%, rgba(255,247,197,.18), transparent 8%),
+      linear-gradient(132deg, transparent 9%, rgba(155,205,255,.08) 9.2% 9.5%, transparent 9.7%),
+      linear-gradient(140deg, transparent 81%, rgba(155,205,255,.06) 81.2% 81.5%, transparent 81.7%);
+    --game-card: rgba(14, 30, 54, 0.94);
+    --game-card-border: rgba(170, 211, 255, .28);
+    --game-card-shadow: 0 18px 40px rgba(0, 0, 0, .38), inset 0 1px 0 rgba(220,240,255,.12);
+  }
 }
 
 html {
   min-width: 320px;
   height: 100%;
   overflow: hidden;
-  background: #0874de;
+  background: var(--game-scene-background);
 }
 
 body {
@@ -23,7 +105,7 @@ body {
   min-height: 0;
   overflow: hidden;
   color: var(--game-ink);
-  background: #0874de;
+  background: var(--game-scene-background);
   font-family: "Arial Black", "Yu Gothic", "Hiragino Kaku Gothic ProN", system-ui, sans-serif;
 }
 
@@ -43,12 +125,7 @@ select {
   padding: 24px clamp(22px, 4vw, 76px) 34px;
   overflow: hidden;
   color: var(--game-ink);
-  background:
-    radial-gradient(ellipse at 0 39%, rgba(255,255,255,.98) 0 2.5%, transparent 6%),
-    radial-gradient(ellipse at 100% 32%, rgba(255,255,255,.95) 0 3%, transparent 7%),
-    radial-gradient(ellipse at 7% 53%, rgba(255,255,255,.85) 0 3%, transparent 8%),
-    radial-gradient(ellipse at 88% 50%, rgba(255,255,255,.7) 0 2%, transparent 8%),
-    linear-gradient(180deg, #0752c8 0%, #119cf4 38%, #8ddcf6 61%, #6fc72f 61.5%, #2d9f19 100%);
+  background: var(--game-scene-background);
 }
 
 .appShell::before {
@@ -56,13 +133,7 @@ select {
   inset: 56% 0 0;
   z-index: -2;
   content: "";
-  background:
-    radial-gradient(circle at 12% 54%, #fff 0 2px, #ffd724 2px 5px, transparent 6px),
-    radial-gradient(circle at 30% 42%, #fff 0 3px, #ffd724 3px 6px, transparent 7px),
-    radial-gradient(circle at 66% 55%, #fff 0 3px, #ffd724 3px 6px, transparent 7px),
-    radial-gradient(circle at 89% 32%, #fff 0 2px, #ffd724 2px 5px, transparent 6px),
-    repeating-linear-gradient(104deg, transparent 0 20px, rgba(255,255,255,.14) 21px 23px, transparent 24px 41px),
-    linear-gradient(180deg, rgba(173,232,88,.82), rgba(30,139,17,.96));
+  background: var(--game-scene-ground);
   filter: saturate(1.2);
 }
 
@@ -72,10 +143,7 @@ select {
   z-index: -1;
   pointer-events: none;
   content: "";
-  background:
-    linear-gradient(132deg, transparent 9%, rgba(255,255,255,.12) 9.2% 9.5%, transparent 9.7%),
-    linear-gradient(140deg, transparent 81%, rgba(255,255,255,.10) 81.2% 81.5%, transparent 81.7%),
-    radial-gradient(ellipse at 50% 84%, rgba(255,230,100,.2), transparent 38%);
+  background: var(--game-scene-overlay);
 }
 
 .appShell > * {
@@ -165,10 +233,10 @@ select {
   height: 64px;
   min-height: 64px;
   padding: 0;
-  color: #07101f;
-  border: 3px solid rgba(255,255,255,.86);
+  color: var(--game-ink);
+  border: 3px solid var(--game-card-border);
   border-radius: 50%;
-  background: #fff;
+  background: var(--game-card);
   box-shadow: 0 10px 20px rgba(0,45,110,.24);
 }
 
@@ -181,7 +249,7 @@ select {
 .gameLogo {
   display: grid;
   justify-items: center;
-  color: #05060a;
+  color: var(--game-logo-ink);
 }
 
 .gameLogoWordmark {
@@ -209,7 +277,7 @@ select {
 .gameLogoWordmark::after { top: 65%; left: -11%; right: 18%; height: 5%; opacity: .45; }
 
 .gameLogoWordmark > span {
-  color: #05060a;
+  color: var(--game-logo-ink);
   font-family: Impact, "Arial Black", sans-serif;
   font-size: clamp(68px, 8.5vw, 154px);
   font-style: italic;
@@ -217,7 +285,7 @@ select {
   line-height: .84;
   letter-spacing: -.035em;
   white-space: nowrap;
-  -webkit-text-stroke: clamp(2px, .25vw, 5px) #fff;
+  -webkit-text-stroke: clamp(2px, .25vw, 5px) var(--game-logo-stroke);
   paint-order: stroke fill;
   transform: skewX(-8deg);
 }
@@ -226,7 +294,7 @@ select {
   width: clamp(56px, 6.2vw, 108px);
   height: clamp(64px, 6.6vw, 116px);
   margin: 0 0 -5px -4px;
-  color: #05060a;
+  color: var(--game-logo-ink);
   filter: none;
 }
 
@@ -302,9 +370,9 @@ select {
   position: relative;
   min-width: 0;
   overflow: hidden;
-  border: 4px solid rgba(255,255,255,.9);
+  border: 4px solid var(--game-card-border);
   border-radius: 30px;
-  background: linear-gradient(145deg, #fff, #f5f7fb);
+  background: var(--game-card);
   box-shadow: var(--game-card-shadow);
   transition: transform 180ms ease, box-shadow 180ms ease;
 }
@@ -361,7 +429,7 @@ select {
 .modeRunner {
   position: relative;
   display: block;
-  color: #050505;
+  color: var(--game-ink);
 }
 
 .modeRunner .stickFigure {
@@ -389,7 +457,7 @@ select {
 .modeRunnerBlue { transform: translateX(10px); }
 .modeRunnerRed { transform: scaleX(-1) translateX(10px); }
 .modeRunnerGreen { transform: scale(1.15); }
-.modeCrossedSwords { color: #111; transform: rotate(3deg); }
+.modeCrossedSwords { color: var(--game-ink); transform: rotate(3deg); }
 
 .modeCardContent {
   display: grid;
@@ -405,11 +473,11 @@ select {
   line-height: 1;
 }
 
-.modeCardBattle .modeCardTitle { color: #073baf; }
-.modeCardSolo .modeCardTitle { color: #087c13; }
+.modeCardBattle .modeCardTitle { color: var(--game-card-title-battle); }
+.modeCardSolo .modeCardTitle { color: var(--game-card-title-solo); }
 
 .modeCardDescription {
-  color: #17213c;
+  color: color-mix(in srgb, var(--game-ink) 76%, transparent);
   font-size: clamp(16px, 1.35vw, 22px);
   font-weight: 800;
 }
@@ -482,10 +550,10 @@ select {
   width: 100%;
   min-height: min(390px, 46vh);
   padding: clamp(26px, 3vw, 38px);
-  color: #07122f;
-  border: 4px solid rgba(255, 255, 255, .95);
+  color: var(--game-ink);
+  border: 4px solid var(--game-card-border);
   border-radius: 28px;
-  background: rgba(255, 255, 255, .97);
+  background: var(--game-card);
   box-shadow: var(--game-card-shadow);
 }
 
@@ -520,7 +588,7 @@ select {
 
 .howToPlayCard > p {
   margin: 0;
-  color: #24324a;
+  color: color-mix(in srgb, var(--game-ink) 78%, transparent);
   font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", system-ui, sans-serif;
   font-size: 18px;
   font-weight: 700;
@@ -576,7 +644,7 @@ select {
   max-height: calc(100svh - 150px);
   padding: 18px;
   border-radius: 22px;
-  background: rgba(255,255,255,.95);
+  background: var(--game-card);
   box-shadow: var(--game-card-shadow);
 }
 
@@ -606,9 +674,9 @@ select {
 }
 
 .secondaryButton {
-  color: #0b347f;
-  border-color: #d9e2f0;
-  background: #fff;
+  color: var(--game-ink);
+  border-color: var(--game-card-border);
+  background: var(--game-card);
   box-shadow: 0 5px 12px rgba(0,45,100,.12);
 }
 
@@ -644,26 +712,26 @@ select {
 
 .isSoloSetup .sidePanel > * + * { padding-top: 0; border-top: 0; }
 .isSoloSetup .soloModePicker { grid-column: 1 / -1; }
-.isSoloSetup .nicknameSetupField { grid-column: 1 / -1; width: min(460px, 100%); justify-self: center; padding: 15px 20px; border-radius: 18px; background: #fff; }
-.isSoloSetup .dailyChallengePanel { grid-column: 1 / -1; display: grid; grid-template-columns: .85fr .85fr 1.5fr; gap: 0; max-width: 1120px; margin: 0 auto; padding: 0; overflow: hidden; border: 4px solid rgba(255,255,255,.92); border-radius: 28px; background: #fff; box-shadow: var(--game-card-shadow); }
+.isSoloSetup .nicknameSetupField { grid-column: 1 / -1; width: min(460px, 100%); justify-self: center; padding: 15px 20px; border-radius: 18px; background: var(--game-card); }
+.isSoloSetup .dailyChallengePanel { grid-column: 1 / -1; display: grid; grid-template-columns: .85fr .85fr 1.5fr; gap: 0; max-width: 1120px; margin: 0 auto; padding: 0; overflow: hidden; border: 4px solid var(--game-card-border); border-radius: 28px; background: var(--game-card); box-shadow: var(--game-card-shadow); }
 .isSoloSetup .dailyChallengePanel > .sectionHeading { grid-column: 1 / -1; padding: 0 0 22px; background: transparent; text-align: center; transform: translateY(-4px); }
 .isSoloSetup .dailyChallengePanel > .sectionHeading .eyebrow { display: none; }
-.isSoloSetup .dailyChallengePanel > .sectionHeading h2 { color: #05070c; font-family: "Arial Black", "Yu Gothic", sans-serif; font-size: clamp(50px, 6vw, 86px); font-style: italic; font-weight: 1000; line-height: 1; letter-spacing: .02em; text-shadow: 0 0 8px #fff, 0 5px 0 rgba(2,37,101,.14); }
+.isSoloSetup .dailyChallengePanel > .sectionHeading h2 { color: var(--game-ink); font-family: "Arial Black", "Yu Gothic", sans-serif; font-size: clamp(50px, 6vw, 86px); font-style: italic; font-weight: 1000; line-height: 1; letter-spacing: .02em; text-shadow: 0 0 8px color-mix(in srgb, var(--game-card) 86%, transparent), 0 5px 0 rgba(2,37,101,.14); }
 .isSoloSetup .dailyChallengePanel > .sectionHeading::after { display: block; margin-top: 14px; color: #0a3b9f; font-size: 19px; font-weight: 900; letter-spacing: .12em; content: "毎日挑戦して、タイピング力を高めよう！"; }
-.isSoloSetup .dailyChallengeHeader { grid-column: 1; grid-row: 2; display: grid; align-content: center; justify-items: center; min-height: 190px; padding: 22px; color: #0c3392; border-right: 2px solid #dae2f1; }
+.isSoloSetup .dailyChallengeHeader { grid-column: 1; grid-row: 2; display: grid; align-content: center; justify-items: center; min-height: 190px; padding: 22px; color: var(--game-ink); border-right: 2px solid var(--game-card-border); }
 .isSoloSetup .dailyChallengeHeader span { font-size: 21px; font-weight: 1000; }
 .isSoloSetup .dailyChallengeHeader small { margin-top: 12px; color: #0c3499; font-size: 48px; font-weight: 1000; }
-.isSoloSetup .dailyChallengePrompt { grid-column: 3; grid-row: 2; display: grid; place-items: center; min-height: 190px; margin: 0; padding: 30px; color: #0c2470; font-size: clamp(26px, 2.6vw, 40px); font-weight: 1000; line-height: 1.5; text-align: center; }
-.isSoloSetup .dailyChallengeStats { grid-column: 2; grid-row: 2; display: grid; grid-template-columns: 1fr; gap: 0; min-height: 190px; border-right: 2px solid #dae2f1; }
-.isSoloSetup .dailyChallengeStats > div { display: grid; place-items: center; padding: 10px; border: 0; border-radius: 0; background: #fff; }
+.isSoloSetup .dailyChallengePrompt { grid-column: 3; grid-row: 2; display: grid; place-items: center; min-height: 190px; margin: 0; padding: 30px; color: var(--game-ink); font-size: clamp(26px, 2.6vw, 40px); font-weight: 1000; line-height: 1.5; text-align: center; }
+.isSoloSetup .dailyChallengeStats { grid-column: 2; grid-row: 2; display: grid; grid-template-columns: 1fr; gap: 0; min-height: 190px; border-right: 2px solid var(--game-card-border); }
+.isSoloSetup .dailyChallengeStats > div { display: grid; place-items: center; padding: 10px; border: 0; border-radius: 0; background: transparent; }
 .isSoloSetup .dailyChallengeStats > div:nth-child(n+2) { display: none; }
 .isSoloSetup .dailyChallengeStats span { color: #15358b; font-size: 13px; text-align: center; }
-.isSoloSetup .dailyChallengeStats strong { color: #0d1e69; font-size: 34px; }
+.isSoloSetup .dailyChallengeStats strong { color: var(--game-ink); font-size: 34px; }
 .isSoloSetup .dailyChallengePanel > .practiceStage { grid-column: 1 / -1; grid-row: 3; width: calc(100% - 80px); height: 140px; margin: 18px auto 0; border-width: 4px; border-radius: 22px; }
 .isSoloSetup .dailyChallengePanel > .practiceStage .practiceRunner { bottom: 28px; transform: translateX(-50%) scale(.72); transform-origin: bottom; }
 .isSoloSetup .dailyChallengePanel > .secondaryButton { grid-column: 1 / -1; grid-row: 4; width: min(670px, 80%); min-height: 82px; margin: 22px auto 24px; color: #fff; border: 4px solid #8ee8ff; border-radius: 999px; background: linear-gradient(180deg, #0d8df7, #0645c9); box-shadow: 0 12px 22px rgba(0,66,154,.34), inset 0 2px 0 rgba(255,255,255,.55); font-size: clamp(25px, 2.5vw, 38px); }
 .isSoloSetup .mistakeTrendPanel,
-.isSoloSetup .difficultySelector { min-height: 132px; padding: 20px; border: 3px solid rgba(255,255,255,.88); border-radius: 22px; background: rgba(255,255,255,.94); box-shadow: var(--game-card-shadow); }
+.isSoloSetup .difficultySelector { min-height: 132px; padding: 20px; border: 3px solid var(--game-card-border); border-radius: 22px; background: var(--game-card); box-shadow: var(--game-card-shadow); }
 .isSoloSetup .difficultySelector { align-content: center; }
 .isSoloSetup-practice .difficultySelector,
 .isSoloSetup-mistakes .mistakeTrendPanel { grid-column: 1 / -1; width: min(760px, 100%); min-height: 360px; margin: 0 auto; align-content: center; }
@@ -705,12 +773,12 @@ select {
 .isLobby .lobbyPrep { grid-template-rows: auto auto auto; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .lobbyPrepHeader { position: absolute; top: -100px; right: 0; left: auto; z-index: 2; display: block; width: auto; min-height: 0; padding: 0; border: 0; background: transparent; }
 .lobbyPrepHeader .sectionHeading { display: none; }
-.lobbyRoomCode { grid-template-columns: auto auto 54px 54px; gap: 10px; min-width: 370px; padding: 10px 14px 10px 22px; border: 3px solid rgba(255,255,255,.9); border-radius: 22px; background: #fff; box-shadow: var(--game-card-shadow); }
-.lobbyRoomCode span { color: #10245d; font-size: 14px; }
-.lobbyRoomCode strong { color: #0a276f; font-size: 35px; }
+.lobbyRoomCode { grid-template-columns: auto auto 54px 54px; gap: 10px; min-width: 370px; padding: 10px 14px 10px 22px; border: 3px solid var(--game-card-border); border-radius: 22px; background: var(--game-card); box-shadow: var(--game-card-shadow); }
+.lobbyRoomCode span { color: color-mix(in srgb, var(--game-ink) 72%, transparent); font-size: 14px; }
+.lobbyRoomCode strong { color: var(--game-ink); font-size: 35px; }
 .lobbyRoomCode .iconButton { width: 48px; height: 48px; min-height: 48px; border: 1px solid #dce2ee; border-radius: 14px; box-shadow: 0 3px 8px rgba(0,35,84,.12); }
 .lobbyPlayerGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; width: min(1320px, 100%); margin: 0 auto; }
-.lobbyPlayerCard { position: relative; display: grid; grid-template-rows: 82px minmax(0, 1fr) 0; gap: 8px; height: min(450px, 47vh); min-height: 390px; padding: 26px; overflow: hidden; border: 5px solid #fff; border-radius: 30px; background: linear-gradient(145deg, #fff, #f8f8fa); box-shadow: var(--game-card-shadow); }
+.lobbyPlayerCard { position: relative; display: grid; grid-template-rows: 82px minmax(0, 1fr) 0; gap: 8px; height: min(450px, 47vh); min-height: 390px; padding: 26px; overflow: hidden; border: 5px solid var(--game-card-border); border-radius: 30px; background: var(--game-card); box-shadow: var(--game-card-shadow); }
 .lobbyPlayerCard:first-child { border-left-color: #1682f1; }
 .lobbyPlayerCard:last-child { border-left-color: #f23a2d; }
 .lobbyPlayerCardTop { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; min-height: 0; padding: 0; background: transparent; }
@@ -722,25 +790,25 @@ select {
 .lobbyPlayerCard .playerIdentityMark { display: none; }
 .lobbyPlayerCard .playerIdentityRole { color: var(--game-blue); font-size: 17px; }
 .lobbyPlayerCard:last-child .playerIdentityRole { color: var(--game-red); }
-.lobbyPlayerCard .playerIdentityCopy > strong { color: #10235c; font-size: clamp(26px, 2.5vw, 42px); }
+.lobbyPlayerCard .playerIdentityCopy > strong { color: var(--game-ink); font-size: clamp(26px, 2.5vw, 42px); }
 .lobbyFigureArea { min-height: 245px; border-radius: 0; background: radial-gradient(ellipse at 50% 90%, rgba(17,102,231,.25), transparent 42%); }
 .lobbyPlayerCard:last-child .lobbyFigureArea { background: radial-gradient(ellipse at 50% 90%, rgba(241,38,28,.22), transparent 42%); }
-.lobbyFigureArea .stickFigure { width: 180px; height: 235px; color: #050505; }
+.lobbyFigureArea .stickFigure { width: 180px; height: 235px; color: var(--game-ink); }
 .lobbyAccessory { top: 28px; font-size: 52px; }
 .accessoryPicker { position: absolute; inset: 45% 25px auto; grid-template-columns: 58px 1fr 58px; pointer-events: none; }
-.accessoryPicker button { width: 58px; min-height: 58px; pointer-events: auto; color: var(--game-blue); border: 0; border-radius: 50%; background: #fff; box-shadow: 0 6px 14px rgba(0,48,115,.2); }
+.accessoryPicker button { width: 58px; min-height: 58px; pointer-events: auto; color: var(--game-blue); border: 0; border-radius: 50%; background: var(--game-card); box-shadow: 0 6px 14px rgba(0,48,115,.2); }
 .accessoryPicker span { visibility: hidden; }
-.lobbyPlayerCard .readyBadge { position: absolute; bottom: 18px; left: 20px; z-index: 3; min-height: 50px; padding: 8px 16px; color: #555; border: 1px solid #dce2eb; border-radius: 14px; background: rgba(255,255,255,.95); font-size: 16px; }
+.lobbyPlayerCard .readyBadge { position: absolute; bottom: 18px; left: 20px; z-index: 3; min-height: 50px; padding: 8px 16px; color: color-mix(in srgb, var(--game-ink) 72%, transparent); border: 1px solid var(--game-card-border); border-radius: 14px; background: color-mix(in srgb, var(--game-card) 92%, transparent); font-size: 16px; }
 .lobbyPlayerCard .readyBadge.active { color: #16861c; }
 .lobbyPrepControls { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 100px; gap: 18px; width: min(1320px, 100%); height: 100px; margin: 0 auto; }
 .lobbySettingsCard,
-.lobbyReactionCard { display: flex; align-items: center; gap: 18px; height: 100px; min-height: 0; padding: 12px 20px; overflow: hidden; border: 3px solid #fff; border-radius: 22px; background: #fff; box-shadow: var(--game-card-shadow); }
+.lobbyReactionCard { display: flex; align-items: center; gap: 18px; height: 100px; min-height: 0; padding: 12px 20px; overflow: hidden; border: 3px solid var(--game-card-border); border-radius: 22px; background: var(--game-card); box-shadow: var(--game-card-shadow); }
 .lobbySettingsHeading h3 { font-size: 15px; }
 .lobbySettingsCard { grid-template-columns: none; grid-template-rows: none; }
 .lobbySettingsCard .lobbySettingsHeading { display: block; flex: 0 0 95px; height: auto; min-height: 0; }
 .lobbySettingsCard .lobbySettingGroup { display: grid; flex: 1; grid-column: auto; grid-row: auto; }
 .lobbyChoiceGrid { gap: 6px; }
-.lobbyChoice { min-height: 52px; border: 2px solid #e1e5ed; background: #fff; }
+.lobbyChoice { min-height: 52px; border: 2px solid var(--game-card-border); background: color-mix(in srgb, var(--game-card) 82%, var(--game-blue) 18%); }
 .lobbyChoice.active { color: #064ec9; border-color: #1782f2; background: #e9f5ff; }
 .lobbyChoice small { display: none; }
 .lobbySettingRow { display: none; }
@@ -780,7 +848,7 @@ select {
 .isBattle .matchHeader,
 .isPractice .matchHeader { position: absolute; top: -82px; left: 0; z-index: 5; }
 .isBattle .statusPill,
-.isPractice .statusPill { min-height: 50px; padding: 0 20px; color: #101936; border: 2px solid #fff; border-radius: 16px; background: #fff; box-shadow: var(--game-card-shadow); font-size: 17px; }
+.isPractice .statusPill { min-height: 50px; padding: 0 20px; color: var(--game-ink); border: 2px solid var(--game-card-border); border-radius: 16px; background: var(--game-card); box-shadow: var(--game-card-shadow); font-size: 17px; }
 .isBattle .progressBlock,
 .isBattle .statsGrid,
 .isBattle .matchSurface > .infoText,
@@ -838,9 +906,9 @@ select {
   left: 0;
   min-width: 170px;
   padding: 11px 20px;
-  color: #101936;
+  color: var(--game-ink);
   border-radius: 999px;
-  background: #fff;
+  background: var(--game-card);
   box-shadow: var(--game-card-shadow);
   font-size: 19px;
   font-weight: 1000;
@@ -848,9 +916,9 @@ select {
 }
 
 .battleStageSummary { display: none; }
-.battleStageTimeAttack { min-width: 330px; min-height: 76px; justify-content: center; padding: 8px 30px; color: #080b15; border: 5px solid #dbe8f7; border-radius: 28px; background: #fff; box-shadow: var(--game-card-shadow); }
+.battleStageTimeAttack { min-width: 330px; min-height: 76px; justify-content: center; padding: 8px 30px; color: var(--game-ink); border: 5px solid var(--game-card-border); border-radius: 28px; background: var(--game-card); box-shadow: var(--game-card-shadow); }
 .battleStageTimeAttack strong { font-family: Impact, "Arial Black", sans-serif; font-size: clamp(32px, 4vw, 58px); }
-.battleStageTimeAttack small { color: #17203a; font-size: 15px; }
+.battleStageTimeAttack small { color: color-mix(in srgb, var(--game-ink) 72%, transparent); font-size: 15px; }
 .battleStageArena { overflow: visible; border: 0; background: transparent !important; }
 
 /* Race / time attack */
@@ -859,7 +927,7 @@ select {
 .battleStage[data-mode="race"] .battleStageHeader,
 .battleStage[data-mode="timeAttack"] .battleStageHeader { padding: 0; background: transparent; }
 .raceStageScene { display: grid; grid-template-rows: repeat(2, minmax(0,1fr)); gap: 18px; height: 100%; padding: 0 12px; background: transparent; }
-.raceLane { position: relative; display: grid; grid-template-rows: auto minmax(0,1fr); gap: 4px; min-height: 0; padding: 15px 26px 14px 116px; overflow: hidden; border: 5px solid #fff; border-radius: 27px; background: rgba(255,255,255,.96); box-shadow: var(--game-card-shadow); }
+.raceLane { position: relative; display: grid; grid-template-rows: auto minmax(0,1fr); gap: 4px; min-height: 0; padding: 15px 26px 14px 116px; overflow: hidden; border: 5px solid var(--game-card-border); border-radius: 27px; background: var(--game-card); box-shadow: var(--game-card-shadow); }
 .raceLaneOne { border-left: 12px solid #096ff0; }
 .raceLaneTwo { border-left: 12px solid #f42720; }
 .raceLane::before { position: absolute; top: 0; bottom: 0; left: 0; display: grid; place-items: center; width: 90px; color: #fff; font-size: 38px; font-weight: 1000; content: "1P"; background: linear-gradient(180deg, #0b78f4, #064ed0); }
@@ -867,10 +935,10 @@ select {
 .raceLaneHeader { position: relative; z-index: 5; }
 .raceLaneIdentity { gap: 14px; }
 .raceLaneSlot { display: none; }
-.raceLaneIdentity strong { color: #10204f; font-size: clamp(21px, 2vw, 32px); }
+.raceLaneIdentity strong { color: var(--game-ink); font-size: clamp(21px, 2vw, 32px); }
 .raceLaneTwo .raceLaneIdentity strong { color: #d81516; }
 .raceYouBadge { color: #fff; background: var(--game-red); font-size: 13px; }
-.raceLaneStats { gap: 18px; color: #0e1327; font-size: 15px; }
+.raceLaneStats { gap: 18px; color: color-mix(in srgb, var(--game-ink) 78%, transparent); font-size: 15px; }
 .raceTrack { min-height: 92px; overflow: visible; border-radius: 12px; background: linear-gradient(180deg, #e7f6ff 0 56%, #d8f0c6 56% 66%, #fff 66%); }
 .raceTrack::after { right: 1%; bottom: 13px; left: 1%; height: 12px; background: #dce1ea; }
 .raceTrackFill { bottom: 13px; left: 1%; height: 12px; max-width: 98%; background: #13931d; }
@@ -879,7 +947,7 @@ select {
 .raceGoalTape { right: 1%; bottom: 34px; padding: 7px 11px; color: #fff; background: var(--game-blue); font-size: 13px; }
 .raceLaneTwo .raceGoalTape { background: var(--game-red); }
 .raceRunner { bottom: 16px; width: 88px; }
-.raceRunner .stickFigure { width: 82px; height: 104px; color: #050505; }
+.raceRunner .stickFigure { width: 82px; height: 104px; color: var(--game-ink); }
 .raceLaneOne .raceRunner::after,
 .raceLaneTwo .raceRunner::after { position: absolute; top: 14px; left: 24px; width: 48px; height: 7px; border-radius: 99px; content: ""; background: var(--game-blue); }
 .raceLaneTwo .raceRunner::after { background: var(--game-red); }
@@ -895,7 +963,7 @@ select {
 .hpBattleArena { display: grid; grid-template-columns: minmax(0,1fr) 110px minmax(0,1fr); gap: 20px; height: 100%; align-items: stretch; }
 .hpBattlePlayer { position: relative; display: grid; grid-template-rows: auto auto 1fr; min-height: 0; padding: 18px 22px 0; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .hpBattlePlayerHeader,
-.hpBattleHpRow { padding: 12px 20px; background: #fff; }
+.hpBattleHpRow { padding: 12px 20px; background: var(--game-card); }
 .hpBattlePlayerHeader { border-radius: 22px 22px 0 0; }
 .hpBattleHpRow { margin: 0; border-radius: 0 0 22px 22px; box-shadow: var(--game-card-shadow); }
 .hpBattleIdentity strong { font-size: 22px; }
@@ -906,7 +974,7 @@ select {
 .hpBattleMeta { position: absolute; bottom: 4px; left: 0; z-index: 5; padding: 8px 16px; color: #fff; border-radius: 12px; background: rgba(5,14,10,.75); font-size: 14px; }
 .hpBattlePlayerRight .hpBattleMeta { right: 0; left: auto; }
 .hpBattleFigure { min-height: 250px; margin: 0; align-items: center; }
-.hpBattleFigure .stickFigure { width: 190px; height: 260px; color: #050505; }
+.hpBattleFigure .stickFigure { width: 190px; height: 260px; color: var(--game-ink); }
 .hpBattlePlayerLeft .hpBattleFigure::after,
 .hpBattlePlayerRight .hpBattleFigure::after { position: absolute; top: 80px; left: calc(50% - 50px); width: 100px; height: 12px; border-radius: 99px; content: ""; background: var(--game-blue); }
 .hpBattlePlayerRight .hpBattleFigure::after { background: var(--game-red); }
@@ -923,18 +991,18 @@ select {
   margin: 18px auto 0;
   padding: 34px clamp(28px, 6vw, 110px);
   overflow: hidden;
-  color: #070d1d;
-  border: 6px solid #fff;
+  color: var(--game-ink);
+  border: 6px solid var(--game-card-border);
   border-radius: 32px;
   outline: 3px solid #1479ed;
   outline-offset: -10px;
-  background: rgba(255,255,255,.97);
+  background: var(--game-card);
   box-shadow: var(--game-card-shadow);
   text-align: center;
 }
 .promptDisplay { font-size: clamp(30px, 3.1vw, 52px); font-weight: 1000; line-height: 1.35; letter-spacing: .05em; }
-.promptGuide { color: #8b8e98; font-family: "Arial Black", ui-monospace, monospace; font-size: clamp(16px, 1.8vw, 28px); font-weight: 900; letter-spacing: .22em; }
-.promptGuide .char.typed { color: #0a142f; }
+.promptGuide { color: color-mix(in srgb, var(--game-ink) 52%, transparent); font-family: "Arial Black", ui-monospace, monospace; font-size: clamp(16px, 1.8vw, 28px); font-weight: 900; letter-spacing: .22em; }
+.promptGuide .char.typed { color: color-mix(in srgb, var(--game-ink) 75%, transparent); }
 .promptGuide .char.current { display: inline-grid; place-items: center; min-width: 1.2em; margin: 0 .02em; color: #062875; border: 3px solid var(--game-blue); border-radius: 8px; background: #eaf4ff; }
 
 /* Practice */
@@ -944,8 +1012,8 @@ select {
 .isPractice .gameLogo.isCompact .stickFigure { width: 62px; height: 70px; }
 .isPractice .brandBlock::after { display: block; margin-top: 6px; color: #167c22; text-align: center; text-shadow: 0 0 5px #fff, 0 0 9px #fff; font-size: clamp(26px, 3vw, 44px); font-weight: 1000; letter-spacing: .35em; content: "— 練 習 —"; }
 .isPractice-daily .brandBlock::after { color: #102e8a; letter-spacing: .1em; content: "— デイリーチャレンジ —"; }
-.practiceStage { position: relative; width: 100%; height: clamp(210px, 28vh, 300px); overflow: hidden; border: 6px solid #fff; border-radius: 30px; background: linear-gradient(180deg, rgba(219,244,255,.96) 0 52%, rgba(124,206,77,.95) 52% 69%, #f5d78c 69% 86%, #fff 86%); box-shadow: var(--game-card-shadow); }
-.practiceRunner { position: absolute; bottom: 34px; z-index: 3; width: 130px; color: #050505; transform: translateX(-50%); transition: left 180ms ease; }
+.practiceStage { position: relative; width: 100%; height: clamp(210px, 28vh, 300px); overflow: hidden; border: 6px solid var(--game-card-border); border-radius: 30px; background: var(--game-scene-background); box-shadow: var(--game-card-shadow); }
+.practiceRunner { position: absolute; bottom: 34px; z-index: 3; width: 130px; color: var(--game-ink); transform: translateX(-50%); transition: left 180ms ease; }
 .practiceRunner .stickFigure { width: 125px; height: 165px; }
 .practiceRunner::after { position: absolute; top: 27px; left: 35px; width: 72px; height: 9px; border-radius: 99px; content: ""; background: var(--game-green); }
 .practiceSpeedLines { position: absolute; top: 73px; left: -45px; width: 64px; border-top: 5px solid var(--game-green); box-shadow: -18px 20px 0 -1px var(--game-green), -3px -20px 0 -1px var(--game-green); }
@@ -953,10 +1021,10 @@ select {
 .practiceGoalFlag { position: absolute; top: 25px; z-index: 2; display: grid; place-items: center; width: 64px; height: 100px; color: #fff; background: var(--game-green); font-size: 26px; clip-path: polygon(0 0, 100% 15%, 72% 48%, 100% 75%, 0 64%); }
 .practiceStartFlag { left: 48px; }
 .practiceGoalFlag { right: 48px; background: var(--game-red); }
-.practiceTrack { position: absolute; right: 5%; bottom: 13px; left: 5%; height: 15px; overflow: hidden; border: 4px solid #fff; border-radius: 99px; background: #dce1e8; box-shadow: 0 2px 7px rgba(0,0,0,.15); }
+.practiceTrack { position: absolute; right: 5%; bottom: 13px; left: 5%; height: 15px; overflow: hidden; border: 4px solid var(--game-card-border); border-radius: 99px; background: color-mix(in srgb, var(--game-card) 70%, #8ca4bb 30%); box-shadow: 0 2px 7px rgba(0,0,0,.15); }
 .practiceTrack span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #42b912, #158d0c); }
 .isPractice .promptBox { min-height: 260px; margin-top: 26px; }
-.isPractice .statsGrid { position: absolute; top: -98px; right: 0; z-index: 3; display: flex; gap: 0; padding: 12px 20px; border: 3px solid #fff; border-radius: 20px; background: #fff; box-shadow: var(--game-card-shadow); }
+.isPractice .statsGrid { position: absolute; top: -98px; right: 0; z-index: 3; display: flex; gap: 0; padding: 12px 20px; border: 3px solid var(--game-card-border); border-radius: 20px; background: var(--game-card); box-shadow: var(--game-card-shadow); }
 .isPractice .statItem { min-width: 95px; padding: 8px 16px; border: 0; border-left: 1px solid #d9deea; border-radius: 0; background: transparent; }
 .isPractice .statItem:first-child { border-left: 0; }
 .isPractice .resultPanel { position: relative; z-index: 5; }
