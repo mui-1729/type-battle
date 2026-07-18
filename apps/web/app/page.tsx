@@ -59,6 +59,7 @@ import {
 } from "./_lib/home-page-view-model";
 import { detectDeviceKind } from "./_lib/device-kind";
 import { advanceTypingProgress } from "./_lib/typing-input-strategy";
+import { shouldHandleDesktopTypingKey } from "./_lib/desktop-typing-input";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
 import {
@@ -1140,28 +1141,23 @@ export default function HomePage() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const practiceActive = Boolean(practiceSession && !practiceResult && !room);
+      const roomPlaying = room?.status === "playing";
 
-      if (room?.status !== "playing" && !practiceActive) {
-        return;
-      }
-
-      if (!acceptingTextInput || exitRequest !== null) {
-        return;
-      }
-
-      if (
-        event.defaultPrevented ||
-        event.isComposing ||
-        event.keyCode === 229 ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.altKey ||
-        isEditableTarget(event.target)
-      ) {
-        return;
-      }
-
-      if (event.key.length !== 1) {
+      if (!shouldHandleDesktopTypingKey({
+        roomPlaying,
+        practiceActive,
+        acceptingTextInput,
+        roomFinishPending: roomFinishPendingRef.current,
+        exitRequested: exitRequest !== null,
+        defaultPrevented: event.defaultPrevented,
+        isComposing: event.isComposing,
+        keyCode: event.keyCode,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        editableTarget: isEditableTarget(event.target),
+        key: event.key
+      })) {
         return;
       }
 
