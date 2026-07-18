@@ -56,6 +56,7 @@ export type HomePageViewModelInput = {
   matchTimerMs: number;
   inputMode?: "kana" | "romaji";
   inputModeInitialized?: boolean;
+  roomFinishPending?: boolean;
 };
 
 export function getHomePageViewModel({
@@ -76,7 +77,8 @@ export function getHomePageViewModel({
   syncClock,
   matchTimerMs,
   inputMode,
-  inputModeInitialized
+  inputModeInitialized,
+  roomFinishPending = false
 }: HomePageViewModelInput) {
   const activePracticePlayer = practiceResult?.players[0] ?? null;
   const activeResult = result ?? practiceResult;
@@ -130,7 +132,7 @@ export function getHomePageViewModel({
   );
   const activeTimeAttackRemainingSeconds = Math.max(matchTimerMs / 1000, 0).toFixed(1);
   const acceptingTextInput =
-    (isRoomPlaying && connected && !result && !isTimeAttackExpired) || isPracticePlaying;
+    (isRoomPlaying && connected && !result && !isTimeAttackExpired && !roomFinishPending) || isPracticePlaying;
   const progressSyncState: ProgressSyncState = room
     ? getProgressSyncState({
         connected,

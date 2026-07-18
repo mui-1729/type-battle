@@ -59,6 +59,7 @@ import {
 } from "./_lib/home-page-view-model";
 import { detectDeviceKind } from "./_lib/device-kind";
 import { advanceTypingProgress } from "./_lib/typing-input-strategy";
+import { shouldHandleDesktopTypingKey } from "./_lib/desktop-typing-input";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
 import {
@@ -159,11 +160,13 @@ export default function HomePage() {
   const [syncClock, setSyncClock] = useState(() => Date.now());
   const [lastProgressSentAt, setLastProgressSentAt] = useState<number | null>(null);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
+  const [roomFinishPending, setRoomFinishPending] = useState(false);
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
   const [inputMode, setInputMode] = useState<"kana" | "romaji">("romaji");
   const [inputModeInitialized, setInputModeInitialized] = useState(false);
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
   const localProgressRef = useRef<ProgressState>(createEmptyProgress());
+  const roomFinishPendingRef = useRef(false);
   const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
   const inputModeRef = useRef<"kana" | "romaji">("romaji");
   const dailyAttemptConsumedRef = useRef(false);
@@ -214,7 +217,8 @@ export default function HomePage() {
         syncClock,
         matchTimerMs,
         inputMode,
-        inputModeInitialized
+        inputModeInitialized,
+        roomFinishPending
       }),
     [
       room,
@@ -233,7 +237,8 @@ export default function HomePage() {
       syncClock,
       matchTimerMs,
       inputMode,
-      inputModeInitialized
+      inputModeInitialized,
+      roomFinishPending
     ]
   );
   const {
@@ -339,6 +344,8 @@ export default function HomePage() {
   const resetTyping = useCallback(() => {
     setLocalProgress(createEmptyProgress());
     localProgressRef.current = createEmptyProgress();
+    roomFinishPendingRef.current = false;
+    setRoomFinishPending(false);
     inputSequenceRef.current = 0;
     resultRef.current = null;
     setResult(null);
@@ -1022,6 +1029,11 @@ export default function HomePage() {
       setSyncClock(Date.now());
 
       if (finish) {
+        if (currentRoom.matchRule === "race") {
+          roomFinishPendingRef.current = true;
+          setRoomFinishPending(true);
+          typingInputRef.current?.blur();
+        }
         socket.emit("typing:finish", payload);
         return;
       }
@@ -1034,6 +1046,10 @@ export default function HomePage() {
   const handleTypedText = useCallback(
     (typedText: string) => {
       if (!typedText) {
+        return;
+      }
+
+      if (roomFinishPendingRef.current) {
         return;
       }
 
@@ -1125,28 +1141,23 @@ export default function HomePage() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const practiceActive = Boolean(practiceSession && !practiceResult && !room);
+      const roomPlaying = room?.status === "playing";
 
-      if (room?.status !== "playing" && !practiceActive) {
-        return;
-      }
-
-      if (!acceptingTextInput || exitRequest !== null) {
-        return;
-      }
-
-      if (
-        event.defaultPrevented ||
-        event.isComposing ||
-        event.keyCode === 229 ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.altKey ||
-        isEditableTarget(event.target)
-      ) {
-        return;
-      }
-
-      if (event.key.length !== 1) {
+      if (!shouldHandleDesktopTypingKey({
+        roomPlaying,
+        practiceActive,
+        acceptingTextInput,
+        roomFinishPending: roomFinishPendingRef.current,
+        exitRequested: exitRequest !== null,
+        defaultPrevented: event.defaultPrevented,
+        isComposing: event.isComposing,
+        keyCode: event.keyCode,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        editableTarget: isEditableTarget(event.target),
+        key: event.key
+      })) {
         return;
       }
 

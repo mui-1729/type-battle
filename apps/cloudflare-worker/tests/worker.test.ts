@@ -611,6 +611,74 @@ describe("room authority", () => {
     });
   });
 
+  it("ends a race for both players when the first player finishes", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "RF34GH" });
+    roomAuthority.attachSocket(guestSocket as unknown as WebSocket, { roomCode: "RF34GH" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-race-first-finish",
+      type: "client:room:create",
+      payload: { nickname: "Alice", guestId: "guest-race-first-host", sessionId: "session-race-first-host" }
+    }));
+    await flushAsyncWork();
+    guestSocket.receive(JSON.stringify({
+      id: "msg-join-race-first-finish",
+      type: "client:room:join",
+      payload: {
+        roomCode: "RF34GH",
+        nickname: "Bob",
+        guestId: "guest-race-first-guest",
+        sessionId: "session-race-first-guest"
+      }
+    }));
+    await flushAsyncWork();
+
+    for (const [socket, id] of [[hostSocket, "host"], [guestSocket, "guest"]] as const) {
+      socket.receive(JSON.stringify({
+        id: `msg-ready-race-first-finish-${id}`,
+        type: "client:player:ready",
+        payload: { roomCode: "RF34GH", ready: true }
+      }));
+    }
+    hostSocket.receive(JSON.stringify({
+      id: "msg-start-race-first-finish",
+      type: "client:match:start",
+      payload: { roomCode: "RF34GH" }
+    }));
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    sendTypingInput(hostSocket, "RF34GH", getCountdownRoom(hostSocket).prompt?.typing.romaji ?? "");
+    await flushAsyncWork();
+
+    for (const socket of [hostSocket, guestSocket]) {
+      const result = [...parseMessages(socket)]
+        .reverse()
+        .find((message) => message.type === "server:match:result")?.payload as
+        | { players?: Array<{ id: string; finishStatus?: string; totalTypedCharacters?: number }> }
+        | undefined;
+      expect(result?.players).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "guest-race-first-host", finishStatus: "finished" }),
+        expect.objectContaining({ id: "guest-race-first-guest", finishStatus: "unfinished", totalTypedCharacters: 0 })
+      ]));
+    }
+
+    const guestMessageCount = guestSocket.messages.length;
+    guestSocket.receive(JSON.stringify({
+      id: "msg-progress-after-race-finished",
+      type: "client:typing:progress",
+      payload: { roomCode: "RF34GH", input: "a", sequence: 1 }
+    }));
+    await flushAsyncWork();
+
+    expect(guestSocket.messages).toHaveLength(guestMessageCount);
+  });
+
   it("preserves partial romaji input and its statistics when a player reconnects", async () => {
     const roomAuthority = new RoomAuthorityDurableObject(
       new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState

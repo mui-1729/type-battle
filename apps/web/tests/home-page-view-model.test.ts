@@ -167,4 +167,21 @@ describe("getHomePageViewModel", () => {
 
     expect(view.activeTypingText).toBe(prompt.typing.hiragana);
   });
+
+  it("stops accepting room input while the finishing event awaits the authoritative result", () => {
+    const player = createPlayer();
+    const room = createRoom(player);
+    room.matchRule = "race";
+    delete room.matchEndsAt;
+    const view = getHomePageViewModel(createInput({
+      room,
+      playerId: player.id,
+      currentPlayer: player,
+      connected: true,
+      roomFinishPending: true
+    }));
+
+    expect(view.isRoomPlaying).toBe(true);
+    expect(view.acceptingTextInput).toBe(false);
+  });
 });
