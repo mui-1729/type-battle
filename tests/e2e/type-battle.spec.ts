@@ -162,8 +162,12 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await expect(matchFooterClose).toBeFocused();
   await host.keyboard.press("Tab");
   await expect(matchHeaderClose).toBeFocused();
-  await host.getByLabel("課題カテゴリ").selectOption("long");
-  await host.getByLabel("COM難易度").selectOption("hard");
+  await matchDialog.getByLabel("課題カテゴリ").selectOption("long");
+  await expect(matchDialog.getByLabel("課題カテゴリ")).toHaveValue("long");
+  await matchDialog.getByLabel("COM難易度").selectOption("hard");
+  await expect(matchDialog.getByLabel("COM難易度")).toHaveValue("hard");
+  await matchDialog.getByRole("button", { name: /^タイムアタック/ }).click();
+  await expect(matchDialog.getByRole("button", { name: /^タイムアタック/ })).toHaveClass(/active/);
   await host.keyboard.press("Escape");
   await expect(matchDialog).toBeHidden();
   await expect(matchSettingsButton).toBeFocused();
@@ -175,6 +179,9 @@ test("plays a complete two player typing match", async ({ browser }) => {
   }))).toEqual({ document: "clip", body: "scroll", appShell: "auto" });
 
   await matchSettingsButton.click();
+  await expect(matchDialog.getByLabel("課題カテゴリ")).toHaveValue("long");
+  await expect(matchDialog.getByLabel("COM難易度")).toHaveValue("hard");
+  await expect(matchDialog.getByRole("button", { name: /^タイムアタック/ })).toHaveClass(/active/);
   await matchFooterClose.click();
   await expect(matchDialog).toBeHidden();
   await matchSettingsButton.click();
@@ -187,6 +194,9 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await guest.getByRole("button", { name: "次の試合設定" }).click();
   const guestDialog = guest.getByRole("dialog", { name: "次の試合設定" });
   await expect(guestDialog.getByText("ホストのみ変更できます")).toBeVisible();
+  await expect(guestDialog.getByLabel("課題カテゴリ")).toHaveValue("long");
+  await expect(guestDialog.getByLabel("COM難易度")).toHaveValue("hard");
+  await expect(guestDialog.getByRole("button", { name: /^タイムアタック/ })).toHaveClass(/active/);
   await expect(guestDialog.locator("button:disabled")).toHaveCount(3);
   await expect(guestDialog.locator("select:disabled")).toHaveCount(2);
   await guest.getByRole("button", { name: "完了" }).click();
@@ -366,7 +376,10 @@ test("plays all three stage modes against COM and resets between rematches", asy
       await input.pressSequentially(guide.slice(splitIndex), { delay: 2 });
       if (mode.key === "hpBattle") {
         for (let attempt = 0; attempt < 12 && !(await host.locator(".resultPanel").isVisible()); attempt += 1) {
-          await input.pressSequentially(await readInputGuide(host), { delay: 2 });
+          const nextGuide = await readInputGuide(host);
+          await input.pressSequentially(nextGuide, { delay: 2, timeout: 2_000 }).catch(async (error: unknown) => {
+            if (!(await host.locator(".resultPanel").isVisible())) throw error;
+          });
         }
       }
       await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 20_000 });
