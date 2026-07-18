@@ -1,8 +1,8 @@
 import { X } from "lucide-react";
-import { useEffect, useId, useRef, type Dispatch, type SetStateAction } from "react";
-import { createPortal } from "react-dom";
+import { useId, type Dispatch, type SetStateAction } from "react";
 import type { PlayerSettings } from "../../lib/player-settings";
 import { FONT_SIZE_LABELS, THEME_LABELS } from "../_lib/ui-labels";
+import { DialogOverlay } from "./dialog-overlay";
 
 type PlayerSettingsModalProps = {
   settings: PlayerSettings;
@@ -14,95 +14,14 @@ type PlayerSettingsModalProps = {
 
 export function PlayerSettingsModal({ settings, setSettings, setNickname, onClose, onOpenTutorial }: PlayerSettingsModalProps) {
   const titleId = useId();
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLElement>(null);
-  const onCloseRef = useRef(onClose);
-
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const appShell = document.querySelector<HTMLElement>(".appShell");
-    const previousDocumentOverflow = document.documentElement.style.overflow;
-    const previousBodyOverflow = document.body.style.overflow;
-    const previousAppShellOverflow = appShell?.style.overflow;
-    const previousAppShellInert = appShell?.inert;
-    document.documentElement.style.overflow = "hidden";
-    document.body.style.overflow = "hidden";
-    if (appShell) {
-      appShell.style.overflow = "hidden";
-      appShell.inert = true;
-    }
-    closeButtonRef.current?.focus();
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-
-      if (event.key !== "Tab") {
-        return;
-      }
-
-      const focusableElements = dialogRef.current
-        ? Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-            "button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"
-          ))
-        : [];
-      const first = focusableElements[0];
-      const last = focusableElements.at(-1);
-
-      if (!first || !last) {
-        event.preventDefault();
-        return;
-      }
-
-      if (!dialogRef.current?.contains(document.activeElement)) {
-        event.preventDefault();
-        (event.shiftKey ? last : first).focus();
-      } else if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.documentElement.style.overflow = previousDocumentOverflow;
-      document.body.style.overflow = previousBodyOverflow;
-      if (appShell) {
-        appShell.style.overflow = previousAppShellOverflow ?? "";
-        appShell.inert = previousAppShellInert ?? false;
-      }
-      document.removeEventListener("keydown", handleKeyDown);
-      previouslyFocusedElement?.focus();
-    };
-  }, []);
-
-  return createPortal(
-    <div
-      className="modalBackdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-    >
-      <section ref={dialogRef} className="modalContent" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+  return (
+    <DialogOverlay titleId={titleId} onClose={onClose}>
         <div className="modalHeader">
           <div>
             <p className="eyebrow">PLAYER</p>
             <h2 id={titleId}>プレイヤー設定</h2>
           </div>
-          <button ref={closeButtonRef} className="iconButton" type="button" onClick={onClose} aria-label="設定を閉じる">
+          <button className="iconButton" type="button" onClick={onClose} aria-label="設定を閉じる">
             <X size={20} />
           </button>
         </div>
@@ -226,8 +145,6 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
             閉じる
           </button>
         </div>
-      </section>
-    </div>,
-    document.body
+    </DialogOverlay>
   );
 }
