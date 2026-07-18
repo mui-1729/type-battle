@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
   expectFixedViewport,
   readInputGuide,
@@ -9,6 +9,65 @@ import {
   setNickname,
   typeInputGuide
 } from "./helpers";
+
+type ContrastTarget = {
+  foreground: string;
+  background: string;
+  pseudo?: "::after";
+};
+
+async function expectReadableContrast(page: Page, targets: ContrastTarget[]): Promise<void> {
+  const ratios = await page.evaluate((items) => {
+    const parseColor = (color: string) => {
+      const channels = color.match(/[\d.]+/g)?.map(Number) ?? [];
+      return [channels[0] ?? 0, channels[1] ?? 0, channels[2] ?? 0, channels[3] ?? 1];
+    };
+    const composite = (foreground: number[], background: number[]) => {
+      const alpha = foreground[3] + background[3] * (1 - foreground[3]);
+      return [
+        ...foreground.slice(0, 3).map((channel, index) => (
+          channel * foreground[3] + background[index] * background[3] * (1 - foreground[3])
+        ) / alpha),
+        alpha
+      ];
+    };
+    const renderedBackground = (element: Element) => {
+      let result = [0, 0, 0, 0];
+      let current: Element | null = element;
+      while (current) {
+        result = composite(result, parseColor(getComputedStyle(current).backgroundColor));
+        if (result[3] >= 0.999) {
+          return result;
+        }
+        current = current.parentElement;
+      }
+      return composite(result, [255, 255, 255, 1]);
+    };
+    const luminance = (channels: number[]) => channels
+      .slice(0, 3)
+      .map((channel) => {
+        const value = channel / 255;
+        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      })
+      .reduce((total, value, index) => total + value * [0.2126, 0.7152, 0.0722][index], 0);
+
+    return items.map(({ foreground, background, pseudo }) => {
+      const foregroundElement = document.querySelector(foreground);
+      const backgroundElement = document.querySelector(background);
+      if (!foregroundElement || !backgroundElement) {
+        return 0;
+      }
+      const foregroundColor = parseColor(getComputedStyle(foregroundElement, pseudo ?? null).color);
+      const backgroundColor = renderedBackground(backgroundElement);
+      const foregroundLuminance = luminance(foregroundColor);
+      const backgroundLuminance = luminance(backgroundColor);
+      return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+        (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+    });
+  }, targets);
+
+  ratios.forEach((ratio) => expect(ratio).toBeGreaterThanOrEqual(4.5));
+}
 
 test("shows only one back action on every menu page", async ({ page }) => {
   await page.goto("/");
@@ -665,6 +724,84 @@ test("saves and restores player settings from localStorage", async ({ browser })
   await expect(page.locator("html")).toHaveClass(/font-large/);
 
   await context.close();
+});
+
+test("keeps explicit and system dark theme text readable", async ({ browser }) => {
+  const systemContext = await browser.newContext({
+    colorScheme: "dark",
+    viewport: { width: 390, height: 844 }
+  });
+  const systemPage = await systemContext.newPage();
+  await systemPage.goto("/");
+  await selectSoloMode(systemPage);
+  await expectFixedViewport(systemPage);
+  await expect(systemPage.locator(".soloModeOption").first()).toHaveCSS("background-color", "rgb(14, 30, 54)");
+  await expectReadableContrast(systemPage, [
+    { foreground: ".soloModeOptionCopy small", background: ".soloModeOption" },
+    { foreground: ".soloModeOptionCopy strong", background: ".soloModeOption" },
+    { foreground: ".soloModeOptionCopy span", background: ".soloModeOption" }
+  ]);
+
+  await systemPage.getByRole("button", { name: /今日のチャレンジ/ }).click();
+  await expectReadableContrast(systemPage, [
+    { foreground: ".dailyChallengePanel > .sectionHeading", background: ".dailyChallengePanel", pseudo: "::after" },
+    { foreground: ".dailyChallengeHeader small", background: ".dailyChallengePanel" },
+    { foreground: ".dailyChallengeStats span", background: ".dailyChallengePanel" }
+  ]);
+  await systemPage.goto("/feedback");
+  await expectFixedViewport(systemPage);
+  await expectReadableContrast(systemPage, [
+    { foreground: ".feedbackCardHeading > p:last-child", background: ".feedbackCard" },
+    { foreground: ".feedbackKinds small", background: ".feedbackKinds > div" }
+  ]);
+  await systemContext.close();
+
+  const darkSettings = JSON.stringify({
+    nickname: "Player",
+    theme: "dark",
+    soundEnabled: true,
+    countdownSoundEnabled: true,
+    reactionsEnabled: true,
+    inputGuideEnabled: true,
+    reducedMotion: false,
+    fontSize: "normal",
+    tutorialSeen: false
+  });
+  const hostContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  await hostContext.addInitScript((settings) => localStorage.setItem("type-battle:settings", settings), darkSettings);
+  await guestContext.addInitScript((settings) => localStorage.setItem("type-battle:settings", settings), darkSettings);
+  const host = await hostContext.newPage();
+  const guest = await guestContext.newPage();
+
+  await host.goto("/");
+  await selectBattleMode(host);
+  await host.getByRole("button", { name: "ルームを作成" }).click();
+  const roomCode = await host.locator(".roomMeta strong").innerText();
+  await guest.goto("/");
+  await selectBattleMode(guest);
+  await guest.getByLabel("ルームコード").fill(roomCode);
+  await guest.getByTitle("ルームに参加").click();
+  await expect(host.locator(".lobbyPlayerCard")).toHaveCount(2);
+
+  await expectReadableContrast(host, [
+    { foreground: ".lobbyPlayerCard .playerIdentityRole", background: ".lobbyPlayerCard" },
+    { foreground: ".lobbyPlayerCard:last-child .playerIdentityRole", background: ".lobbyPlayerCard:last-child" }
+  ]);
+  await host.getByRole("button", { name: "READYにする" }).click();
+  await expect(host.locator(".lobbyPlayerCard .readyBadge.active")).toBeVisible();
+  await expectReadableContrast(host, [
+    { foreground: ".lobbyPlayerCard .readyBadge.active", background: ".lobbyPlayerCard" }
+  ]);
+
+  await guest.getByRole("button", { name: "READYにする" }).click();
+  await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expectReadableContrast(host, [
+    { foreground: ".raceLaneTwo .raceLaneIdentity strong", background: ".raceLaneTwo" }
+  ]);
+
+  await hostContext.close();
+  await guestContext.close();
 });
 
 test("contains settings focus and restores focus and scroll state on Escape", async ({ page }) => {
