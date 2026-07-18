@@ -121,6 +121,86 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await expect(guest.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(host.getByText("再戦READY")).toBeVisible();
   await expect(guest.getByText("再戦READY")).toBeVisible();
+
+  const matchSettingsButton = host.getByRole("button", { name: "次の試合設定" });
+  const hostDifficultySelector = host.locator(".sidePanel .difficultySelector");
+  const [matchSettingsBounds, difficultyBounds] = await Promise.all([
+    matchSettingsButton.boundingBox(),
+    hostDifficultySelector.boundingBox()
+  ]);
+  expect(matchSettingsBounds).not.toBeNull();
+  expect(difficultyBounds).not.toBeNull();
+  expect(
+    matchSettingsBounds!.x + matchSettingsBounds!.width > difficultyBounds!.x &&
+      matchSettingsBounds!.x < difficultyBounds!.x + difficultyBounds!.width &&
+      matchSettingsBounds!.y + matchSettingsBounds!.height > difficultyBounds!.y &&
+      matchSettingsBounds!.y < difficultyBounds!.y + difficultyBounds!.height
+  ).toBe(false);
+  await expect(hostDifficultySelector).toBeVisible();
+  await host.evaluate(() => {
+    document.documentElement.style.overflow = "clip";
+    document.body.style.overflow = "scroll";
+    const appShell = document.querySelector<HTMLElement>(".appShell");
+    if (appShell) appShell.style.overflow = "auto";
+  });
+  await matchSettingsButton.click();
+
+  const matchDialog = host.getByRole("dialog", { name: "次の試合設定" });
+  const matchHeaderClose = host.getByRole("button", { name: "設定を閉じる" });
+  const matchFooterClose = host.getByRole("button", { name: "完了" });
+  await expect(matchDialog).toBeVisible();
+  await expect(matchHeaderClose).toBeFocused();
+  await expect(host.locator("body > .modalBackdrop")).toHaveCount(1);
+  await expect(host.locator(".appShell")).toHaveAttribute("inert", "");
+  await expect.poll(() => host.evaluate(() => ({
+    document: document.documentElement.style.overflow,
+    body: document.body.style.overflow,
+    appShell: document.querySelector<HTMLElement>(".appShell")?.style.overflow
+  }))).toEqual({ document: "hidden", body: "hidden", appShell: "hidden" });
+
+  await host.keyboard.press("Shift+Tab");
+  await expect(matchFooterClose).toBeFocused();
+  await host.keyboard.press("Tab");
+  await expect(matchHeaderClose).toBeFocused();
+  await matchDialog.getByLabel("課題カテゴリ").selectOption("long");
+  await expect(matchDialog.getByLabel("課題カテゴリ")).toHaveValue("long");
+  await matchDialog.getByLabel("COM難易度").selectOption("hard");
+  await expect(matchDialog.getByLabel("COM難易度")).toHaveValue("hard");
+  await matchDialog.getByRole("button", { name: /^タイムアタック/ }).click();
+  await expect(matchDialog.getByRole("button", { name: /^タイムアタック/ })).toHaveClass(/active/);
+  await host.keyboard.press("Escape");
+  await expect(matchDialog).toBeHidden();
+  await expect(matchSettingsButton).toBeFocused();
+  await expect(host.locator(".appShell")).not.toHaveAttribute("inert", "");
+  await expect.poll(() => host.evaluate(() => ({
+    document: document.documentElement.style.overflow,
+    body: document.body.style.overflow,
+    appShell: document.querySelector<HTMLElement>(".appShell")?.style.overflow
+  }))).toEqual({ document: "clip", body: "scroll", appShell: "auto" });
+
+  await matchSettingsButton.click();
+  await expect(matchDialog.getByLabel("課題カテゴリ")).toHaveValue("long");
+  await expect(matchDialog.getByLabel("COM難易度")).toHaveValue("hard");
+  await expect(matchDialog.getByRole("button", { name: /^タイムアタック/ })).toHaveClass(/active/);
+  await matchFooterClose.click();
+  await expect(matchDialog).toBeHidden();
+  await matchSettingsButton.click();
+  await matchHeaderClose.click();
+  await expect(matchDialog).toBeHidden();
+  await matchSettingsButton.click();
+  await host.locator(".modalBackdrop").click({ position: { x: 2, y: 2 } });
+  await expect(matchDialog).toBeHidden();
+
+  await guest.getByRole("button", { name: "次の試合設定" }).click();
+  const guestDialog = guest.getByRole("dialog", { name: "次の試合設定" });
+  await expect(guestDialog.getByText("ホストのみ変更できます")).toBeVisible();
+  await expect(guestDialog.getByLabel("課題カテゴリ")).toHaveValue("long");
+  await expect(guestDialog.getByLabel("COM難易度")).toHaveValue("hard");
+  await expect(guestDialog.getByRole("button", { name: /^タイムアタック/ })).toHaveClass(/active/);
+  await expect(guestDialog.locator("button:disabled")).toHaveCount(3);
+  await expect(guestDialog.locator("select:disabled")).toHaveCount(2);
+  await guest.getByRole("button", { name: "完了" }).click();
+
   await host.getByRole("button", { name: "再戦READY" }).click();
   await expect(host.getByRole("button", { name: "READYを取り消す" })).toBeVisible();
   await guest.getByRole("button", { name: "再戦READY" }).click();
@@ -296,7 +376,10 @@ test("plays all three stage modes against COM and resets between rematches", asy
       await input.pressSequentially(guide.slice(splitIndex), { delay: 2 });
       if (mode.key === "hpBattle") {
         for (let attempt = 0; attempt < 12 && !(await host.locator(".resultPanel").isVisible()); attempt += 1) {
-          await input.pressSequentially(await readInputGuide(host), { delay: 2 });
+          const nextGuide = await readInputGuide(host);
+          await input.pressSequentially(nextGuide, { delay: 2, timeout: 2_000 }).catch(async (error: unknown) => {
+            if (!(await host.locator(".resultPanel").isVisible())) throw error;
+          });
         }
       }
       await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 20_000 });
