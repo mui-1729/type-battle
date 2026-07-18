@@ -13,12 +13,15 @@
 
 html {
   min-width: 320px;
+  height: 100%;
+  overflow: hidden;
   background: #0874de;
 }
 
 body {
-  min-height: 100svh;
-  overflow-x: hidden;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   color: var(--game-ink);
   background: #0874de;
   font-family: "Arial Black", "Yu Gothic", "Hiragino Kaku Gothic ProN", system-ui, sans-serif;
@@ -35,7 +38,8 @@ select {
   position: relative;
   isolation: isolate;
   width: 100%;
-  min-height: 100svh;
+  height: 100dvh;
+  min-height: 0;
   padding: 24px clamp(22px, 4vw, 76px) 34px;
   overflow: hidden;
   color: var(--game-ink);
@@ -49,7 +53,7 @@ select {
 
 .appShell::before {
   position: absolute;
-  inset: 56% -5% -5%;
+  inset: 56% 0 0;
   z-index: -2;
   content: "";
   background:
@@ -431,9 +435,8 @@ select {
 /* How to play */
 .howToPlayPage {
   display: grid;
-  align-content: start;
-  grid-template-rows: auto 1fr;
-  gap: clamp(34px, 6vh, 72px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: clamp(18px, 3vh, 34px);
 }
 
 .howToPlayPage .topBar {
@@ -463,10 +466,9 @@ select {
 
 .howToPlayGrid {
   display: grid;
-  align-items: start;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(18px, 2.4vw, 32px);
-  width: min(1240px, 100%);
+  place-items: center;
+  width: min(760px, 100%);
+  min-height: 0;
   margin: 0 auto;
 }
 
@@ -474,7 +476,8 @@ select {
   display: grid;
   align-content: start;
   gap: 24px;
-  min-height: 300px;
+  width: 100%;
+  min-height: min(390px, 46vh);
   padding: clamp(26px, 3vw, 38px);
   color: #07122f;
   border: 4px solid rgba(255, 255, 255, .95);
@@ -520,6 +523,29 @@ select {
   font-weight: 700;
   line-height: 1.9;
 }
+
+.howToPlayStepNav { display: grid; grid-template-columns: minmax(120px, 180px) auto minmax(120px, 180px); align-items: center; justify-content: center; gap: 24px; width: min(760px, 100%); margin: 0 auto; }
+.howToPlayDots { display: flex; align-items: center; justify-content: center; gap: 9px; }
+.howToPlayDots button { width: 12px; height: 12px; padding: 0; border: 2px solid #fff; border-radius: 999px; background: rgba(255,255,255,.4); transition: width 180ms ease, background 180ms ease; }
+.howToPlayDots button.active { width: 32px; background: #fff; }
+
+/* Feedback */
+.feedbackPage { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: clamp(20px, 4vh, 42px); }
+.feedbackPage .topBar { align-items: center; }
+.feedbackPage .brandBlock { width: min(560px, 52vw); color: #fff; text-align: right; text-shadow: 0 2px 5px rgba(3,35,94,.55); }
+.feedbackPage .brandBlock .eyebrow,
+.feedbackPage .topBarCopy { color: rgba(255,255,255,.92); }
+.feedbackCard { align-self: center; display: grid; gap: 24px; width: min(760px, 100%); max-height: 100%; margin: 0 auto; padding: clamp(24px, 4vw, 44px); border: 4px solid rgba(255,255,255,.95); border-radius: 30px; background: rgba(255,255,255,.97); box-shadow: var(--game-card-shadow); }
+.feedbackCardHeading { text-align: center; }
+.feedbackCardHeading h2 { margin: 0; font-size: clamp(26px, 4vw, 42px); }
+.feedbackCardHeading > p:last-child { margin: 12px 0 0; color: #425777; font-family: "Yu Gothic", system-ui, sans-serif; font-weight: 700; line-height: 1.7; }
+.feedbackKinds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.feedbackKinds > div { display: flex; align-items: center; gap: 14px; min-height: 92px; padding: 18px; border: 2px solid #dbe6f6; border-radius: 20px; background: #f4f8ff; }
+.feedbackKinds svg { flex: 0 0 auto; color: var(--game-blue); }
+.feedbackKinds span { display: grid; gap: 4px; }
+.feedbackKinds strong { font-size: 18px; }
+.feedbackKinds small { color: #526783; font-family: "Yu Gothic", system-ui, sans-serif; font-weight: 700; }
+.feedbackIssueButton { display: inline-flex; align-items: center; justify-content: center; gap: 10px; width: min(420px, 100%); margin: 0 auto; }
 
 /* Main workspace */
 .workspace,
@@ -612,6 +638,7 @@ select {
 }
 
 .isSoloSetup .sidePanel > * + * { padding-top: 0; border-top: 0; }
+.isSoloSetup .soloModePicker { grid-column: 1 / -1; }
 .isSoloSetup .nicknameSetupField { grid-column: 1 / -1; width: min(460px, 100%); justify-self: center; padding: 15px 20px; border-radius: 18px; background: #fff; }
 .isSoloSetup .dailyChallengePanel { grid-column: 1 / -1; display: grid; grid-template-columns: .85fr .85fr 1.5fr; gap: 0; max-width: 1120px; margin: 0 auto; padding: 0; overflow: hidden; border: 4px solid rgba(255,255,255,.92); border-radius: 28px; background: #fff; box-shadow: var(--game-card-shadow); }
 .isSoloSetup .dailyChallengePanel > .sectionHeading { grid-column: 1 / -1; padding: 0 0 22px; background: transparent; text-align: center; transform: translateY(-4px); }
@@ -633,8 +660,34 @@ select {
 .isSoloSetup .mistakeTrendPanel,
 .isSoloSetup .difficultySelector { min-height: 132px; padding: 20px; border: 3px solid rgba(255,255,255,.88); border-radius: 22px; background: rgba(255,255,255,.94); box-shadow: var(--game-card-shadow); }
 .isSoloSetup .difficultySelector { align-content: center; }
+.isSoloSetup-practice .difficultySelector,
+.isSoloSetup-mistakes .mistakeTrendPanel { grid-column: 1 / -1; width: min(760px, 100%); min-height: 360px; margin: 0 auto; align-content: center; }
 .isSoloSetup .panelLinks { display: none; }
 .isSoloSetup .matchSurface { display: none; }
+
+.soloModePicker {
+  display: grid;
+  align-content: center;
+  gap: 24px;
+  width: min(1120px, 100%);
+  min-height: min(620px, calc(100dvh - 150px));
+  margin: 0 auto;
+}
+
+.soloModePickerHeading { text-align: center; }
+.soloModePickerHeading h2 { margin: 0; font-size: clamp(34px, 5vw, 68px); }
+.soloModePickerHeading > p:last-child { margin: 10px 0 0; color: #123a82; font-size: 16px; font-weight: 900; }
+.soloModePickerGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.soloModeOption { display: grid; grid-template-columns: 64px minmax(0, 1fr) 28px; align-items: center; gap: 14px; min-height: 190px; padding: 24px; color: #081945; border: 4px solid rgba(255,255,255,.94); border-radius: 28px; background: rgba(255,255,255,.97); box-shadow: var(--game-card-shadow); text-align: left; transition: transform 180ms ease, box-shadow 180ms ease; }
+.soloModeOption:hover { transform: translateY(-3px); box-shadow: 0 20px 42px rgba(0,67,133,.3); }
+.soloModeOptionIcon { display: grid; place-items: center; width: 64px; height: 64px; color: #fff; border-radius: 20px; background: var(--game-blue); }
+.soloModeOption-daily .soloModeOptionIcon { background: #ed9b00; }
+.soloModeOption-mistakes .soloModeOptionIcon { background: #d94338; }
+.soloModeOptionCopy { display: grid; gap: 6px; min-width: 0; }
+.soloModeOptionCopy small { color: #2f5c9f; font-size: 11px; font-weight: 1000; letter-spacing: .12em; }
+.soloModeOptionCopy strong { font-size: clamp(20px, 2vw, 28px); }
+.soloModeOptionCopy span { color: #496184; font-size: 13px; font-weight: 800; line-height: 1.5; }
+.soloModeOptionArrow { color: #174b9b; }
 
 /* Lobby */
 .isLobby .brandBlock { width: min(470px, 42vw); }
@@ -900,6 +953,13 @@ select {
 .isPractice .statItem:first-child { border-left: 0; }
 .isPractice .resultPanel { position: relative; z-index: 5; }
 
+@media (min-width: 761px) {
+  .isBattle .battleStage { height: min(47dvh, 470px); }
+  .isBattle .promptBox { gap: 10px; height: min(230px, 26dvh); min-height: 0; margin-top: 12px; padding-block: 20px; }
+  .isBattle .promptDisplay { font-size: clamp(26px, 2.5vw, 40px); }
+  .isBattle .promptGuide { font-size: clamp(14px, 1.45vw, 22px); }
+}
+
 /* Countdown */
 .countdown { position: fixed; inset: 50% auto auto 50%; z-index: 30; display: grid; place-items: center; width: 180px; height: 180px; color: #fff; border: 8px solid #fff; border-radius: 50%; background: var(--game-blue); box-shadow: 0 0 0 18px rgba(6,104,232,.4), 0 18px 40px rgba(0,0,0,.3); font-family: Impact, sans-serif; font-size: 110px; transform: translate(-50%,-50%); }
 
@@ -920,12 +980,12 @@ select {
   .hpBattleArena { grid-template-columns: minmax(0,1fr) 70px minmax(0,1fr); gap: 4px; }
   .hpBattleFigure .stickFigure { width: 140px; height: 205px; }
   .howToPlayPage { gap: 28px; }
-  .howToPlayGrid { grid-template-columns: 1fr; width: min(720px, 100%); }
+  .howToPlayGrid { width: min(720px, 100%); }
   .howToPlayCard { min-height: 0; }
 }
 
 @media (max-width: 760px) {
-  .appShell { min-height: 100svh; padding: 14px 12px 26px; overflow-y: auto; }
+  .appShell { height: 100dvh; min-height: 0; padding: 14px 12px; overflow: hidden; }
   .topBar { min-height: 64px; }
   .headerHowTo { min-height: 50px; padding: 0 14px; border-radius: 14px; font-size: 14px; }
   .topBar .iconButton { width: 50px; height: 50px; min-height: 50px; }
@@ -939,6 +999,13 @@ select {
   .howToPlayIcon { width: 58px; height: 58px; border-radius: 18px; }
   .howToPlayCard .sectionHeading h2 { font-size: 22px; }
   .howToPlayCard > p { font-size: 16px; line-height: 1.8; }
+  .howToPlayStepNav { grid-template-columns: 1fr auto 1fr; gap: 8px; }
+  .howToPlayStepNav .uiButton { min-width: 0; min-height: 46px; padding-inline: 12px; }
+  .feedbackPage .topBar { align-items: stretch; }
+  .feedbackPage .brandBlock { width: 100%; text-align: left; }
+  .feedbackCard { align-self: start; gap: 16px; padding: 20px; border-radius: 22px; }
+  .feedbackKinds { grid-template-columns: 1fr; gap: 10px; }
+  .feedbackKinds > div { min-height: 72px; padding: 12px; }
   .homeModeMenu { align-content: start; gap: 24px; width: 100%; min-height: 0; margin-top: 10px; }
   .homeModeGrid { grid-template-columns: 1fr; gap: 18px; width: min(460px, 100%); }
   .modeCardButton { grid-template-columns: 130px 1fr; grid-template-rows: 1fr; align-items: center; min-height: 170px; padding: 15px; }
@@ -953,12 +1020,33 @@ select {
   .isBattleSetup .matchSurface { display: none; }
   .sidePanel { position: relative; top: 0; max-height: none; }
   .isSoloSetup .sidePanel { grid-template-columns: 1fr; padding-top: 20px; }
+  .soloModePicker { align-content: start; gap: 14px; min-height: 0; }
+  .soloModePickerHeading h2 { font-size: 32px; }
+  .soloModePickerHeading > p:last-child { font-size: 13px; }
+  .soloModePickerGrid { grid-template-columns: 1fr; gap: 10px; }
+  .soloModeOption { grid-template-columns: 52px minmax(0, 1fr) 24px; min-height: 108px; padding: 14px; border-radius: 20px; }
+  .soloModeOptionIcon { width: 52px; height: 52px; border-radius: 16px; }
+  .soloModeOptionCopy strong { font-size: 20px; }
+  .soloModeOptionCopy span { font-size: 11px; }
+  .isSoloSetup-practice .difficultySelector,
+  .isSoloSetup-mistakes .mistakeTrendPanel { min-height: 0; max-height: calc(100dvh - 120px); }
   .isSoloSetup .dailyChallengePanel { grid-template-columns: 1fr 1fr; }
   .isSoloSetup .dailyChallengePanel > .sectionHeading { grid-column: 1/-1; }
   .isSoloSetup .dailyChallengeHeader { grid-column: 1; grid-row: 2; }
   .isSoloSetup .dailyChallengeStats { grid-column: 2; grid-row: 2; }
   .isSoloSetup .dailyChallengePrompt { grid-column: 1/-1; grid-row: 3; min-height: 130px; }
   .isSoloSetup .dailyChallengePanel > .secondaryButton { grid-row: 4; }
+  .isSoloSetup-daily .dailyChallengePanel > .sectionHeading { padding-bottom: 10px; }
+  .isSoloSetup-daily .dailyChallengePanel > .sectionHeading h2 { font-size: 34px; }
+  .isSoloSetup-daily .dailyChallengePanel > .sectionHeading::after { margin-top: 8px; font-size: 13px; }
+  .isSoloSetup-daily .dailyChallengeHeader,
+  .isSoloSetup-daily .dailyChallengeStats { min-height: 104px; }
+  .isSoloSetup-daily .dailyChallengeHeader { padding: 12px; }
+  .isSoloSetup-daily .dailyChallengeHeader span { font-size: 13px; text-align: center; }
+  .isSoloSetup-daily .dailyChallengeHeader small { margin-top: 4px; font-size: 30px; }
+  .isSoloSetup-daily .dailyChallengePrompt { min-height: 92px; padding: 14px; font-size: 22px; }
+  .isSoloSetup-daily .dailyChallengePanel > .practiceStage { display: none; }
+  .isSoloSetup-daily .dailyChallengePanel > .secondaryButton { min-height: 62px; margin-block: 12px 16px; font-size: 20px; }
   .brandBlock { width: 52vw; }
   .gameLogo.isCompact .gameLogoWordmark > span { font-size: 30px !important; }
   .gameLogo.isCompact .stickFigure { width: 32px !important; height: 38px !important; }
@@ -978,6 +1066,14 @@ select {
   .lobbyReadyButton { width: 100%; min-height: 70px; font-size: 27px; }
   .isBattle .brandBlock,
   .isPractice .brandBlock { width: 62vw; }
+  .isBattle .brandBlock,
+  .isPractice .brandBlock { display: none; }
+  .isBattle .topBar,
+  .isPractice .topBar { flex-direction: row; align-items: center; min-height: 64px; }
+  .isBattle .headerBackSlot,
+  .isPractice .headerBackSlot { align-self: center; }
+  .isBattle .headerActions,
+  .isPractice .headerActions { margin-left: auto; }
   .battleStage,
   .battleStage[data-mode="race"],
   .battleStage[data-mode="timeAttack"],

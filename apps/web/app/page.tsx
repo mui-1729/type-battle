@@ -27,6 +27,7 @@ import type {
 } from "@type-battle/shared";
 import { GameHeader } from "./_components/game-header";
 import { HomeModeMenu } from "./_components/home-mode-menu";
+import { SoloModeMenu } from "./_components/solo-mode-menu";
 import { LobbyPrep } from "./_components/lobby-prep";
 import { BattleStage } from "./_components/battle-stage";
 import { PlayerSettingsModal } from "./_components/player-settings-modal";
@@ -113,6 +114,7 @@ type StoredRoomRecoveryState = {
 };
 
 type HomeMode = "battle" | "solo";
+type SoloSetupView = "menu" | "practice" | "daily" | "mistakes";
 type ExitRequest = "room" | "practice";
 
 const REALTIME_TRANSPORT: RealtimeTransport = "cloudflare";
@@ -138,6 +140,7 @@ export default function HomePage() {
   const [matchSettingsOpen, setMatchSettingsOpen] = useState(false);
   const [exitRequest, setExitRequest] = useState<ExitRequest | null>(null);
   const [homeMode, setHomeMode] = useState<HomeMode | null>(null);
+  const [soloSetupView, setSoloSetupView] = useState<SoloSetupView>("menu");
   const [accessoryIndex, setAccessoryIndex] = useState(0);
   const [joinCode, setJoinCode] = useState("");
   const [room, setRoom] = useState<RoomState | null>(null);
@@ -1010,14 +1013,7 @@ export default function HomePage() {
       return;
     }
 
-    const usesStackedLayout = window.matchMedia("(max-width: 1080px)").matches;
     input.focus({ preventScroll: true });
-
-    if (usesStackedLayout) {
-      const matchSurface = input.closest(".matchSurface");
-      const focusRegion = matchSurface?.querySelector(".battleStage, .promptBox");
-      focusRegion?.scrollIntoView({ block: "start", inline: "nearest", behavior: "auto" });
-    }
   }, [acceptingTextInput, activeTypingText]);
 
   const emitProgress = useCallback(
@@ -1486,6 +1482,7 @@ export default function HomePage() {
   const returnToPracticeMenu = useCallback(() => {
     clearPracticeState();
     resetTyping();
+    setSoloSetupView("menu");
     setHomeMode("solo");
     setExitRequest(null);
   }, [clearPracticeState, resetTyping]);
@@ -1575,7 +1572,7 @@ export default function HomePage() {
   const visualState = showHomeModeMenu
     ? "isHome"
     : showModeSetup && homeMode === "solo"
-      ? "isSoloSetup"
+      ? `isSoloSetup isSoloSetup-${soloSetupView}`
       : showModeSetup && homeMode === "battle"
         ? "isBattleSetup"
         : room?.status === "waiting"
@@ -1592,13 +1589,13 @@ export default function HomePage() {
         connected={connected}
         realtimeConfigured={realtimeConfigured}
         onOpenSettings={() => setSettingsOpen(true)}
-        exitAction={room ? { label: room.status === "finished" ? "ルームを退出" : "対戦を退出", onClick: requestRoomExit } : practiceSession || practiceResult ? { label: practiceResult ? "ひとり用メニューへ" : "練習をやめる", onClick: requestPracticeExit } : showModeSetup ? { label: "モード選択へ", onClick: () => setHomeMode(null) } : undefined}
+        exitAction={room ? { label: room.status === "finished" ? "ルームを退出" : "対戦を退出", onClick: requestRoomExit } : practiceSession || practiceResult ? { label: practiceResult ? "ひとり用メニューへ" : "練習をやめる", onClick: requestPracticeExit } : showModeSetup && homeMode === "solo" && soloSetupView !== "menu" ? { label: "ひとり用メニューへ", onClick: () => setSoloSetupView("menu") } : showModeSetup ? { label: "モード選択へ", onClick: () => setHomeMode(null) } : undefined}
       />
 
       {showHomeModeMenu ? (
         <HomeModeMenu
           onBattle={() => setHomeMode("battle")}
-          onSolo={() => setHomeMode("solo")}
+          onSolo={() => { setSoloSetupView("menu"); setHomeMode("solo"); }}
         />
       ) : (
       <section className={showModeSetup ? "workspace modeWorkspace" : "workspace"}>
@@ -1620,7 +1617,7 @@ export default function HomePage() {
             </div>
           ) : null}
 
-          {showModeSetup && !hasNickname ? (
+          {showModeSetup && !hasNickname && (homeMode === "battle" || soloSetupView === "menu") ? (
           <div className="fieldGroup nicknameSetupField">
             <label htmlFor="nickname">ニックネーム</label>
             <input
@@ -1634,6 +1631,14 @@ export default function HomePage() {
             />
             <small>開始前にニックネームを入力してください。</small>
           </div>
+          ) : null}
+
+          {!room && homeMode === "solo" && soloSetupView === "menu" ? (
+            <SoloModeMenu
+              onPractice={() => setSoloSetupView("practice")}
+              onDaily={() => setSoloSetupView("daily")}
+              onMistakes={() => setSoloSetupView("mistakes")}
+            />
           ) : null}
 
           {!room && homeMode === "battle" ? (
@@ -1674,7 +1679,7 @@ export default function HomePage() {
             </div>
           ) : null}
 
-          {!room && homeMode === "solo" ? (
+          {!room && homeMode === "solo" && soloSetupView === "daily" ? (
             <SurfaceCard className="dailyChallengePanel">
               <SectionHeading eyebrow="SOLO" title="デイリーチャレンジ" />
               <div className="dailyChallengeHeader">
@@ -1713,7 +1718,7 @@ export default function HomePage() {
             </SurfaceCard>
           ) : null}
 
-          {!room && homeMode === "solo" ? (
+          {!room && homeMode === "solo" && soloSetupView === "mistakes" ? (
           <div className="mistakeTrendPanel">
             <div className="mistakeTrendHeader">
               <div>
@@ -1754,7 +1759,7 @@ export default function HomePage() {
           </div>
           ) : null}
 
-          {!room && homeMode === "solo" ? (
+          {!room && homeMode === "solo" && soloSetupView === "practice" ? (
             <div className="difficultySelector">
               <span>練習モード</span>
               <div className="difficultyButtons">

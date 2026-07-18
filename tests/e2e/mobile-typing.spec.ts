@@ -1,13 +1,14 @@
 import { expect, test } from "@playwright/test";
-import { selectBattleMode, selectSoloMode, setNickname } from "./helpers";
+import { expectFixedViewport, selectBattleMode, selectPracticeMode, setNickname } from "./helpers";
 
 test("completes practice with mobile Japanese textarea input", async ({ page }) => {
   await page.goto("/");
-  await selectSoloMode(page);
+  await selectPracticeMode(page);
   await setNickname(page, "Mobile");
   await expect(page.locator(".connection")).toHaveClass(/isOnline/);
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expectFixedViewport(page);
 
   const guide = (await page.getByLabel("入力ガイド").innerText()).replace(/\s+/g, "");
   const textarea = page.getByLabel("入力欄");
@@ -36,6 +37,7 @@ test("completes practice with mobile Japanese textarea input", async ({ page }) 
 
   await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(page.locator(".resultPanel").getByText("もう一度練習")).toBeVisible();
+  await expectFixedViewport(page);
 
   const resultPanel = page.locator(".resultPanel");
   const panelHeightBefore = await resultPanel.evaluate((element) => element.getBoundingClientRect().height);
