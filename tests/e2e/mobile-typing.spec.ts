@@ -36,6 +36,19 @@ test("completes practice with mobile Japanese textarea input", async ({ page }) 
 
   await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(page.locator(".resultPanel").getByText("もう一度練習")).toBeVisible();
+
+  const resultPanel = page.locator(".resultPanel");
+  const panelHeightBefore = await resultPanel.evaluate((element) => element.getBoundingClientRect().height);
+  await resultPanel.getByRole("button", { name: "詳しい結果" }).click();
+  const detailsDialog = page.getByRole("dialog", { name: "詳しい結果" });
+  await expect(detailsDialog).toBeVisible();
+  expect(await resultPanel.evaluate((element) => element.getBoundingClientRect().height)).toBe(panelHeightBefore);
+
+  const dialogBox = await detailsDialog.boundingBox();
+  expect(dialogBox).not.toBeNull();
+  expect(dialogBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect((dialogBox?.x ?? 0) + (dialogBox?.width ?? 0)).toBeLessThanOrEqual(390);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
 });
 
 test("keeps the COM battle stage inside a 390px mobile viewport", async ({ page }) => {
