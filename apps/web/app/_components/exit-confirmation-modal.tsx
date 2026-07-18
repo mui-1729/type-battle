@@ -18,7 +18,7 @@ export function ExitConfirmationModal({
   onConfirm
 }: ExitConfirmationModalProps) {
   return (
-    <DialogOverlay className="exitConfirmationModal" titleId="exit-confirmation-title" onClose={onCancel}>
+    <DialogOverlay className="exitConfirmationModal" restoreFocus={false} titleId="exit-confirmation-title" onClose={onCancel}>
         <div className="modalHeader">
           <div>
             <p className="eyebrow">LEAVE GAME</p>

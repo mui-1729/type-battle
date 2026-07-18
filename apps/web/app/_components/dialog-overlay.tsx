@@ -4,6 +4,8 @@ import { createPortal } from "react-dom";
 type DialogOverlayProps = {
   children: ReactNode;
   className?: string;
+  closeOnBackdrop?: boolean;
+  restoreFocus?: boolean;
   titleId: string;
   onClose: () => void;
 };
@@ -11,7 +13,7 @@ type DialogOverlayProps = {
 const FOCUSABLE_SELECTOR =
   "button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])";
 
-export function DialogOverlay({ children, className, titleId, onClose }: DialogOverlayProps) {
+export function DialogOverlay({ children, className, closeOnBackdrop = true, restoreFocus = true, titleId, onClose }: DialogOverlayProps) {
   const dialogRef = useRef<HTMLElement>(null);
   const onCloseRef = useRef(onClose);
 
@@ -24,11 +26,17 @@ export function DialogOverlay({ children, className, titleId, onClose }: DialogO
     const appShell = document.querySelector<HTMLElement>(".appShell");
     const previousDocumentOverflow = document.documentElement.style.overflow;
     const previousBodyOverflow = document.body.style.overflow;
+    const previousBodyPaddingRight = document.body.style.paddingRight;
     const previousAppShellOverflow = appShell?.style.overflow;
     const previousAppShellInert = appShell?.inert;
+    const scrollbarWidth = Math.max(0, window.innerWidth - document.documentElement.clientWidth);
 
     document.documentElement.style.overflow = "hidden";
     document.body.style.overflow = "hidden";
+    if (scrollbarWidth > 0) {
+      const bodyPaddingRight = Number.parseFloat(window.getComputedStyle(document.body).paddingRight) || 0;
+      document.body.style.paddingRight = `${bodyPaddingRight + scrollbarWidth}px`;
+    }
     if (appShell) {
       appShell.style.overflow = "hidden";
       appShell.inert = true;
@@ -68,12 +76,13 @@ export function DialogOverlay({ children, className, titleId, onClose }: DialogO
     return () => {
       document.documentElement.style.overflow = previousDocumentOverflow;
       document.body.style.overflow = previousBodyOverflow;
+      document.body.style.paddingRight = previousBodyPaddingRight;
       if (appShell) {
         appShell.style.overflow = previousAppShellOverflow ?? "";
         appShell.inert = previousAppShellInert ?? false;
       }
       document.removeEventListener("keydown", handleKeyDown);
-      previouslyFocusedElement?.focus();
+      if (restoreFocus) previouslyFocusedElement?.focus();
     };
   }, []);
 
@@ -82,7 +91,7 @@ export function DialogOverlay({ children, className, titleId, onClose }: DialogO
       className="modalBackdrop"
       role="presentation"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (closeOnBackdrop && event.target === event.currentTarget) onClose();
       }}
     >
       <section

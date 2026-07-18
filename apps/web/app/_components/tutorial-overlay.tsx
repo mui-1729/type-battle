@@ -18,7 +18,7 @@ export function TutorialOverlay({ step, onNext, onClose }: TutorialOverlayProps)
   const isLast = step === TUTORIAL_STEPS.length - 1;
 
   return (
-    <DialogOverlay className="tutorialCard" titleId="tutorial-title" onClose={onClose}>
+    <DialogOverlay className="tutorialCard" closeOnBackdrop={false} titleId="tutorial-title" onClose={onClose}>
         <button className="iconButton tutorialClose" type="button" onClick={onClose} aria-label="遊び方を閉じる"><X size={20} /></button>
         <p className="eyebrow">HOW TO PLAY · {step + 1}/3</p>
         <h2 id="tutorial-title">{title}</h2>

@@ -486,7 +486,7 @@ test("completes a practice session", async ({ browser }) => {
 
   const resultPanel = page.locator(".resultPanel");
   const detailsButton = resultPanel.getByRole("button", { name: "詳しい結果" });
-  const panelHeightBefore = await resultPanel.evaluate((element) => element.getBoundingClientRect().height);
+  const panelBoxBefore = await resultPanel.boundingBox();
   const documentHeightBefore = await page.evaluate(() => document.documentElement.scrollHeight);
 
   await detailsButton.click();
@@ -495,7 +495,9 @@ test("completes a practice session", async ({ browser }) => {
   await expect(page.getByRole("button", { name: "詳しい結果を閉じる" })).toBeFocused();
   await expect(page.locator(".appShell")).toHaveAttribute("inert", "");
   await expect.poll(() => page.evaluate(() => document.documentElement.style.overflow)).toBe("hidden");
-  expect(await resultPanel.evaluate((element) => element.getBoundingClientRect().height)).toBe(panelHeightBefore);
+  const panelBoxAfter = await resultPanel.boundingBox();
+  expect(panelBoxBefore).not.toBeNull();
+  expect(panelBoxAfter).toEqual(panelBoxBefore);
   expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(documentHeightBefore);
 
   await page.keyboard.press("Escape");
@@ -520,7 +522,7 @@ test("can cancel and confirm leaving an active practice session", async ({ page 
   await expect(page.locator(".appShell")).toHaveAttribute("inert", "");
   await page.keyboard.press("Escape");
   await expect(exitDialog).toBeHidden();
-  await expect(exitButton).toBeFocused();
+  await expect(page.getByLabel("入力欄")).toBeFocused();
   await expect(page.locator(".status-playing")).toBeVisible();
 
   await exitButton.click();
