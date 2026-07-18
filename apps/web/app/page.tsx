@@ -159,11 +159,13 @@ export default function HomePage() {
   const [syncClock, setSyncClock] = useState(() => Date.now());
   const [lastProgressSentAt, setLastProgressSentAt] = useState<number | null>(null);
   const [localProgress, setLocalProgress] = useState<ProgressState>(createEmptyProgress());
+  const [roomFinishPending, setRoomFinishPending] = useState(false);
   const [practiceProgress, setPracticeProgress] = useState<ProgressState>(createEmptyProgress());
   const [inputMode, setInputMode] = useState<"kana" | "romaji">("romaji");
   const [inputModeInitialized, setInputModeInitialized] = useState(false);
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
   const localProgressRef = useRef<ProgressState>(createEmptyProgress());
+  const roomFinishPendingRef = useRef(false);
   const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
   const inputModeRef = useRef<"kana" | "romaji">("romaji");
   const dailyAttemptConsumedRef = useRef(false);
@@ -214,7 +216,8 @@ export default function HomePage() {
         syncClock,
         matchTimerMs,
         inputMode,
-        inputModeInitialized
+        inputModeInitialized,
+        roomFinishPending
       }),
     [
       room,
@@ -233,7 +236,8 @@ export default function HomePage() {
       syncClock,
       matchTimerMs,
       inputMode,
-      inputModeInitialized
+      inputModeInitialized,
+      roomFinishPending
     ]
   );
   const {
@@ -339,6 +343,8 @@ export default function HomePage() {
   const resetTyping = useCallback(() => {
     setLocalProgress(createEmptyProgress());
     localProgressRef.current = createEmptyProgress();
+    roomFinishPendingRef.current = false;
+    setRoomFinishPending(false);
     inputSequenceRef.current = 0;
     resultRef.current = null;
     setResult(null);
@@ -1022,6 +1028,11 @@ export default function HomePage() {
       setSyncClock(Date.now());
 
       if (finish) {
+        if (currentRoom.matchRule === "race") {
+          roomFinishPendingRef.current = true;
+          setRoomFinishPending(true);
+          typingInputRef.current?.blur();
+        }
         socket.emit("typing:finish", payload);
         return;
       }
@@ -1034,6 +1045,10 @@ export default function HomePage() {
   const handleTypedText = useCallback(
     (typedText: string) => {
       if (!typedText) {
+        return;
+      }
+
+      if (roomFinishPendingRef.current) {
         return;
       }
 
