@@ -443,7 +443,7 @@ test("disables stage motion for the player setting and OS preference", async ({ 
     if (source === "setting") {
       await page.getByTitle("設定を開く").click();
       await page.getByLabel("アニメーションを減らす").check();
-      await page.getByRole("button", { name: "設定を反映" }).click();
+      await page.getByRole("button", { name: "閉じる", exact: true }).click();
       await expect(page.locator("html")).toHaveClass(/reduced-motion/);
     }
 
@@ -488,7 +488,7 @@ test("saves and restores player settings from localStorage", async ({ browser })
   await page.getByRole("button", { name: "大" }).click();
 
   // Close modal
-  await page.getByRole("button", { name: "設定を反映" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
   await expect(page.getByText("プレイヤー設定")).not.toBeVisible();
 
   // Verify UI reflects changes
@@ -496,7 +496,7 @@ test("saves and restores player settings from localStorage", async ({ browser })
   await expect(page.locator(".modalContent input").first()).toHaveValue("Charlie");
   await expect(page.locator("html")).toHaveClass(/theme-dark/);
   await expect(page.locator("html")).toHaveClass(/font-large/);
-  await page.getByRole("button", { name: "設定を反映" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
 
   // Reload and verify persistence
   await page.reload();
@@ -506,4 +506,47 @@ test("saves and restores player settings from localStorage", async ({ browser })
   await expect(page.locator("html")).toHaveClass(/font-large/);
 
   await context.close();
+});
+
+test("contains settings focus and restores focus and scroll state on Escape", async ({ page }) => {
+  await page.goto("/");
+  const settingsButton = page.getByTitle("設定を開く");
+  await settingsButton.focus();
+  await page.evaluate(() => {
+    document.documentElement.style.overflow = "clip";
+    document.body.style.overflow = "scroll";
+    const appShell = document.querySelector<HTMLElement>(".appShell");
+    if (appShell) {
+      appShell.style.overflow = "auto";
+    }
+  });
+
+  await settingsButton.click();
+  const dialog = page.getByRole("dialog", { name: "プレイヤー設定" });
+  const headerCloseButton = page.getByRole("button", { name: "設定を閉じる" });
+  const footerCloseButton = page.getByRole("button", { name: "閉じる", exact: true });
+
+  await expect(dialog).toBeVisible();
+  await expect(headerCloseButton).toBeFocused();
+  await expect(page.locator(".appShell")).toHaveAttribute("inert", "");
+  await expect.poll(() => page.evaluate(() => ({
+    document: document.documentElement.style.overflow,
+    body: document.body.style.overflow,
+    appShell: document.querySelector<HTMLElement>(".appShell")?.style.overflow
+  }))).toEqual({ document: "hidden", body: "hidden", appShell: "hidden" });
+
+  await page.keyboard.press("Shift+Tab");
+  await expect(footerCloseButton).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(headerCloseButton).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(settingsButton).toBeFocused();
+  await expect(page.locator(".appShell")).not.toHaveAttribute("inert", "");
+  await expect.poll(() => page.evaluate(() => ({
+    document: document.documentElement.style.overflow,
+    body: document.body.style.overflow,
+    appShell: document.querySelector<HTMLElement>(".appShell")?.style.overflow
+  }))).toEqual({ document: "clip", body: "scroll", appShell: "auto" });
 });
