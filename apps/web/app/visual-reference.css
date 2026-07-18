@@ -38,7 +38,7 @@ select {
   position: relative;
   isolation: isolate;
   width: 100%;
-  height: 100dvh;
+  height: var(--visual-viewport-height, 100dvh);
   min-height: 0;
   padding: 24px clamp(22px, 4vw, 76px) 34px;
   overflow: hidden;
@@ -470,6 +470,9 @@ select {
   width: min(760px, 100%);
   min-height: 0;
   margin: 0 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .howToPlayCard {
@@ -535,7 +538,7 @@ select {
 .feedbackPage .brandBlock { width: min(560px, 52vw); color: #fff; text-align: right; text-shadow: 0 2px 5px rgba(3,35,94,.55); }
 .feedbackPage .brandBlock .eyebrow,
 .feedbackPage .topBarCopy { color: rgba(255,255,255,.92); }
-.feedbackCard { align-self: center; display: grid; gap: 24px; width: min(760px, 100%); max-height: 100%; margin: 0 auto; padding: clamp(24px, 4vw, 44px); border: 4px solid rgba(255,255,255,.95); border-radius: 30px; background: rgba(255,255,255,.97); box-shadow: var(--game-card-shadow); }
+.feedbackCard { align-self: center; display: grid; gap: 24px; width: min(760px, 100%); min-height: 0; max-height: 100%; margin: 0 auto; padding: clamp(24px, 4vw, 44px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border: 4px solid rgba(255,255,255,.95); border-radius: 30px; background: rgba(255,255,255,.97); box-shadow: var(--game-card-shadow); }
 .feedbackCardHeading { text-align: center; }
 .feedbackCardHeading h2 { margin: 0; font-size: clamp(26px, 4vw, 42px); }
 .feedbackCardHeading > p:last-child { margin: 12px 0 0; color: #425777; font-family: "Yu Gothic", system-ui, sans-serif; font-weight: 700; line-height: 1.7; }
@@ -630,9 +633,11 @@ select {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
-  max-height: none;
+  max-height: calc(var(--visual-viewport-height, 100dvh) - 136px);
   padding: 0;
-  overflow: visible;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   background: transparent;
   box-shadow: none;
 }
@@ -764,6 +769,9 @@ select {
 .isPractice .sidePanel { display: none; }
 .isBattle .connection,
 .isPractice .connection { display: none; }
+.isPractice .brandBlock { display: none; }
+.isPractice .topBar { align-items: center; min-height: 64px; }
+.isPractice .headerActions { margin-left: auto; }
 .isBattle .matchSurface,
 .isPractice .matchSurface { min-height: 0; }
 .isBattle:not(.isBattle-hpBattle) .brandBlock { margin-top: 18px; }
@@ -931,7 +939,7 @@ select {
 
 /* Practice */
 .isPractice .brandBlock { position: absolute; top: -12px; left: 50%; width: min(720px, 52vw); transform: translateX(-50%); }
-.isPractice .workspace { margin-top: 98px; }
+.isPractice .workspace { margin-top: 0; }
 .isPractice .gameLogo.isCompact .gameLogoWordmark > span { font-size: clamp(50px, 5vw, 86px); }
 .isPractice .gameLogo.isCompact .stickFigure { width: 62px; height: 70px; }
 .isPractice .brandBlock::after { display: block; margin-top: 6px; color: #167c22; text-align: center; text-shadow: 0 0 5px #fff, 0 0 9px #fff; font-size: clamp(26px, 3vw, 44px); font-weight: 1000; letter-spacing: .35em; content: "— 練 習 —"; }
@@ -985,7 +993,7 @@ select {
 }
 
 @media (max-width: 760px) {
-  .appShell { height: 100dvh; min-height: 0; padding: 14px 12px; overflow: hidden; }
+  .appShell { height: var(--visual-viewport-height, 100dvh); min-height: 0; padding: 14px 12px; overflow: hidden; }
   .topBar { min-height: 64px; }
   .headerHowTo { min-height: 50px; padding: 0 14px; border-radius: 14px; font-size: 14px; }
   .topBar .iconButton { width: 50px; height: 50px; min-height: 50px; }
@@ -1068,12 +1076,22 @@ select {
   .isPractice .brandBlock { width: 62vw; }
   .isBattle .brandBlock,
   .isPractice .brandBlock { display: none; }
+  .appShell.isBattle,
+  .appShell.isPractice { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 14px; }
   .isBattle .topBar,
   .isPractice .topBar { flex-direction: row; align-items: center; min-height: 64px; }
   .isBattle .headerBackSlot,
   .isPractice .headerBackSlot { align-self: center; }
   .isBattle .headerActions,
   .isPractice .headerActions { margin-left: auto; }
+  .isBattle .workspace,
+  .isPractice .workspace { height: 100%; min-height: 0; }
+  .isBattle .matchSurface,
+  .isPractice .matchSurface { height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .isBattle .battleStage,
+  .isPractice .practiceStage,
+  .isBattle .promptBox,
+  .isPractice .promptBox { flex-shrink: 0; }
   .battleStage,
   .battleStage[data-mode="race"],
   .battleStage[data-mode="timeAttack"],

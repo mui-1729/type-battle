@@ -58,6 +58,22 @@ test("keeps every setup screen fixed to one viewport", async ({ page }) => {
   }
 });
 
+test("keeps nickname correction available before opening a solo activity", async ({ page }) => {
+  await page.goto("/");
+  await setNickname(page, "");
+  await selectSoloMode(page);
+
+  await page.getByRole("button", { name: /練習する/ }).click();
+  const nicknameInput = page.getByLabel("ニックネーム");
+  await expect(nicknameInput).toBeVisible();
+  await expect(nicknameInput).toBeFocused();
+  await expect(page.locator(".errorText")).toBeVisible();
+
+  await nicknameInput.fill("SoloPlayer");
+  await page.getByRole("button", { name: /練習する/ }).click();
+  await expect(page.getByRole("button", { name: "練習を開始" })).toBeVisible();
+});
+
 test("keeps the how-to-play steps readable and paged across screen sizes", async ({ page }) => {
   for (const viewport of [
     { width: 1440, height: 900 },

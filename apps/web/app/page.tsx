@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Clipboard, Swords, Users } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   createRealtimeSocket,
   getDefaultRealtimeUrl,
@@ -130,6 +131,7 @@ export default function HomePage() {
   const nicknameInputRef = useRef<HTMLInputElement | null>(null);
   const countdownSecondRef = useRef<number | null>(null);
   const typingInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const matchSurfaceRef = useRef<HTMLElement | null>(null);
   const exitTriggerRef = useRef<HTMLElement | null>(null);
   const [connected, setConnected] = useState(false);
   const [guestSession, setGuestSession] = useState<GuestSession | null>(null);
@@ -141,6 +143,7 @@ export default function HomePage() {
   const [exitRequest, setExitRequest] = useState<ExitRequest | null>(null);
   const [homeMode, setHomeMode] = useState<HomeMode | null>(null);
   const [soloSetupView, setSoloSetupView] = useState<SoloSetupView>("menu");
+  const [visualViewportHeight, setVisualViewportHeight] = useState<number | null>(null);
   const [accessoryIndex, setAccessoryIndex] = useState(0);
   const [joinCode, setJoinCode] = useState("");
   const [room, setRoom] = useState<RoomState | null>(null);
@@ -1016,6 +1019,41 @@ export default function HomePage() {
     input.focus({ preventScroll: true });
   }, [acceptingTextInput, activeTypingText]);
 
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) {
+      return;
+    }
+
+    const updateViewportHeight = () => {
+      const nextHeight = Math.round(viewport.height);
+      const layoutHeight = document.documentElement.clientHeight;
+      setVisualViewportHeight(nextHeight < layoutHeight - 80 ? nextHeight : null);
+    };
+    updateViewportHeight();
+    viewport.addEventListener("resize", updateViewportHeight);
+    return () => viewport.removeEventListener("resize", updateViewportHeight);
+  }, []);
+
+  useEffect(() => {
+    if (!acceptingTextInput || visualViewportHeight === null) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      const surface = matchSurfaceRef.current;
+      const prompt = surface?.querySelector<HTMLElement>(".promptBox");
+      if (!surface || !prompt || surface.scrollHeight <= surface.clientHeight) {
+        return;
+      }
+
+      const promptBottom = prompt.offsetTop + prompt.offsetHeight;
+      surface.scrollTo({ top: Math.max(0, promptBottom - surface.clientHeight + 12), behavior: "instant" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [acceptingTextInput, activeTypingText, visualViewportHeight]);
+
   const emitProgress = useCallback(
     (input: string, finish: boolean) => {
       const socket = socketRef.current;
@@ -1569,6 +1607,19 @@ export default function HomePage() {
   const showHomeModeMenu = !room && !practiceSession && !practiceResult && homeMode === null && !isRecoveringStoredRoom;
   const showModeSetup = !room && !practiceSession && !practiceResult && homeMode !== null;
   const hasNickname = nickname.trim().length > 0;
+  const openSoloSetupView = (view: Exclude<SoloSetupView, "menu">) => {
+    if (view !== "mistakes") {
+      const validationError = validateNickname(nicknameRef.current);
+      if (validationError) {
+        setError(validationError);
+        window.requestAnimationFrame(() => nicknameInputRef.current?.focus());
+        return;
+      }
+    }
+
+    setError("");
+    setSoloSetupView(view);
+  };
   const visualState = showHomeModeMenu
     ? "isHome"
     : showModeSetup && homeMode === "solo"
@@ -1584,7 +1635,10 @@ export default function HomePage() {
               : "isSetup";
 
   return (
-    <main className={`appShell ${visualState}${activeResult ? " hasResult" : ""}`}>
+    <main
+      className={`appShell ${visualState}${activeResult ? " hasResult" : ""}`}
+      style={visualViewportHeight === null ? undefined : { "--visual-viewport-height": `${visualViewportHeight}px` } as CSSProperties}
+    >
       <GameHeader
         connected={connected}
         realtimeConfigured={realtimeConfigured}
@@ -1635,9 +1689,9 @@ export default function HomePage() {
 
           {!room && homeMode === "solo" && soloSetupView === "menu" ? (
             <SoloModeMenu
-              onPractice={() => setSoloSetupView("practice")}
-              onDaily={() => setSoloSetupView("daily")}
-              onMistakes={() => setSoloSetupView("mistakes")}
+              onPractice={() => openSoloSetupView("practice")}
+              onDaily={() => openSoloSetupView("daily")}
+              onMistakes={() => openSoloSetupView("mistakes")}
             />
           ) : null}
 
@@ -1845,6 +1899,7 @@ export default function HomePage() {
         </aside>
 
         <section
+          ref={matchSurfaceRef}
           className="matchSurface"
           aria-label="タイピング対戦"
           onPointerDown={(event) => {

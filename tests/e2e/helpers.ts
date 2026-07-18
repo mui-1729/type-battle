@@ -3,22 +3,29 @@ import { expect, type Page } from "@playwright/test";
 export async function expectFixedViewport(page: Page): Promise<void> {
   const metrics = await page.evaluate(() => {
     const shell = document.querySelector<HTMLElement>(".appShell");
+    const isVisible = (element: HTMLElement) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number.parseFloat(style.opacity) > 0.05 &&
+        rect.width > 0 &&
+        rect.height > 0;
+    };
+    const isOutsideViewport = (element: HTMLElement) => {
+      const rect = element.getBoundingClientRect();
+      return rect.top < 0 || rect.left < 0 || rect.bottom > window.innerHeight || rect.right > window.innerWidth;
+    };
     const outsideControls = Array.from(document.querySelectorAll<HTMLElement>(".appShell button, .appShell a, .appShell input, .appShell select"))
-      .filter((element) => {
-        const style = getComputedStyle(element);
-        const rect = element.getBoundingClientRect();
-        return style.display !== "none" &&
-          style.visibility !== "hidden" &&
-          Number.parseFloat(style.opacity) > 0.05 &&
-          style.pointerEvents !== "none" &&
-          rect.width > 0 &&
-          rect.height > 0;
-      })
-      .filter((element) => {
-        const rect = element.getBoundingClientRect();
-        return rect.top < 0 || rect.left < 0 || rect.bottom > window.innerHeight || rect.right > window.innerWidth;
-      })
+      .filter((element) => isVisible(element) && getComputedStyle(element).pointerEvents !== "none")
+      .filter(isOutsideViewport)
       .map((element) => element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 40) ?? element.tagName);
+    const outsideContentRegions = Array.from(document.querySelectorAll<HTMLElement>(
+      ".feedbackCard, .howToPlayCard, .soloModePicker, .dailyChallengePanel, .difficultySelector, .mistakeTrendPanel, .battleStage, .practiceStage, .promptBox, .resultPanel"
+    ))
+      .filter(isVisible)
+      .filter(isOutsideViewport)
+      .map((element) => element.className);
 
     return {
       documentHeight: document.documentElement.scrollHeight,
@@ -27,7 +34,8 @@ export async function expectFixedViewport(page: Page): Promise<void> {
       viewportWidth: window.innerWidth,
       shellScrollTop: shell?.scrollTop ?? 0,
       shellScrollLeft: shell?.scrollLeft ?? 0,
-      outsideControls
+      outsideControls,
+      outsideContentRegions
     };
   });
 
@@ -36,6 +44,7 @@ export async function expectFixedViewport(page: Page): Promise<void> {
   expect(metrics.shellScrollTop).toBe(0);
   expect(metrics.shellScrollLeft).toBe(0);
   expect(metrics.outsideControls).toEqual([]);
+  expect(metrics.outsideContentRegions).toEqual([]);
 }
 
 export async function readInputGuide(page: Page): Promise<string> {
