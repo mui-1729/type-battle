@@ -667,6 +667,48 @@ test("saves and restores player settings from localStorage", async ({ browser })
   await context.close();
 });
 
+test("keeps dark theme supporting text readable", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "ダーク" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+
+  await selectDailyMode(page);
+  await expectFixedViewport(page);
+
+  const dailyContrast = await page.evaluate(() => {
+    const cardBackground = [14, 30, 54];
+    const selectors = [
+      ".dailyChallengePanel > .sectionHeading::after",
+      ".dailyChallengeHeader small",
+      ".dailyChallengeStats span"
+    ];
+    const luminance = (channels: number[]) => channels
+      .map((channel) => {
+        const value = channel / 255;
+        return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      })
+      .reduce((total, value, index) => total + value * [0.2126, 0.7152, 0.0722][index], 0);
+    const backgroundLuminance = luminance(cardBackground);
+
+    return selectors.map((selector) => {
+      const hasPseudoElement = selector.endsWith("::after");
+      const element = document.querySelector(selector.replace("::after", ""));
+      const color = getComputedStyle(element!, hasPseudoElement ? "::after" : null).color;
+      const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [0, 0, 0];
+      const foregroundLuminance = luminance(channels);
+      return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+        (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+    });
+  });
+  dailyContrast.forEach((ratio) => expect(ratio).toBeGreaterThanOrEqual(4.5));
+
+  await page.goto("/feedback");
+  await expectFixedViewport(page);
+  await expect(page.locator(".feedbackCard")).toHaveCSS("background-color", "rgba(14, 30, 54, 0.94)");
+});
+
 test("contains settings focus and restores focus and scroll state on Escape", async ({ page }) => {
   await page.goto("/");
   const settingsButton = page.getByTitle("設定を開く");
