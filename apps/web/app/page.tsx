@@ -578,11 +578,16 @@ export default function HomePage() {
             setStoredRoomRecovery({ status: "idle", message: "" });
             setError("");
             setPlayerId(response.data.playerId);
+            // Clear transient typing state before applying the stored snapshot.
+            // A finished room carries its result in the snapshot, so resetting
+            // afterwards would overwrite that result with null in the same batch.
+            resetTyping();
+            roomRef.current = response.data.room;
+            resultRef.current = response.data.room.result ?? null;
             setRoom(response.data.room);
             setResult(response.data.room.result ?? null);
             updateGuestSession();
             clearPracticeState();
-            resetTyping();
             return;
           }
 
