@@ -61,6 +61,7 @@ import { detectDeviceKind } from "./_lib/device-kind";
 import { advanceTypingProgress } from "./_lib/typing-input-strategy";
 import { shouldHandleDesktopTypingKey } from "./_lib/desktop-typing-input";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
+import { resolveRoomSnapshot } from "./_lib/room-state-order";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
 import {
   getStoredRoomJoinFailureAction,
@@ -386,16 +387,21 @@ export default function HomePage() {
   }, [socketMode]);
 
   const attachSocketHandlers = useCallback((socket: ClientSocket) => {
-    const applyRoomSnapshot = (nextRoom: RoomState) => {
-      const nextResult = nextRoom.result ?? null;
-      roomRef.current = nextRoom;
-      resultRef.current = nextResult;
-      setRoom(nextRoom);
-      setResult(nextResult);
+    const applyRoomSnapshot = (nextRoom: RoomState, beforeApply?: () => void) => {
+      const resolution = resolveRoomSnapshot(roomRef.current, resultRef.current, nextRoom);
+      if (!resolution.accepted) {
+        return false;
+      }
+      beforeApply?.();
+      roomRef.current = resolution.room;
+      resultRef.current = resolution.result;
+      setRoom(resolution.room);
+      setResult(resolution.result);
 
-      if (nextRoom.status === "finished" || nextResult) {
+      if (nextRoom.status === "finished" || resolution.result) {
         typingInputRef.current?.blur();
       }
+      return true;
     };
 
     socket.on("connect", () => {
@@ -431,9 +437,8 @@ export default function HomePage() {
             return;
           }
 
-          resetTyping();
           setPlayerId(response.data.playerId);
-          applyRoomSnapshot(response.data.room);
+          applyRoomSnapshot(response.data.room, resetTyping);
         }
       );
     });
@@ -573,11 +578,16 @@ export default function HomePage() {
             setStoredRoomRecovery({ status: "idle", message: "" });
             setError("");
             setPlayerId(response.data.playerId);
+            // Clear transient typing state before applying the stored snapshot.
+            // A finished room carries its result in the snapshot, so resetting
+            // afterwards would overwrite that result with null in the same batch.
+            resetTyping();
+            roomRef.current = response.data.room;
+            resultRef.current = response.data.room.result ?? null;
             setRoom(response.data.room);
             setResult(response.data.room.result ?? null);
             updateGuestSession();
             clearPracticeState();
-            resetTyping();
             return;
           }
 
@@ -1920,16 +1930,18 @@ export default function HomePage() {
                 </div>
               )}
 
-              <TypingInput
-                inputRef={typingInputRef}
-                deviceKind={activeInputDeviceKind}
-                expectedText={activeTypingText}
-                progressIndex={activeGuideProgressIndex}
-                acceptingInput={acceptingTextInput}
-                loop={isTimeAttackPlaying}
-                inputKey={typingInputKey}
-                onTextInput={handleTypedText}
-              />
+              {!result ? (
+                <TypingInput
+                  inputRef={typingInputRef}
+                  deviceKind={activeInputDeviceKind}
+                  expectedText={activeTypingText}
+                  progressIndex={activeGuideProgressIndex}
+                  acceptingInput={acceptingTextInput}
+                  loop={isTimeAttackPlaying}
+                  inputKey={typingInputKey}
+                  onTextInput={handleTypedText}
+                />
+              ) : null}
               {room?.status === "playing" ? (
                 <p className="infoText" role="status" aria-live="polite">
                   {getProgressSyncLabel(progressSyncState)}

@@ -11,6 +11,7 @@ class FakeStorage {
   readonly failPutPrefixes = new Set<string>();
   alarmAt: number | null = null;
   failAlarmWrites = false;
+  roomPutGate: Promise<void> | null = null;
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
     return this.values.get(key) as T | undefined;
@@ -31,6 +32,9 @@ class FakeStorage {
   }
 
   async put<T = unknown>(key: string, value: T): Promise<void> {
+    if (key === "room" && this.roomPutGate) {
+      await this.roomPutGate;
+    }
     if ([...this.failPutPrefixes].some((prefix) => key.startsWith(prefix))) {
       throw new Error(`put failed for ${key}`);
     }
@@ -612,8 +616,9 @@ describe("room authority", () => {
   });
 
   it("ends a race for both players when the first player finishes", async () => {
+    const storage = new FakeStorage();
     const roomAuthority = new RoomAuthorityDurableObject(
-      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
     );
     const hostSocket = new FakeSocket();
     const guestSocket = new FakeSocket();
@@ -653,10 +658,22 @@ describe("room authority", () => {
     }));
     await vi.advanceTimersByTimeAsync(3_000);
 
+    let releasePersistence!: () => void;
+    storage.roomPutGate = new Promise<void>((resolve) => {
+      releasePersistence = resolve;
+    });
+    storage.failPutPrefixes.add("room");
     sendTypingInput(hostSocket, "RF34GH", getCountdownRoom(hostSocket).prompt?.typing.romaji ?? "");
-    await flushAsyncWork();
 
     for (const socket of [hostSocket, guestSocket]) {
+      const terminalMessages = parseMessages(socket).filter(
+        (message) => message.type === "server:room:state" || message.type === "server:match:result"
+      );
+      expect(terminalMessages.slice(-2).map((message) => message.type)).toEqual([
+        "server:room:state",
+        "server:match:result"
+      ]);
+      expect(terminalMessages.at(-2)?.payload).toMatchObject({ status: "finished" });
       const result = [...parseMessages(socket)]
         .reverse()
         .find((message) => message.type === "server:match:result")?.payload as
@@ -668,6 +685,9 @@ describe("room authority", () => {
       ]));
     }
 
+    releasePersistence();
+    await flushAsyncWork();
+
     const guestMessageCount = guestSocket.messages.length;
     guestSocket.receive(JSON.stringify({
       id: "msg-progress-after-race-finished",
@@ -677,6 +697,75 @@ describe("room authority", () => {
     await flushAsyncWork();
 
     expect(guestSocket.messages).toHaveLength(guestMessageCount);
+  });
+
+  it("broadcasts and persists post-finish departures without repeating the match result", async () => {
+    const storage = new FakeStorage();
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "PL34MN" });
+    roomAuthority.attachSocket(guestSocket as unknown as WebSocket, { roomCode: "PL34MN" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-post-finish-leave",
+      type: "client:room:create",
+      payload: { nickname: "Alice", guestId: "guest-post-finish-host", sessionId: "session-post-finish-host" }
+    }));
+    await flushAsyncWork();
+    guestSocket.receive(JSON.stringify({
+      id: "msg-join-post-finish-leave",
+      type: "client:room:join",
+      payload: {
+        roomCode: "PL34MN",
+        nickname: "Bob",
+        guestId: "guest-post-finish-guest",
+        sessionId: "session-post-finish-guest"
+      }
+    }));
+    await flushAsyncWork();
+
+    for (const [socket, id] of [[hostSocket, "host"], [guestSocket, "guest"]] as const) {
+      socket.receive(JSON.stringify({
+        id: `msg-ready-post-finish-leave-${id}`,
+        type: "client:player:ready",
+        payload: { roomCode: "PL34MN", ready: true }
+      }));
+    }
+    hostSocket.receive(JSON.stringify({
+      id: "msg-start-post-finish-leave",
+      type: "client:match:start",
+      payload: { roomCode: "PL34MN" }
+    }));
+    await vi.advanceTimersByTimeAsync(3_000);
+    sendTypingInput(hostSocket, "PL34MN", getCountdownRoom(hostSocket).prompt?.typing.romaji ?? "");
+    await flushAsyncWork();
+
+    const resultCountBeforeLeave = parseMessages(hostSocket)
+      .filter((message) => message.type === "server:match:result").length;
+    guestSocket.receive(JSON.stringify({
+      id: "msg-post-finish-leave",
+      type: "client:room:leave",
+      payload: { roomCode: "PL34MN" }
+    }));
+    await flushAsyncWork();
+
+    const latestRoom = [...parseMessages(hostSocket)]
+      .reverse()
+      .find((message) => message.type === "server:room:state")?.payload as RoomState | undefined;
+    expect(latestRoom?.players).toEqual([
+      expect.objectContaining({ id: "guest-post-finish-host" })
+    ]);
+    expect(parseMessages(hostSocket).filter((message) => message.type === "server:match:result"))
+      .toHaveLength(resultCountBeforeLeave);
+    expect(storage.values.get("room")).toMatchObject({
+      room: {
+        players: [expect.objectContaining({ id: "guest-post-finish-host" })]
+      }
+    });
   });
 
   it("preserves partial romaji input and its statistics when a player reconnects", async () => {
