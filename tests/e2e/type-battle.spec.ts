@@ -1,7 +1,10 @@
 import { expect, test } from "@playwright/test";
 import {
+  expectFixedViewport,
   readInputGuide,
   selectBattleMode,
+  selectDailyMode,
+  selectPracticeMode,
   selectSoloMode,
   setNickname,
   typeInputGuide
@@ -26,29 +29,74 @@ test("shows only one back action on every menu page", async ({ page }) => {
   }
 });
 
-test("keeps the how-to-play steps readable across screen sizes", async ({ page }) => {
+test("keeps every setup screen fixed to one viewport", async ({ page }) => {
   for (const viewport of [
-    { width: 1440, height: 900, expectedColumnCount: 3 },
-    { width: 1050, height: 900, expectedColumnCount: 1 },
-    { width: 390, height: 844, expectedColumnCount: 1 }
+    { width: 1440, height: 900 },
+    { width: 768, height: 1024 },
+    { width: 390, height: 844 }
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    await expectFixedViewport(page);
+
+    await selectSoloMode(page);
+    await expect(page.getByRole("heading", { name: "ひとりで遊ぶ" })).toBeVisible();
+    await expectFixedViewport(page);
+
+    for (const option of [/練習する/, /今日のチャレンジ/, /ミス詳細/] as const) {
+      await page.getByRole("button", { name: option }).click();
+      await expectFixedViewport(page);
+      await page.getByRole("button", { name: "ひとり用メニューへ" }).click();
+    }
+
+    await page.getByRole("button", { name: "モード選択へ" }).click();
+    await selectBattleMode(page);
+    await expectFixedViewport(page);
+
+    await page.goto("/feedback");
+    await expectFixedViewport(page);
+  }
+});
+
+test("keeps nickname correction available before opening a solo activity", async ({ page }) => {
+  await page.goto("/");
+  await setNickname(page, "");
+  await selectSoloMode(page);
+
+  await page.getByRole("button", { name: /練習する/ }).click();
+  const nicknameInput = page.getByLabel("ニックネーム");
+  await expect(nicknameInput).toBeVisible();
+  await expect(nicknameInput).toBeFocused();
+  await expect(page.locator(".errorText")).toBeVisible();
+
+  await nicknameInput.fill("SoloPlayer");
+  await page.getByRole("button", { name: /練習する/ }).click();
+  await expect(page.getByRole("button", { name: "練習を開始" })).toBeVisible();
+});
+
+test("keeps the how-to-play steps readable and paged across screen sizes", async ({ page }) => {
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1050, height: 900 },
+    { width: 390, height: 844 }
   ]) {
     await page.setViewportSize(viewport);
     await page.goto("/how-to-play");
 
-    await expect(page.locator(".howToPlayCard")).toHaveCount(3);
+    await expect(page.locator(".howToPlayCard")).toHaveCount(1);
     await expect(page.getByRole("heading", { level: 1, name: "遊び方" })).toBeVisible();
     await expect(page.getByRole("link", { name: "ホームへ戻る" })).toBeVisible();
-    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await expect(page.getByRole("heading", { name: "モードを選択" })).toBeVisible();
+    await page.getByRole("button", { name: "次へ" }).click();
+    await expect(page.getByRole("heading", { name: "表示された文字を入力" })).toBeVisible();
+    await page.getByRole("button", { name: "3ページ目" }).click();
+    await expect(page.getByRole("heading", { name: "結果を確認して再挑戦" })).toBeVisible();
+    await expectFixedViewport(page);
 
-    const gridColumnCount = await page.locator(".howToPlayGrid").evaluate((element) =>
-      getComputedStyle(element).gridTemplateColumns.trim().split(/\s+/).length
+    const bodyFontSize = await page.locator(".howToPlayCard > p").evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).fontSize)
     );
-    expect(gridColumnCount).toBe(viewport.expectedColumnCount);
-
-    const bodyFontSizes = await page.locator(".howToPlayCard > p").evaluateAll((elements) =>
-      elements.map((element) => Number.parseFloat(getComputedStyle(element).fontSize))
-    );
-    expect(bodyFontSizes.every((fontSize) => fontSize >= 16)).toBe(true);
+    expect(bodyFontSize).toBeGreaterThanOrEqual(16);
   }
 });
 
@@ -472,17 +520,19 @@ test("completes a practice session", async ({ browser }) => {
   const page = await context.newPage();
 
   await page.goto("/");
-  await selectSoloMode(page);
+  await selectPracticeMode(page);
   await setNickname(page, "Alice");
   await expect(page.locator(".connection")).toHaveClass(/isOnline/);
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expectFixedViewport(page);
   await expect(page.getByTestId("battle-stage")).toHaveCount(0);
 
   await typeInputGuide(page, await readInputGuide(page));
 
   await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(page.locator(".resultPanel").getByText("もう一度練習")).toBeVisible();
+  await expectFixedViewport(page);
 
   const resultPanel = page.locator(".resultPanel");
   const detailsButton = resultPanel.getByRole("button", { name: "詳しい結果" });
@@ -509,7 +559,7 @@ test("completes a practice session", async ({ browser }) => {
 
 test("can cancel and confirm leaving an active practice session", async ({ page }) => {
   await page.goto("/");
-  await selectSoloMode(page);
+  await selectPracticeMode(page);
   await setNickname(page, "PracticePlayer");
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
@@ -527,12 +577,12 @@ test("can cancel and confirm leaving an active practice session", async ({ page 
 
   await exitButton.click();
   await page.getByRole("button", { name: "練習をやめる" }).last().click();
-  await expect(page.getByRole("button", { name: "練習を開始" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "練習する" })).toBeVisible();
 });
 
 test("returns to the solo menu from a daily challenge result", async ({ page }) => {
   await page.goto("/");
-  await selectSoloMode(page);
+  await selectDailyMode(page);
   await setNickname(page, "DailyPlayer");
   await page.getByRole("button", { name: "今日の挑戦を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
@@ -540,7 +590,7 @@ test("returns to the solo menu from a daily challenge result", async ({ page }) 
   await typeInputGuide(page, await readInputGuide(page));
   await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await page.locator(".resultPanel").getByRole("button", { name: "ひとり用メニューへ" }).click();
-  await expect(page.getByRole("button", { name: "今日の挑戦を開始" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "今日のチャレンジ" })).toBeVisible();
 });
 
 test("disables stage motion for the player setting and OS preference", async ({ browser }) => {
