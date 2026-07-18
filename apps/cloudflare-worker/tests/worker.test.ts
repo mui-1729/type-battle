@@ -11,6 +11,7 @@ class FakeStorage {
   readonly failPutPrefixes = new Set<string>();
   alarmAt: number | null = null;
   failAlarmWrites = false;
+  roomPutGate: Promise<void> | null = null;
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
     return this.values.get(key) as T | undefined;
@@ -31,6 +32,9 @@ class FakeStorage {
   }
 
   async put<T = unknown>(key: string, value: T): Promise<void> {
+    if (key === "room" && this.roomPutGate) {
+      await this.roomPutGate;
+    }
     if ([...this.failPutPrefixes].some((prefix) => key.startsWith(prefix))) {
       throw new Error(`put failed for ${key}`);
     }
@@ -612,8 +616,9 @@ describe("room authority", () => {
   });
 
   it("ends a race for both players when the first player finishes", async () => {
+    const storage = new FakeStorage();
     const roomAuthority = new RoomAuthorityDurableObject(
-      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
     );
     const hostSocket = new FakeSocket();
     const guestSocket = new FakeSocket();
@@ -653,10 +658,22 @@ describe("room authority", () => {
     }));
     await vi.advanceTimersByTimeAsync(3_000);
 
+    let releasePersistence!: () => void;
+    storage.roomPutGate = new Promise<void>((resolve) => {
+      releasePersistence = resolve;
+    });
+    storage.failPutPrefixes.add("room");
     sendTypingInput(hostSocket, "RF34GH", getCountdownRoom(hostSocket).prompt?.typing.romaji ?? "");
-    await flushAsyncWork();
 
     for (const socket of [hostSocket, guestSocket]) {
+      const terminalMessages = parseMessages(socket).filter(
+        (message) => message.type === "server:room:state" || message.type === "server:match:result"
+      );
+      expect(terminalMessages.slice(-2).map((message) => message.type)).toEqual([
+        "server:room:state",
+        "server:match:result"
+      ]);
+      expect(terminalMessages.at(-2)?.payload).toMatchObject({ status: "finished" });
       const result = [...parseMessages(socket)]
         .reverse()
         .find((message) => message.type === "server:match:result")?.payload as
@@ -667,6 +684,9 @@ describe("room authority", () => {
         expect.objectContaining({ id: "guest-race-first-guest", finishStatus: "unfinished", totalTypedCharacters: 0 })
       ]));
     }
+
+    releasePersistence();
+    await flushAsyncWork();
 
     const guestMessageCount = guestSocket.messages.length;
     guestSocket.receive(JSON.stringify({

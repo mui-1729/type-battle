@@ -61,6 +61,7 @@ import { detectDeviceKind } from "./_lib/device-kind";
 import { advanceTypingProgress } from "./_lib/typing-input-strategy";
 import { shouldHandleDesktopTypingKey } from "./_lib/desktop-typing-input";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
+import { shouldApplyRoomSnapshot } from "./_lib/room-state-order";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
 import {
   getStoredRoomJoinFailureAction,
@@ -387,6 +388,9 @@ export default function HomePage() {
 
   const attachSocketHandlers = useCallback((socket: ClientSocket) => {
     const applyRoomSnapshot = (nextRoom: RoomState) => {
+      if (!shouldApplyRoomSnapshot(roomRef.current, resultRef.current, nextRoom)) {
+        return;
+      }
       const nextResult = nextRoom.result ?? null;
       roomRef.current = nextRoom;
       resultRef.current = nextResult;
@@ -1920,16 +1924,18 @@ export default function HomePage() {
                 </div>
               )}
 
-              <TypingInput
-                inputRef={typingInputRef}
-                deviceKind={activeInputDeviceKind}
-                expectedText={activeTypingText}
-                progressIndex={activeGuideProgressIndex}
-                acceptingInput={acceptingTextInput}
-                loop={isTimeAttackPlaying}
-                inputKey={typingInputKey}
-                onTextInput={handleTypedText}
-              />
+              {!result ? (
+                <TypingInput
+                  inputRef={typingInputRef}
+                  deviceKind={activeInputDeviceKind}
+                  expectedText={activeTypingText}
+                  progressIndex={activeGuideProgressIndex}
+                  acceptingInput={acceptingTextInput}
+                  loop={isTimeAttackPlaying}
+                  inputKey={typingInputKey}
+                  onTextInput={handleTypedText}
+                />
+              ) : null}
               {room?.status === "playing" ? (
                 <p className="infoText" role="status" aria-live="polite">
                   {getProgressSyncLabel(progressSyncState)}

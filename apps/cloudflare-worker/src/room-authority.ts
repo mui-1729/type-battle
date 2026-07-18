@@ -202,6 +202,7 @@ export class RoomAuthorityDurableObject {
   private readonly hooks: RoomEngineHooks;
   private maintenanceFallbackTimer: ReturnType<typeof setTimeout> | undefined;
   private retentionAlarmAt: number | null | undefined;
+  private lastFinalizedNotificationKey: string | null = null;
   private roomCode: string | null = null;
   private room: InternalRoom | null = null;
   readonly ready: Promise<void>;
@@ -496,6 +497,7 @@ export class RoomAuthorityDurableObject {
     );
 
     this.room = room;
+    this.lastFinalizedNotificationKey = null;
     this.recordPlayerSession(room.roomCode, room.hostPlayerId, parsedPayload.sessionId);
     this.setSocketRoom(socketId, room.hostPlayerId);
     this.sendAck(socketId, messageId, "client:room:create", {
@@ -574,8 +576,12 @@ export class RoomAuthorityDurableObject {
     this.detachSocketFromRoom(socketId);
 
     if (room) {
-      this.broadcastRoomState(room);
-      void this.persistRoom(room.roomCode);
+      if (room.status === "finished" && room.result) {
+        this.notifyMatchFinalized(room.result);
+      } else {
+        this.broadcastRoomState(room);
+        void this.persistRoom(room.roomCode);
+      }
       return;
     }
 
@@ -783,13 +789,7 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    this.clearMatchTimers();
-    await this.persistRoom(result.roomCode);
-    this.broadcastToAll({
-      id: crypto.randomUUID(),
-      type: "server:match:result",
-      payload: result
-    });
+    this.notifyMatchFinalized(result);
   }
 
   private async handleTypingFinish(socketId: string, payload: unknown): Promise<void> {
@@ -812,13 +812,7 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    this.clearMatchTimers();
-    await this.persistRoom(result.roomCode);
-    this.broadcastToAll({
-      id: crypto.randomUUID(),
-      type: "server:match:result",
-      payload: result
-    });
+    this.notifyMatchFinalized(result);
   }
 
   private async handleRematch(socketId: string, messageId: string, payload: unknown): Promise<void> {
@@ -1183,17 +1177,7 @@ export class RoomAuthorityDurableObject {
       }
 
       if (outcome.type === "result") {
-        this.broadcastToAll({
-          id: crypto.randomUUID(),
-          type: "server:match:result",
-          payload: outcome.result
-        });
-        const currentRoom = this.room;
-        if (currentRoom) {
-          this.broadcastRoomState(currentRoom);
-        }
-        this.clearMatchTimers();
-        void this.persistRoom(roomCode);
+        this.notifyMatchFinalized(outcome.result);
         return;
       }
 
@@ -1213,6 +1197,30 @@ export class RoomAuthorityDurableObject {
 
     this.timers.countdown = undefined;
     this.timers.bot = undefined;
+  }
+
+  private notifyMatchFinalized(result: MatchResult): void {
+    this.clearMatchTimers();
+
+    const room = this.room;
+    const notificationKey = `${normalizeRoomCode(result.roomCode)}:${room?.round ?? "unknown"}`;
+    if (this.lastFinalizedNotificationKey === notificationKey) {
+      return;
+    }
+    this.lastFinalizedNotificationKey = notificationKey;
+
+    if (room && normalizeRoomCode(room.roomCode) === normalizeRoomCode(result.roomCode)) {
+      this.broadcastRoomState(room);
+    }
+    this.broadcastToAll({
+      id: crypto.randomUUID(),
+      type: "server:match:result",
+      payload: result
+    });
+
+    void this.persistRoom(result.roomCode).catch(() => {
+      // Persistence is best-effort and must never delay or reject live finalization.
+    });
   }
 
   private clearRoomTimers(): void {
@@ -1309,11 +1317,12 @@ export class RoomAuthorityDurableObject {
     if (changed) {
       if (this.areHumansFinished(this.room)) {
         this.finalizeUnfinishedBots(this.room);
-        this.finalizeRoom(this.room);
+        const result = this.finalizeRoom(this.room);
+        this.notifyMatchFinalized(result);
+      } else {
+        this.broadcastRoomState(this.room);
+        await this.persistRoom(this.room.roomCode);
       }
-
-      this.broadcastRoomState(this.room);
-      await this.persistRoom(this.room.roomCode);
     }
 
     await this.scheduleMaintenanceAlarm();
@@ -1346,14 +1355,7 @@ export class RoomAuthorityDurableObject {
 
     this.finalizeUnfinishedBots(this.room);
     const result = this.finalizeRoom(this.room);
-    this.broadcastToAll({
-      id: crypto.randomUUID(),
-      type: "server:match:result",
-      payload: result
-    });
-    this.broadcastRoomState(this.room);
-    this.clearMatchTimers();
-    await this.persistRoom(this.room.roomCode);
+    this.notifyMatchFinalized(result);
     await this.scheduleMaintenanceAlarm();
   }
 
@@ -2252,6 +2254,10 @@ export class RoomAuthorityDurableObject {
   }
 
   private finalizeRoom(room: InternalRoom): MatchResult {
+    if (room.status === "finished" && room.result) {
+      return room.result;
+    }
+
     const result = finalizeRoom(room);
 
     void this.hooks.recordMatchResult?.({
