@@ -25,4 +25,12 @@ describe("shouldApplyRoomSnapshot", () => {
       result
     });
   });
+
+  it("keeps a finished result when restoring a stored room without local state", () => {
+    expect(resolveRoomSnapshot(null, null, finished)).toEqual({
+      accepted: true,
+      room: finished,
+      result
+    });
+  });
 });
