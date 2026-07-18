@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
-import type { Dispatch, SetStateAction } from "react";
+import { useEffect, useId, useRef, type Dispatch, type SetStateAction } from "react";
+import { createPortal } from "react-dom";
 import type { PlayerSettings } from "../../lib/player-settings";
 import { FONT_SIZE_LABELS, THEME_LABELS } from "../_lib/ui-labels";
 
@@ -12,20 +13,67 @@ type PlayerSettingsModalProps = {
 };
 
 export function PlayerSettingsModal({ settings, setSettings, setNickname, onClose, onOpenTutorial }: PlayerSettingsModalProps) {
-  return (
-    <div className="modalBackdrop" onClick={onClose}>
-      <div className="modalContent" onClick={(event) => event.stopPropagation()}>
+  const titleId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const appShell = document.querySelector<HTMLElement>(".appShell");
+    const previousDocumentOverflow = document.documentElement.style.overflow;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousAppShellOverflow = appShell?.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    if (appShell) {
+      appShell.style.overflow = "hidden";
+    }
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onCloseRef.current();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.documentElement.style.overflow = previousDocumentOverflow;
+      document.body.style.overflow = previousBodyOverflow;
+      if (appShell) {
+        appShell.style.overflow = previousAppShellOverflow ?? "";
+      }
+      document.removeEventListener("keydown", handleKeyDown);
+      previouslyFocusedElement?.focus();
+    };
+  }, []);
+
+  return createPortal(
+    <div
+      className="modalBackdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section className="modalContent" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="modalHeader">
           <div>
             <p className="eyebrow">PLAYER</p>
-            <h2>プレイヤー設定</h2>
+            <h2 id={titleId}>プレイヤー設定</h2>
           </div>
-          <button className="iconButton" type="button" onClick={onClose} aria-label="設定を閉じる">
+          <button ref={closeButtonRef} className="iconButton" type="button" onClick={onClose} aria-label="設定を閉じる">
             <X size={20} />
           </button>
         </div>
 
-        <p className="modalCopy">表示、入力、音の設定をこの画面でまとめて調整します。</p>
+        <p className="modalCopy">表示、入力、音の設定は変更すると自動で保存されます。</p>
 
         <div className="settingsGrid">
           <div className="fieldGroup">
@@ -141,10 +189,11 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
             <button className="secondaryButton" type="button" onClick={onOpenTutorial}>遊び方を再表示</button>
           ) : null}
           <button className="primaryButton" type="button" onClick={onClose}>
-            設定を反映
+            閉じる
           </button>
         </div>
-      </div>
-    </div>
+      </section>
+    </div>,
+    document.body
   );
 }
