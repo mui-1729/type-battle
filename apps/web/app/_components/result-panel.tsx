@@ -1,8 +1,10 @@
-import { ChevronLeft, ChevronRight, RotateCcw, Settings, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, Settings, Sparkles, X } from "lucide-react";
+import { useId, useState } from "react";
 import type { MatchResult, MatchRule, QuickReaction } from "@type-battle/shared";
 import { QUICK_REACTIONS } from "@type-battle/shared";
 import { MATCH_RULE_DETAILS, getPlayerDeviceLabel } from "../_lib/ui-labels";
 import { PlayerIdentity } from "./player-identity";
+import { DialogOverlay } from "./dialog-overlay";
 import { Button, SurfaceCard } from "./ui";
 
 type ResultPanelProps = {
@@ -48,6 +50,8 @@ export function ResultPanel({
   onExit,
   exitLabel = "ホームへ戻る"
 }: ResultPanelProps) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsTitleId = useId();
   const rule = result.matchRule ?? matchRule;
   const doubleKo = isRoomResult && result.players.length > 1 && result.players.every((player) => (player.hp ?? 1) <= 0);
   const title = isRoomResult ? (doubleKo ? "DOUBLE KO" : "試合結果") : practiceMode === "daily" ? "デイリーチャレンジの記録" : "練習の記録";
@@ -93,22 +97,39 @@ export function ResultPanel({
         })}
       </div>
 
-      <details className="resultDetails">
-        <summary>詳しい結果</summary>
-        <div className="resultDetailsBody">
-          {result.players.map((player) => (
-            <div className="resultDetailRow" key={player.id}>
-              <strong>{player.nickname}</strong>
-              <span>最大連続 {player.maxStreak}</span>
-              <span>finish gap {player.finishGap === undefined ? "—" : `${player.finishGap}ms`}</span>
-              <span>{player.accuracy === 100 && player.mistakes === 0 ? "PERFECT" : "通常記録"}</span>
-              <span>獲得ポイント {getResultPoints(player)}</span>
-              <span>苦手文字・主な誤入力 —</span>
-              <small>端末 {getPlayerDeviceLabel(player)}</small>
+      <Button className="resultDetailsButton" variant="secondary" type="button" onClick={() => setDetailsOpen(true)}>
+        詳しい結果
+      </Button>
+
+      {detailsOpen ? (
+        <DialogOverlay className="resultDetailsModal" titleId={detailsTitleId} onClose={() => setDetailsOpen(false)}>
+          <div className="modalHeader">
+            <div>
+              <p className="eyebrow">RESULT DETAILS</p>
+              <h2 id={detailsTitleId}>詳しい結果</h2>
             </div>
-          ))}
-        </div>
-      </details>
+            <button className="iconButton" type="button" onClick={() => setDetailsOpen(false)} aria-label="詳しい結果を閉じる">
+              <X size={20} />
+            </button>
+          </div>
+          <div className="resultDetailsBody">
+            {result.players.map((player) => (
+              <div className="resultDetailRow" key={player.id}>
+                <strong>{player.nickname}</strong>
+                <span>最大連続 {player.maxStreak}</span>
+                <span>finish gap {player.finishGap === undefined ? "—" : `${player.finishGap}ms`}</span>
+                <span>{player.accuracy === 100 && player.mistakes === 0 ? "PERFECT" : "通常記録"}</span>
+                <span>獲得ポイント {getResultPoints(player)}</span>
+                <span>苦手文字・主な誤入力 —</span>
+                <small>端末 {getPlayerDeviceLabel(player)}</small>
+              </div>
+            ))}
+          </div>
+          <div className="modalActions">
+            <Button variant="primary" type="button" onClick={() => setDetailsOpen(false)}>閉じる</Button>
+          </div>
+        </DialogOverlay>
+      ) : null}
 
       {isRoomResult && onReaction ? (
         <div className="resultReactions" aria-label="定型リアクション">

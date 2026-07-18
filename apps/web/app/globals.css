@@ -1612,22 +1612,17 @@ textarea::placeholder {
   cursor: pointer;
 }
 
-.resultDetails {
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
+.resultDetailsButton {
+  justify-self: start;
 }
 
-.resultDetails summary {
-  cursor: pointer;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 700;
+.resultDetailsModal {
+  width: min(620px, 100%);
 }
 
 .resultDetailsBody {
   display: grid;
   gap: 10px;
-  margin-top: 12px;
 }
 
 .resultDetailRow {

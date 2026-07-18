@@ -484,6 +484,26 @@ test("completes a practice session", async ({ browser }) => {
   await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(page.locator(".resultPanel").getByText("もう一度練習")).toBeVisible();
 
+  const resultPanel = page.locator(".resultPanel");
+  const detailsButton = resultPanel.getByRole("button", { name: "詳しい結果" });
+  const panelBoxBefore = await resultPanel.boundingBox();
+  const documentHeightBefore = await page.evaluate(() => document.documentElement.scrollHeight);
+
+  await detailsButton.click();
+  const detailsDialog = page.getByRole("dialog", { name: "詳しい結果" });
+  await expect(detailsDialog).toBeVisible();
+  await expect(page.getByRole("button", { name: "詳しい結果を閉じる" })).toBeFocused();
+  await expect(page.locator(".appShell")).toHaveAttribute("inert", "");
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.overflow)).toBe("hidden");
+  const panelBoxAfter = await resultPanel.boundingBox();
+  expect(panelBoxBefore).not.toBeNull();
+  expect(panelBoxAfter).toEqual(panelBoxBefore);
+  expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(documentHeightBefore);
+
+  await page.keyboard.press("Escape");
+  await expect(detailsDialog).toBeHidden();
+  await expect(detailsButton).toBeFocused();
+
   await context.close();
 });
 
@@ -494,12 +514,18 @@ test("can cancel and confirm leaving an active practice session", async ({ page 
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
-  await page.getByRole("button", { name: "練習をやめる" }).click();
-  await expect(page.getByRole("dialog", { name: "練習をやめますか？" })).toBeVisible();
-  await page.getByRole("button", { name: "キャンセル" }).click();
+  const exitButton = page.getByRole("button", { name: "練習をやめる" });
+  await exitButton.click();
+  const exitDialog = page.getByRole("dialog", { name: "練習をやめますか？" });
+  await expect(exitDialog).toBeVisible();
+  await expect(page.getByRole("button", { name: "退出確認を閉じる" })).toBeFocused();
+  await expect(page.locator(".appShell")).toHaveAttribute("inert", "");
+  await page.keyboard.press("Escape");
+  await expect(exitDialog).toBeHidden();
+  await expect(page.getByLabel("入力欄")).toBeFocused();
   await expect(page.locator(".status-playing")).toBeVisible();
 
-  await page.getByRole("button", { name: "練習をやめる" }).click();
+  await exitButton.click();
   await page.getByRole("button", { name: "練習をやめる" }).last().click();
   await expect(page.getByRole("button", { name: "練習を開始" })).toBeVisible();
 });

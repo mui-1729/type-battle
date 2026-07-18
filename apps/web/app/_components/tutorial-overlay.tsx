@@ -1,4 +1,5 @@
 import { ArrowRight, X } from "lucide-react";
+import { DialogOverlay } from "./dialog-overlay";
 
 type TutorialOverlayProps = {
   step: number;
@@ -17,8 +18,7 @@ export function TutorialOverlay({ step, onNext, onClose }: TutorialOverlayProps)
   const isLast = step === TUTORIAL_STEPS.length - 1;
 
   return (
-    <div className="modalBackdrop" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">
-      <div className="tutorialCard">
+    <DialogOverlay className="tutorialCard" closeOnBackdrop={false} titleId="tutorial-title" onClose={onClose}>
         <button className="iconButton tutorialClose" type="button" onClick={onClose} aria-label="遊び方を閉じる"><X size={20} /></button>
         <p className="eyebrow">HOW TO PLAY · {step + 1}/3</p>
         <h2 id="tutorial-title">{title}</h2>
@@ -27,7 +27,6 @@ export function TutorialOverlay({ step, onNext, onClose }: TutorialOverlayProps)
           {TUTORIAL_STEPS.map((_, index) => <span className={index === step ? "active" : ""} key={index} />)}
         </div>
         <button className="primaryButton" type="button" onClick={onNext}>{isLast ? "はじめる" : "次へ"} <ArrowRight size={18} /></button>
-      </div>
-    </div>
+    </DialogOverlay>
   );
 }
