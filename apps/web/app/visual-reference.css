@@ -961,6 +961,23 @@ select {
 .isPractice .statItem:first-child { border-left: 0; }
 .isPractice .resultPanel { position: relative; z-index: 5; }
 
+.appShell.hasConstrainedViewport.isBattle,
+.appShell.hasConstrainedViewport.isPractice { display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 14px; }
+.hasConstrainedViewport.isBattle .brandBlock,
+.hasConstrainedViewport.isPractice .brandBlock { display: none; }
+.hasConstrainedViewport.isBattle .topBar,
+.hasConstrainedViewport.isPractice .topBar { align-items: center; min-height: 64px; }
+.hasConstrainedViewport.isBattle .headerActions,
+.hasConstrainedViewport.isPractice .headerActions { margin-left: auto; }
+.hasConstrainedViewport.isBattle .workspace,
+.hasConstrainedViewport.isPractice .workspace { height: 100%; min-height: 0; margin-top: 0; }
+.hasConstrainedViewport.isBattle .matchSurface,
+.hasConstrainedViewport.isPractice .matchSurface { height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.hasConstrainedViewport.isBattle .battleStage,
+.hasConstrainedViewport.isPractice .practiceStage,
+.hasConstrainedViewport.isBattle .promptBox,
+.hasConstrainedViewport.isPractice .promptBox { flex-shrink: 0; }
+
 @media (min-width: 761px) {
   .isBattle .battleStage { height: min(47dvh, 470px); }
   .isBattle .promptBox { gap: 10px; height: min(230px, 26dvh); min-height: 0; margin-top: 12px; padding-block: 20px; }

@@ -66,36 +66,42 @@ test("keeps the typing prompt reachable when the software keyboard reduces the v
       }
     });
   });
-  await page.goto("/");
-  await selectPracticeMode(page);
-  await setNickname(page, "KeyboardPlayer");
-  await page.getByRole("button", { name: "練習を開始" }).click();
-  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  for (const viewport of [
+    { width: 390, height: 844 },
+    { width: 768, height: 1024 }
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    await selectPracticeMode(page);
+    await setNickname(page, "KeyboardPlayer");
+    await page.getByRole("button", { name: "練習を開始" }).click();
+    await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
-  await page.evaluate(() => {
-    (window as typeof window & { simulateSoftwareKeyboard: (height: number) => void }).simulateSoftwareKeyboard(500);
-  });
-  await page.getByLabel("入力欄").focus();
+    await page.evaluate(() => {
+      (window as typeof window & { simulateSoftwareKeyboard: (height: number) => void }).simulateSoftwareKeyboard(500);
+    });
+    await page.getByLabel("入力欄").focus();
 
-  const metrics = await page.locator(".matchSurface").evaluate((surface) => {
-    const prompt = surface.querySelector<HTMLElement>(".promptBox");
-    const promptRect = prompt?.getBoundingClientRect();
-    return {
-      documentHeight: document.documentElement.scrollHeight,
-      viewportHeight: window.innerHeight,
-      shellHeight: document.querySelector<HTMLElement>(".appShell")?.clientHeight ?? 0,
-      surfaceScrollHeight: surface.scrollHeight,
-      surfaceClientHeight: surface.clientHeight,
-      promptTop: promptRect?.top ?? -1,
-      promptBottom: promptRect?.bottom ?? Number.POSITIVE_INFINITY
-    };
-  });
+    const metrics = await page.locator(".matchSurface").evaluate((surface) => {
+      const prompt = surface.querySelector<HTMLElement>(".promptBox");
+      const promptRect = prompt?.getBoundingClientRect();
+      return {
+        documentHeight: document.documentElement.scrollHeight,
+        viewportHeight: window.innerHeight,
+        shellHeight: document.querySelector<HTMLElement>(".appShell")?.clientHeight ?? 0,
+        surfaceScrollHeight: surface.scrollHeight,
+        surfaceClientHeight: surface.clientHeight,
+        promptTop: promptRect?.top ?? -1,
+        promptBottom: promptRect?.bottom ?? Number.POSITIVE_INFINITY
+      };
+    });
 
-  expect(metrics.documentHeight).toBe(metrics.viewportHeight);
-  expect(metrics.shellHeight).toBe(500);
-  expect(metrics.surfaceScrollHeight).toBeGreaterThan(metrics.surfaceClientHeight);
-  expect(metrics.promptTop).toBeGreaterThanOrEqual(0);
-  expect(metrics.promptBottom).toBeLessThanOrEqual(metrics.viewportHeight);
+    expect(metrics.documentHeight).toBe(metrics.viewportHeight);
+    expect(metrics.shellHeight).toBe(500);
+    expect(metrics.surfaceScrollHeight).toBeGreaterThan(metrics.surfaceClientHeight);
+    expect(metrics.promptTop).toBeGreaterThanOrEqual(0);
+    expect(metrics.promptBottom).toBeLessThanOrEqual(metrics.shellHeight);
+  }
 });
 
 test("keeps the COM battle stage inside a 390px mobile viewport", async ({ page }) => {

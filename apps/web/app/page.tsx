@@ -1636,7 +1636,7 @@ export default function HomePage() {
 
   return (
     <main
-      className={`appShell ${visualState}${activeResult ? " hasResult" : ""}`}
+      className={`appShell ${visualState}${activeResult ? " hasResult" : ""}${visualViewportHeight === null ? "" : " hasConstrainedViewport"}`}
       style={visualViewportHeight === null ? undefined : { "--visual-viewport-height": `${visualViewportHeight}px` } as CSSProperties}
     >
       <GameHeader
