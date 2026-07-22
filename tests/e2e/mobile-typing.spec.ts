@@ -1,13 +1,26 @@
 import { expect, test } from "@playwright/test";
-import { expectFixedViewport, selectBattleMode, selectPracticeMode, setNickname } from "./helpers";
+import {
+  expectFixedViewport,
+  installWebSocketProbe,
+  readWebSocketProbe,
+  selectBattleMode,
+  selectPracticeMode,
+  setNickname
+} from "./helpers";
 
 test("completes practice with mobile Japanese textarea input", async ({ page }) => {
+  await installWebSocketProbe(page.context());
   await page.goto("/");
+  await page.waitForTimeout(500);
+  expect(await readWebSocketProbe(page)).toMatchObject({ socketCount: 0, openSocketCount: 0 });
   await selectPracticeMode(page);
   await setNickname(page, "Mobile");
-  await expect(page.locator(".connection")).toHaveClass(/isOnline/);
+  await expect(page.locator(".connection")).not.toHaveClass(/isOnline/);
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expect(page.locator(".connection")).not.toHaveClass(/isOnline/);
+  await expect.poll(async () => (await readWebSocketProbe(page)).openSocketCount).toBe(0);
+  expect((await readWebSocketProbe(page)).socketCount).toBe(1);
   await expectFixedViewport(page);
 
   const guide = (await page.getByLabel("入力ガイド").innerText()).replace(/\s+/g, "");
