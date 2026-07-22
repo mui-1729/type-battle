@@ -65,6 +65,7 @@ import { shouldHandleDesktopTypingKey } from "./_lib/desktop-typing-input";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
 import { resolveRoomSnapshot } from "./_lib/room-state-order";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
+import { getPracticeSocketToRelease } from "./_lib/practice-socket-lifecycle";
 import {
   getStoredRoomJoinFailureAction,
   getStoredRoomRejoinDelayMs,
@@ -578,6 +579,29 @@ export default function HomePage() {
     [connectSocket, realtimeUrl]
   );
 
+  const disconnectCurrentSocket = useCallback(() => {
+    const socket = socketRef.current;
+    socketRef.current = null;
+    socketModeRef.current = null;
+    storedRoomJoinInFlightRef.current = false;
+    socket?.disconnect();
+    setSocketMode(null);
+    setConnected(false);
+  }, []);
+
+  const disconnectPracticeSocket = useCallback(() => {
+    const socket = getPracticeSocketToRelease(socketRef.current, socketModeRef.current);
+    if (!socket) {
+      return;
+    }
+
+    socketRef.current = null;
+    socketModeRef.current = null;
+    socket.disconnect();
+    setSocketMode(null);
+    setConnected(false);
+  }, []);
+
   const clearStoredRoomRetryTimer = useCallback(() => {
     if (storedRoomRetryTimerRef.current) {
       window.clearTimeout(storedRoomRetryTimerRef.current);
@@ -594,9 +618,9 @@ export default function HomePage() {
       window.localStorage.removeItem(ROOM_CODE_KEY);
       setStoredRoomRecovery({ status: "idle", message: "" });
       setError(message);
-      connectPracticeSocket();
+      disconnectCurrentSocket();
     },
-    [clearStoredRoomRetryTimer, connectPracticeSocket]
+    [clearStoredRoomRetryTimer, disconnectCurrentSocket]
   );
 
   const attemptStoredRoomJoin = useCallback(
@@ -708,16 +732,16 @@ export default function HomePage() {
   }, [connectRoomSocket]);
 
   const startPractice = useCallback(() => {
-    const socket = socketRef.current;
     const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
     const validationError = validateNickname(currentNickname);
     const deviceKind = detectDeviceKind();
 
-    if (!realtimeConfigured || !socket || socketMode !== "practice" || validationError || !guestId) {
+    if (!realtimeConfigured || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
       return;
     }
 
+    const socket = connectPracticeSocket();
     prepareTypingInput();
     setHomeMode(null);
     void primeSoundPlayback();
@@ -731,9 +755,11 @@ export default function HomePage() {
 
         if (!response.ok) {
           setError(response.error);
+          disconnectPracticeSocket();
           return;
         }
 
+        disconnectPracticeSocket();
         setError("");
         setPracticeSession({
           ...response.data,
@@ -746,7 +772,7 @@ export default function HomePage() {
         resetTyping();
       }
     );
-  }, [guestId, practiceCategory, prepareTypingInput, realtimeConfigured, resetTyping, socketMode]);
+  }, [connectPracticeSocket, disconnectPracticeSocket, guestId, practiceCategory, prepareTypingInput, realtimeConfigured, resetTyping]);
 
   const consumeDailyAttempt = useCallback(() => {
     if (!practiceSession || practiceSession.mode !== "daily" || dailyAttemptConsumedRef.current) {
@@ -768,12 +794,11 @@ export default function HomePage() {
   }, [dailyChallengeInfo.challengeKey, practiceSession]);
 
   const startDailyChallenge = useCallback(() => {
-    const socket = socketRef.current;
     const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
     const validationError = validateNickname(currentNickname);
     const deviceKind = detectDeviceKind();
 
-    if (!realtimeConfigured || !socket || socketMode !== "practice" || validationError || !guestId) {
+    if (!realtimeConfigured || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
       return;
     }
@@ -784,6 +809,7 @@ export default function HomePage() {
       return;
     }
 
+    const socket = connectPracticeSocket();
     prepareTypingInput();
     setHomeMode(null);
     void primeSoundPlayback();
@@ -794,9 +820,11 @@ export default function HomePage() {
 
       if (!response.ok) {
         setError(response.error);
+        disconnectPracticeSocket();
         return;
       }
 
+      disconnectPracticeSocket();
       setError("");
       setPracticeSession({
         ...response.data,
@@ -811,7 +839,7 @@ export default function HomePage() {
         setDailyAttemptConsumed(false);
         resetTyping();
     });
-  }, [dailyChallengeInfo.challengeKey, guestId, prepareTypingInput, realtimeConfigured, resetTyping, socketMode]);
+  }, [connectPracticeSocket, dailyChallengeInfo.challengeKey, disconnectPracticeSocket, guestId, prepareTypingInput, realtimeConfigured, resetTyping]);
 
   const finishPractice = useCallback(
     (finalProgress: ProgressState) => {
@@ -875,8 +903,10 @@ export default function HomePage() {
         );
         setDailyChallengeRecord(visibleRecord);
       }
+
+      disconnectPracticeSocket();
     },
-    [consumeDailyAttempt, dailyChallengeInfo.challengeKey, practiceSession]
+    [consumeDailyAttempt, dailyChallengeInfo.challengeKey, disconnectPracticeSocket, practiceSession]
   );
 
   useEffect(() => {
@@ -908,7 +938,6 @@ export default function HomePage() {
 
     if (!storedRoomCode || !guestIdFromSession || !sessionIdFromSession) {
       storedRoomCodeRef.current = null;
-      connectPracticeSocket();
     } else {
       storedRoomCodeRef.current = storedRoomCode;
       setStoredRoomRecovery({ status: "reconnecting", message: "保存済みルームへ再接続しています…" });
@@ -922,7 +951,7 @@ export default function HomePage() {
       socketModeRef.current = null;
       setSocketMode(null);
     };
-  }, [clearStoredRoomRetryTimer, connectPracticeSocket, connectRoomSocket, realtimeConfigured]);
+  }, [clearStoredRoomRetryTimer, connectRoomSocket, realtimeConfigured]);
 
   useEffect(() => {
     if (!settingsHydrated) {
@@ -1394,7 +1423,7 @@ export default function HomePage() {
 
         if (!response.ok) {
           setError(response.error);
-          connectPracticeSocket();
+          disconnectCurrentSocket();
           return;
         }
 
@@ -1444,7 +1473,7 @@ export default function HomePage() {
 
         if (!response.ok) {
           setError(response.error);
-          connectPracticeSocket();
+          disconnectCurrentSocket();
           return;
         }
 
@@ -1472,17 +1501,16 @@ export default function HomePage() {
     storedRoomJoinInFlightRef.current = false;
     window.localStorage.removeItem(ROOM_CODE_KEY);
     setStoredRoomRecovery({ status: "idle", message: "" });
-    socketModeRef.current = "practice";
     setHomeMode(null);
 
-    connectPracticeSocket();
+    disconnectCurrentSocket();
     setRoom(null);
     setResult(null);
     setPlayerId("");
     clearPracticeState();
     resetTyping();
     setExitRequest(null);
-  }, [clearPracticeState, clearStoredRoomRetryTimer, connectPracticeSocket, resetTyping, room]);
+  }, [clearPracticeState, clearStoredRoomRetryTimer, disconnectCurrentSocket, resetTyping, room]);
 
   const setReady = () => {
     if (!realtimeConfigured || !socketRef.current || !room || !currentPlayer) {
@@ -1608,12 +1636,13 @@ export default function HomePage() {
   }, [practiceSession, prepareTypingInput, resetTyping]);
 
   const returnToPracticeMenu = useCallback(() => {
+    disconnectPracticeSocket();
     clearPracticeState();
     resetTyping();
     setSoloSetupView("menu");
     setHomeMode("solo");
     setExitRequest(null);
-  }, [clearPracticeState, resetTyping]);
+  }, [clearPracticeState, disconnectPracticeSocket, resetTyping]);
 
   const openExitRequest = useCallback((request: ExitRequest) => {
     const activeElement = document.activeElement;

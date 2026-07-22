@@ -681,14 +681,20 @@ test("forfeits the match after long disconnect", async ({ browser }) => {
 
 test("completes a practice session", async ({ browser }) => {
   const context = await browser.newContext();
+  await installWebSocketProbe(context);
   const page = await context.newPage();
 
   await page.goto("/");
+  await page.waitForTimeout(500);
+  expect(await readWebSocketProbe(page)).toMatchObject({ socketCount: 0, openSocketCount: 0 });
   await selectPracticeMode(page);
   await setNickname(page, "Alice");
-  await expect(page.locator(".connection")).toHaveClass(/isOnline/);
+  await expect(page.locator(".connection")).not.toHaveClass(/isOnline/);
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expect(page.locator(".connection")).not.toHaveClass(/isOnline/);
+  await expect.poll(async () => (await readWebSocketProbe(page)).openSocketCount).toBe(0);
+  expect((await readWebSocketProbe(page)).socketCount).toBe(1);
   await expectFixedViewport(page);
   await expect(page.getByTestId("battle-stage")).toHaveCount(0);
 
@@ -696,6 +702,7 @@ test("completes a practice session", async ({ browser }) => {
 
   await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
   await expect(page.locator(".resultPanel").getByText("もう一度練習")).toBeVisible();
+  expect(await readWebSocketProbe(page)).toMatchObject({ socketCount: 1, openSocketCount: 0 });
   await expectFixedViewport(page);
 
   const resultPanel = page.locator(".resultPanel");
