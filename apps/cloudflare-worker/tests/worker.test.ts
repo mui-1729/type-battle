@@ -50,6 +50,10 @@ class FakeStorage {
     this.values.clear();
   }
 
+  async transaction<T>(callback: (transaction: FakeStorage) => Promise<T>): Promise<T> {
+    return await callback(this);
+  }
+
   async setAlarm(timestamp: number): Promise<void> {
     if (this.failAlarmWrites) {
       throw new Error("setAlarm failed");
@@ -74,10 +78,16 @@ class FakeStorage {
 }
 
 class FakeDurableObjectState {
+  readonly backgroundWork: Promise<unknown>[] = [];
+
   constructor(public readonly storage: FakeStorage) {}
 
   async blockConcurrencyWhile<T>(callback: () => Promise<T> | T): Promise<T> {
     return await callback();
+  }
+
+  waitUntil(promise: Promise<unknown>): void {
+    this.backgroundWork.push(promise);
   }
 }
 
@@ -112,6 +122,8 @@ type RateLimitResult = { ok: true } | { ok: false; error: string };
 
 class FakeGatewayRateLimitStub {
   readonly calls: RateLimitInput[] = [];
+  responseGate: Promise<void> | null = null;
+  readonly responseGates: Array<Promise<void> | null> = [];
 
   constructor(private readonly maxPerGuestAction: number) {}
 
@@ -141,6 +153,10 @@ class FakeGatewayRateLimitStub {
       guestId: payload.guestId
     };
     this.calls.push(rateLimitInput);
+    const responseGate = this.responseGates[this.calls.length - 1] ?? this.responseGate;
+    if (responseGate) {
+      await responseGate;
+    }
     const callCount = this.calls.filter(
       (call) => call.action === rateLimitInput.action && call.guestId === rateLimitInput.guestId
     ).length;
@@ -329,6 +345,7 @@ describe("cloudflare gateway", () => {
         }
       })
     );
+    await flushAsyncWork();
 
     expect(findLastAck(socket, "client:room:create")).toMatchObject({
       type: "server:ack",
@@ -338,6 +355,74 @@ describe("cloudflare gateway", () => {
         error: "Room commands must use /rooms/:roomCode/socket."
       }
     });
+
+    socket.receive(JSON.stringify({
+      id: "msg-root-reaction",
+      type: "client:player:reaction",
+      payload: { roomCode: "AB23CD", reaction: "ナイス" }
+    }));
+    socket.receive(JSON.stringify({
+      id: "msg-root-accessory",
+      type: "client:player:accessory",
+      payload: { roomCode: "AB23CD", accessoryIndex: 1 }
+    }));
+    await flushAsyncWork();
+
+    expect(findLastAck(socket, "client:player:reaction")).toMatchObject({
+      payload: { ok: false, error: "Room commands must use /rooms/:roomCode/socket." }
+    });
+    expect(parseMessages(socket)).toContainEqual(expect.objectContaining({
+      type: "server:error",
+      payload: { message: "Room commands must use /rooms/:roomCode/socket." }
+    }));
+  });
+
+  it("serializes gateway socket events and continues after a rejected event", async () => {
+    const state = new FakeDurableObjectState(new FakeStorage());
+    const gateway = new RoomDurableObject(state as unknown as DurableObjectState);
+    const socket = new FakeSocket();
+    const events: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const internals = gateway as unknown as {
+      handleSocketMessage(socketId: string, data: unknown): Promise<void>;
+      detachSocket(socketId: string): void;
+    };
+    let messageCount = 0;
+    const originalDetachSocket = internals.detachSocket.bind(gateway);
+    internals.handleSocketMessage = async () => {
+      messageCount += 1;
+      events.push(`message-${messageCount}:start`);
+      if (messageCount === 1) {
+        await gate;
+        throw new Error("injected failure");
+      }
+      events.push(`message-${messageCount}:end`);
+    };
+    internals.detachSocket = (socketId) => {
+      events.push("close");
+      originalDetachSocket(socketId);
+    };
+
+    await gateway.ready;
+    gateway.attachSocket(socket as unknown as WebSocket);
+    socket.receive("first");
+    socket.receive("second");
+    socket.close();
+    await flushAsyncWork();
+    expect(events).toEqual(["message-1:start"]);
+
+    release();
+    await flushAsyncWork();
+    expect(events).toEqual([
+      "message-1:start",
+      "message-2:start",
+      "message-2:end",
+      "close"
+    ]);
+    expect(state.backgroundWork.length).toBeGreaterThanOrEqual(3);
   });
 
   it("closes idle gateway sockets and rejects connections over the limit", async () => {
@@ -389,6 +474,311 @@ describe("cloudflare gateway", () => {
 });
 
 describe("room authority", () => {
+  it("serializes room commands across delayed rate limiting", async () => {
+    const storage = new FakeStorage();
+    const gateway = new FakeGatewayRateLimitNamespace(10);
+    let release!: () => void;
+    gateway.stub.responseGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState,
+      { GATEWAY: gateway }
+    );
+    const socket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(socket as unknown as WebSocket, { roomCode: "SQ23RS" });
+    socket.receive(JSON.stringify({
+      id: "msg-create-serialized",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-serialized",
+        sessionId: "session-serialized"
+      }
+    }));
+    socket.receive(JSON.stringify({
+      id: "msg-ready-serialized",
+      type: "client:player:ready",
+      payload: { roomCode: "SQ23RS", ready: true }
+    }));
+    await flushAsyncWork();
+    expect(storage.values.get("room")).toBeUndefined();
+
+    release();
+    await flushAsyncWork();
+    expect(storage.values.get("room")).toMatchObject({
+      room: {
+        players: [expect.objectContaining({ id: "guest-serialized", ready: true })]
+      }
+    });
+  });
+
+  it("runs maintenance after an already in-flight socket command", async () => {
+    const storage = new FakeStorage();
+    const gateway = new FakeGatewayRateLimitNamespace(10);
+    let release!: () => void;
+    gateway.stub.responseGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState,
+      { GATEWAY: gateway }
+    );
+    const socket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(socket as unknown as WebSocket, { roomCode: "AM23NT" });
+    socket.receive(JSON.stringify({
+      id: "msg-create-before-maintenance",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-before-maintenance",
+        sessionId: "session-before-maintenance"
+      }
+    }));
+
+    let maintenanceSettled = false;
+    const maintenance = roomAuthority.alarm().then(() => {
+      maintenanceSettled = true;
+    });
+    await flushAsyncWork();
+    expect(maintenanceSettled).toBe(false);
+
+    release();
+    await maintenance;
+    expect(storage.values.get("room")).toMatchObject({
+      room: {
+        players: [expect.objectContaining({ id: "guest-before-maintenance" })]
+      }
+    });
+  });
+
+  it("persists room rate limits across instances and releases them after the fixed window", async () => {
+    const storage = new FakeStorage();
+    const firstGateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const request = (guestId: string) => new Request(
+      `https://type-battle.internal${GATEWAY_ROOM_RATE_LIMIT_PATH}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "create",
+          clientIp: "203.0.113.10",
+          guestId
+        })
+      }
+    );
+
+    await firstGateway.ready;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const response = await firstGateway.fetch(request("guest-persisted-limit"));
+      await expect(response.json()).resolves.toEqual({ ok: true });
+    }
+
+    const secondGateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    await secondGateway.ready;
+    const limitedResponse = await secondGateway.fetch(request("guest-persisted-limit"));
+    await expect(limitedResponse.json()).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Guest")
+    });
+
+    vi.setSystemTime(Date.now() + 10 * 60 * 1000 + 1);
+    await secondGateway.alarm();
+    expect([...storage.values.keys()].filter((key) => key.startsWith("rate-limit:v1:"))).toHaveLength(0);
+    expect(storage.alarmAt).toBeNull();
+
+    const releasedResponse = await secondGateway.fetch(request("guest-persisted-limit"));
+    await expect(releasedResponse.json()).resolves.toEqual({ ok: true });
+
+    expect([...storage.values.keys()].filter((key) => key.startsWith("rate-limit:v1:"))).toHaveLength(2);
+    expect(storage.alarmAt).toEqual(expect.any(Number));
+  });
+
+  it("starts a fresh rate-limit window exactly at the persisted reset time", async () => {
+    const storage = new FakeStorage();
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const request = () => new Request(
+      `https://type-battle.internal${GATEWAY_ROOM_RATE_LIMIT_PATH}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "create",
+          clientIp: "203.0.113.11",
+          guestId: "guest-reset-boundary"
+        })
+      }
+    );
+
+    await gateway.ready;
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await gateway.fetch(request());
+    }
+    await expect((await gateway.fetch(request())).json()).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Guest")
+    });
+
+    const resetAt = storage.alarmAt;
+    expect(resetAt).toEqual(expect.any(Number));
+    vi.setSystemTime(resetAt!);
+
+    await expect((await gateway.fetch(request())).json()).resolves.toEqual({ ok: true });
+  });
+
+  it("continues consuming the IP quota when the guest quota rejects a request", async () => {
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const request = (guestId: string) => new Request(
+      `https://type-battle.internal${GATEWAY_ROOM_RATE_LIMIT_PATH}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "create",
+          clientIp: "198.51.100.20",
+          guestId
+        })
+      }
+    );
+
+    await gateway.ready;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      await gateway.fetch(request("guest-exhausts-ip"));
+    }
+
+    const response = await gateway.fetch(request("fresh-guest-on-exhausted-ip"));
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("IP")
+    });
+  });
+
+  it("preserves arrival order across sockets when an earlier join is delayed", async () => {
+    const storage = new FakeStorage();
+    const gateway = new FakeGatewayRateLimitNamespace(10);
+    const state = new FakeDurableObjectState(storage);
+    const roomAuthority = new RoomAuthorityDurableObject(
+      state as unknown as DurableObjectState,
+      { GATEWAY: gateway }
+    );
+    const hostSocket = new FakeSocket();
+    const firstGuestSocket = new FakeSocket();
+    const secondGuestSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "JK23LM" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-cross-socket-order",
+      type: "client:room:create",
+      payload: {
+        nickname: "Host",
+        guestId: "guest-cross-socket-host",
+        sessionId: "session-cross-socket-host"
+      }
+    }));
+    await state.backgroundWork[0];
+
+    let releaseFirstJoin!: () => void;
+    gateway.stub.responseGates[1] = new Promise<void>((resolve) => {
+      releaseFirstJoin = resolve;
+    });
+    roomAuthority.attachSocket(firstGuestSocket as unknown as WebSocket, { roomCode: "JK23LM" });
+    roomAuthority.attachSocket(secondGuestSocket as unknown as WebSocket, { roomCode: "JK23LM" });
+    const joinMessage = {
+      type: "client:room:join",
+      payload: {
+        roomCode: "JK23LM",
+        nickname: "Guest",
+        guestId: "guest-cross-socket-player",
+        sessionId: "session-cross-socket-player"
+      }
+    };
+    firstGuestSocket.receive(JSON.stringify({ id: "msg-first-delayed-join", ...joinMessage }));
+    secondGuestSocket.receive(JSON.stringify({ id: "msg-second-later-join", ...joinMessage }));
+    // This is received before the replacement closes the first socket, but it
+    // executes after that socket has been detached. It must not steal the
+    // session back from the second socket.
+    firstGuestSocket.receive(JSON.stringify({ id: "msg-stale-first-rejoin", ...joinMessage }));
+    await vi.waitFor(() => {
+      expect(gateway.stub.calls).toHaveLength(2);
+    });
+    expect(firstGuestSocket.readyState).toBe(1);
+    expect(secondGuestSocket.readyState).toBe(1);
+
+    releaseFirstJoin();
+    await vi.waitFor(() => {
+      expect(gateway.stub.calls).toHaveLength(3);
+      expect(firstGuestSocket.readyState).toBe(3);
+    });
+    expect(secondGuestSocket.readyState).toBe(1);
+
+    secondGuestSocket.receive(JSON.stringify({
+      id: "msg-ready-from-final-active-socket",
+      type: "client:player:ready",
+      payload: { roomCode: "JK23LM", ready: true }
+    }));
+    await flushAsyncWork();
+    expect(storage.values.get("room")).toMatchObject({
+      room: {
+        players: expect.arrayContaining([
+          expect.objectContaining({ id: "guest-cross-socket-player", connected: true, ready: true })
+        ])
+      }
+    });
+  });
+
+  it("processes a close after an in-flight room creation", async () => {
+    const storage = new FakeStorage();
+    const gateway = new FakeGatewayRateLimitNamespace(10);
+    let release!: () => void;
+    gateway.stub.responseGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const state = new FakeDurableObjectState(storage);
+    const roomAuthority = new RoomAuthorityDurableObject(
+      state as unknown as DurableObjectState,
+      { GATEWAY: gateway }
+    );
+    const socket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(socket as unknown as WebSocket, { roomCode: "SC23TU" });
+    socket.receive(JSON.stringify({
+      id: "msg-create-before-close",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-before-close",
+        sessionId: "session-before-close"
+      }
+    }));
+    socket.close();
+    await flushAsyncWork();
+    expect(storage.values.get("room")).toBeUndefined();
+
+    release();
+    await flushAsyncWork();
+    expect(storage.values.get("room")).toMatchObject({
+      room: {
+        players: [expect.objectContaining({ id: "guest-before-close", connected: false })]
+      },
+      disconnectedAt: { "guest-before-close": expect.any(Number) }
+    });
+    expect(state.backgroundWork.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("does not broadcast room state to sockets before they join", async () => {
     const roomAuthority = new RoomAuthorityDurableObject(
       new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
@@ -664,6 +1054,7 @@ describe("room authority", () => {
     });
     storage.failPutPrefixes.add("room");
     sendTypingInput(hostSocket, "RF34GH", getCountdownRoom(hostSocket).prompt?.typing.romaji ?? "");
+    await flushAsyncWork();
 
     for (const socket of [hostSocket, guestSocket]) {
       const terminalMessages = parseMessages(socket).filter(
@@ -842,6 +1233,99 @@ describe("room authority", () => {
     expect(parseMessages(rejoinedSocket).some((message) => message.type === "server:match:result")).toBe(true);
   });
 
+  it("derives the romaji cursor when a legacy snapshot has no internal typing state", async () => {
+    const storage = new FakeStorage();
+    const firstRoom = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const firstSocket = new FakeSocket();
+
+    await firstRoom.ready;
+    firstRoom.attachSocket(firstSocket as unknown as WebSocket, { roomCode: "LG34MN" });
+    firstSocket.receive(JSON.stringify({
+      id: "msg-create-legacy-typing",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-legacy-typing",
+        sessionId: "session-legacy-typing",
+        deviceKind: "desktop"
+      }
+    }));
+    firstSocket.receive(JSON.stringify({
+      id: "msg-category-legacy-typing",
+      type: "client:room:setPromptCategory",
+      payload: { roomCode: "LG34MN", category: "short" }
+    }));
+    firstSocket.receive(JSON.stringify({
+      id: "msg-ready-legacy-typing",
+      type: "client:player:ready",
+      payload: { roomCode: "LG34MN", ready: true }
+    }));
+    firstSocket.receive(JSON.stringify({
+      id: "msg-start-legacy-typing",
+      type: "client:match:start",
+      payload: { roomCode: "LG34MN" }
+    }));
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(3_000);
+    await flushAsyncWork();
+
+    const prompt = getCountdownRoom(firstSocket).prompt!;
+    const plan = buildRomajiTypingPlan(prompt.typing.hiragana);
+    expect(plan.units.length).toBeGreaterThan(1);
+    const completedCanonicalLength = Array.from(plan.units[0]!.hiragana).length;
+    const completedGuideLength = plan.units[0]!.guide.length;
+    const legacySnapshot = structuredClone(storage.values.get("room")) as {
+      room: RoomState;
+      internal?: { typingState?: unknown };
+    };
+    const legacyPlayer = legacySnapshot.room.players.find((player) => player.id === "guest-legacy-typing")!;
+    legacyPlayer.progressIndex = completedCanonicalLength;
+    legacyPlayer.correctCharacters = completedGuideLength;
+    legacyPlayer.totalTypedCharacters = completedGuideLength;
+    delete legacyPlayer.typingProgressIndex;
+    delete legacyPlayer.pendingInput;
+    if (legacySnapshot.internal) {
+      delete legacySnapshot.internal.typingState;
+    }
+    storage.values.set("room", legacySnapshot);
+
+    const restoredRoom = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const rejoinedSocket = new FakeSocket();
+    await restoredRoom.ready;
+    restoredRoom.attachSocket(rejoinedSocket as unknown as WebSocket, { roomCode: "LG34MN" });
+    rejoinedSocket.receive(JSON.stringify({
+      id: "msg-rejoin-legacy-typing",
+      type: "client:room:join",
+      payload: {
+        roomCode: "LG34MN",
+        nickname: "Alice",
+        guestId: "guest-legacy-typing",
+        sessionId: "session-legacy-typing",
+        deviceKind: "desktop"
+      }
+    }));
+    await flushAsyncWork();
+
+    const rejoinAck = findLastAck(rejoinedSocket, "client:room:join") as {
+      payload?: { data?: { room?: RoomState } };
+    };
+    expect(rejoinAck.payload?.data?.room?.players.find((player) => player.id === "guest-legacy-typing"))
+      .toMatchObject({
+        progressIndex: completedCanonicalLength,
+        typingProgressIndex: completedGuideLength,
+        pendingInput: ""
+      });
+
+    const remainingInput = plan.units.slice(1).map((unit) => unit.guide).join("");
+    sendTypingInput(rejoinedSocket, "LG34MN", remainingInput);
+    await flushAsyncWork();
+    expect(parseMessages(rejoinedSocket).some((message) => message.type === "server:match:result")).toBe(true);
+  });
+
   it("marks players disconnected before detaching socket state", async () => {
     const storage = new FakeStorage();
     const roomAuthority = new RoomAuthorityDurableObject(
@@ -895,6 +1379,190 @@ describe("room authority", () => {
     });
     expect(snapshot?.disconnectedAt?.["guest-alice-disconnect"]).toEqual(expect.any(Number));
     expect(storage.alarmAt).not.toBeNull();
+  });
+
+  it("retains an all-offline waiting room until its idle TTL and then deletes it", async () => {
+    const storage = new FakeStorage();
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const socket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(socket as unknown as WebSocket, { roomCode: "WT45UV" });
+    socket.receive(JSON.stringify({
+      id: "msg-create-waiting-ttl",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-waiting-ttl",
+        sessionId: "session-waiting-ttl"
+      }
+    }));
+    await flushAsyncWork();
+    socket.close();
+    await flushAsyncWork();
+
+    expect(storage.values.get("room")).toMatchObject({
+      room: { status: "waiting", players: [expect.objectContaining({ connected: false })] }
+    });
+    expect(storage.alarmAt).toEqual(expect.any(Number));
+
+    vi.setSystemTime(storage.alarmAt! - 1);
+    await roomAuthority.alarm();
+    expect(storage.values.get("room")).toBeDefined();
+
+    vi.setSystemTime(storage.alarmAt! + 1);
+    await roomAuthority.alarm();
+    expect(storage.values.get("room")).toBeUndefined();
+    const response = await roomAuthority.fetch(new Request("https://example.com/health"));
+    await expect(response.json()).resolves.toMatchObject({ room: null });
+  });
+
+  it("cleans a player that was connected before a waiting-room restart", async () => {
+    const storage = new FakeStorage();
+    const firstRoom = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const aliceSocket = new FakeSocket();
+    const bobSocket = new FakeSocket();
+
+    await firstRoom.ready;
+    firstRoom.attachSocket(aliceSocket as unknown as WebSocket, { roomCode: "RW45XY" });
+    aliceSocket.receive(JSON.stringify({
+      id: "msg-create-before-waiting-restart",
+      type: "client:room:create",
+      payload: { nickname: "Alice", guestId: "guest-restart-alice", sessionId: "session-restart-alice" }
+    }));
+    firstRoom.attachSocket(bobSocket as unknown as WebSocket, { roomCode: "RW45XY" });
+    bobSocket.receive(JSON.stringify({
+      id: "msg-join-before-waiting-restart",
+      type: "client:room:join",
+      payload: {
+        roomCode: "RW45XY",
+        nickname: "Bob",
+        guestId: "guest-restart-bob",
+        sessionId: "session-restart-bob"
+      }
+    }));
+    await flushAsyncWork();
+
+    const restoreAt = Date.now();
+    const restoredRoom = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const rejoinedAliceSocket = new FakeSocket();
+    await restoredRoom.ready;
+    restoredRoom.attachSocket(rejoinedAliceSocket as unknown as WebSocket, { roomCode: "RW45XY" });
+    rejoinedAliceSocket.receive(JSON.stringify({
+      id: "msg-rejoin-after-waiting-restart",
+      type: "client:room:join",
+      payload: {
+        roomCode: "RW45XY",
+        nickname: "Alice",
+        guestId: "guest-restart-alice",
+        sessionId: "session-restart-alice"
+      }
+    }));
+    await flushAsyncWork();
+
+    vi.setSystemTime(restoreAt + 30_001);
+    await restoredRoom.alarm();
+    const response = await restoredRoom.fetch(new Request("https://example.com/health"));
+    const body = await response.json() as { room?: RoomState };
+    expect(body.room).toMatchObject({
+      status: "waiting",
+      players: [expect.objectContaining({ id: "guest-restart-alice", connected: true })]
+    });
+  });
+
+  it("forfeits and finalizes a player that stays offline after a playing-room restart", async () => {
+    const storage = new FakeStorage();
+    const firstRoom = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const aliceSocket = new FakeSocket();
+    const bobSocket = new FakeSocket();
+
+    await firstRoom.ready;
+    firstRoom.attachSocket(aliceSocket as unknown as WebSocket, { roomCode: "RP45YZ" });
+    aliceSocket.receive(JSON.stringify({
+      id: "msg-create-before-playing-restart",
+      type: "client:room:create",
+      payload: { nickname: "Alice", guestId: "guest-playing-alice", sessionId: "session-playing-alice" }
+    }));
+    firstRoom.attachSocket(bobSocket as unknown as WebSocket, { roomCode: "RP45YZ" });
+    bobSocket.receive(JSON.stringify({
+      id: "msg-join-before-playing-restart",
+      type: "client:room:join",
+      payload: {
+        roomCode: "RP45YZ",
+        nickname: "Bob",
+        guestId: "guest-playing-bob",
+        sessionId: "session-playing-bob"
+      }
+    }));
+    for (const [socket, id] of [[aliceSocket, "alice"], [bobSocket, "bob"]] as const) {
+      socket.receive(JSON.stringify({
+        id: `msg-ready-before-playing-restart-${id}`,
+        type: "client:player:ready",
+        payload: { roomCode: "RP45YZ", ready: true }
+      }));
+    }
+    aliceSocket.receive(JSON.stringify({
+      id: "msg-start-before-playing-restart",
+      type: "client:match:start",
+      payload: { roomCode: "RP45YZ" }
+    }));
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(3_000);
+    await flushAsyncWork();
+
+    const restoreAt = Date.now();
+    const restoredRoom = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const rejoinedAliceSocket = new FakeSocket();
+    await restoredRoom.ready;
+    restoredRoom.attachSocket(rejoinedAliceSocket as unknown as WebSocket, { roomCode: "RP45YZ" });
+    rejoinedAliceSocket.receive(JSON.stringify({
+      id: "msg-rejoin-after-playing-restart",
+      type: "client:room:join",
+      payload: {
+        roomCode: "RP45YZ",
+        nickname: "Alice",
+        guestId: "guest-playing-alice",
+        sessionId: "session-playing-alice"
+      }
+    }));
+    await flushAsyncWork();
+
+    vi.setSystemTime(restoreAt + 30_001);
+    await restoredRoom.alarm();
+    await flushAsyncWork();
+    const resultRetentionAlarm = storage.alarmAt;
+    expect(resultRetentionAlarm).toEqual(expect.any(Number));
+    expect(resultRetentionAlarm!).toBeGreaterThan(Date.now());
+
+    // A second maintenance pass used to immediately remove the forfeited
+    // player and reset the finished room, making the just-broadcast result
+    // disappear from connected clients.
+    await restoredRoom.alarm();
+    await flushAsyncWork();
+    const response = await restoredRoom.fetch(new Request("https://example.com/health"));
+    const body = await response.json() as { room?: RoomState };
+    expect(body.room).toMatchObject({
+      status: "finished",
+      players: expect.arrayContaining([
+        expect.objectContaining({ id: "guest-playing-alice", connected: true }),
+        expect.objectContaining({
+          id: "guest-playing-bob",
+          connected: false,
+          forfeited: true,
+          finishStatus: "forfeited"
+        })
+      ])
+    });
   });
 
   it("cleans explicitly forfeited players and lets the remaining player rematch", async () => {
@@ -958,7 +1626,16 @@ describe("room authority", () => {
       ]
     });
     expect(storage.alarmAt).toEqual(expect.any(Number));
-    vi.setSystemTime(storage.alarmAt! + 1);
+    const resultRetentionAlarm = storage.alarmAt!;
+    expect(resultRetentionAlarm).toBeGreaterThan(Date.now());
+
+    await roomAuthority.alarm();
+    await flushAsyncWork();
+    const retainedResponse = await roomAuthority.fetch(new Request("https://example.com/health"));
+    const retainedBody = await retainedResponse.json() as { room?: RoomState };
+    expect(retainedBody.room).toMatchObject({ status: "finished", result: expect.any(Object) });
+
+    vi.setSystemTime(resultRetentionAlarm + 1);
     await roomAuthority.alarm();
     await flushAsyncWork();
 

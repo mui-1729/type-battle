@@ -1,11 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_STORED_ROOM_REJOIN_ATTEMPTS,
+  getRoomDisconnectRecoveryState,
   getStoredRoomJoinFailureAction,
   getStoredRoomRejoinDelayMs
 } from "../app/_lib/room-reconnect";
 
 describe("stored room reconnect", () => {
+  it("keeps waiting only when the transport will reconnect", () => {
+    expect(getRoomDisconnectRecoveryState({ reason: "Try again later.", willReconnect: true })).toEqual({
+      status: "reconnecting",
+      message: "接続が切れました。ルームへの再接続を待っています。"
+    });
+  });
+
+  it("makes terminal disconnects retryable instead of showing reconnecting forever", () => {
+    expect(getRoomDisconnectRecoveryState({
+      reason: "Rejoined from another socket.",
+      willReconnect: false
+    })).toEqual({
+      status: "failed",
+      message: "接続が終了しました（Rejoined from another socket.）。再接続を再試行してください。"
+    });
+  });
+
   it.each([
     "ルームが見つかりません。",
     "このプレイヤーの認証情報がありません。",

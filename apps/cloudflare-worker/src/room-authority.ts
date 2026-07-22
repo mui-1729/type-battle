@@ -190,6 +190,7 @@ const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistake
 export class RoomAuthorityDurableObject {
   private readonly sockets = new Map<string, CloudflareSocketLike>();
   private readonly socketStates = new Map<string, SocketState>();
+  private socketEventChain: Promise<void> = Promise.resolve();
   private readonly reactionTimestamps = new Map<string, number>();
   private readonly unjoinedSocketTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly playerSessions = new Map<string, string>();
@@ -213,10 +214,10 @@ export class RoomAuthorityDurableObject {
   ) {
     this.hooks = {
       recordGuestSession: (input) => {
-        void this.persistGuestSessionRecord(input);
+        this.runInBackground(this.persistGuestSessionRecord(input), "persist_guest_session_failed");
       },
       recordMatchResult: (input) => {
-        void this.persistMatchResultRecord(input);
+        this.runInBackground(this.persistMatchResultRecord(input), "persist_match_result_failed");
       }
     };
     this.ready = this.state.blockConcurrencyWhile(async () => {
@@ -257,8 +258,10 @@ export class RoomAuthorityDurableObject {
 
   async alarm(): Promise<void> {
     await this.ready;
-    await this.runMaintenance();
-    await this.scheduleMaintenanceAlarm();
+    await this.enqueueRoomOperation("alarm", async () => {
+      await this.runMaintenance();
+      await this.scheduleMaintenanceAlarm();
+    });
   }
 
   private async handleStateRequest(request: Request, roomCode: string): Promise<Response> {
@@ -356,11 +359,11 @@ export class RoomAuthorityDurableObject {
     socket.accept();
 
     socket.addEventListener("message", (event) => {
-      void this.handleSocketMessage(socketId, event.data);
+      this.enqueueSocketEvent(socketId, () => this.handleSocketMessage(socketId, event.data));
     });
 
     socket.addEventListener("close", () => {
-      void this.handleSocketClose(socketId);
+      this.enqueueSocketEvent(socketId, () => this.handleSocketClose(socketId));
     });
 
     this.scheduleUnjoinedSocketTimeout(socketId);
@@ -368,7 +371,41 @@ export class RoomAuthorityDurableObject {
     return socketId;
   }
 
+  private enqueueSocketEvent(socketId: string, operation: () => void | Promise<void>): void {
+    this.enqueueRoomOperation(socketId, operation);
+    this.state.waitUntil(this.socketEventChain);
+  }
+
+  private enqueueRoomOperation(socketId: string, operation: () => void | Promise<void>): Promise<void> {
+    const current = this.socketEventChain.then(operation);
+    this.socketEventChain = current
+      .catch((error: unknown) => {
+        console.warn(JSON.stringify({
+          event: "room_socket_event_failed",
+          socketId,
+          error: error instanceof Error ? error.message : String(error)
+        }));
+      });
+    return current;
+  }
+
+  private runInBackground(operation: Promise<unknown>, event: string): void {
+    this.state.waitUntil(operation.catch((error: unknown) => {
+      console.warn(JSON.stringify({
+        event,
+        error: error instanceof Error ? error.message : String(error)
+      }));
+    }));
+  }
+
   private async handleSocketMessage(socketId: string, rawMessage: unknown): Promise<void> {
+    // A replacement connection can detach and close an older socket while
+    // messages from that socket are still waiting in the shared event chain.
+    // Never let those already-queued messages reclaim or mutate the room.
+    if (!this.sockets.has(socketId) || !this.socketStates.has(socketId)) {
+      return;
+    }
+
     if (typeof rawMessage !== "string") {
       return;
     }
@@ -580,12 +617,12 @@ export class RoomAuthorityDurableObject {
         this.notifyMatchFinalized(room.result);
       } else {
         this.broadcastRoomState(room);
-        void this.persistRoom(room.roomCode);
+        this.runInBackground(this.persistRoom(room.roomCode), "persist_room_failed");
       }
       return;
     }
 
-    void this.persistRoom(roomCode);
+    this.runInBackground(this.persistRoom(roomCode), "persist_room_failed");
   }
 
   private async handleSetReady(socketId: string, payload: unknown): Promise<void> {
@@ -612,7 +649,7 @@ export class RoomAuthorityDurableObject {
     } else {
       this.broadcastRoomState(room);
     }
-    void this.persistRoom(room.roomCode);
+    this.runInBackground(this.persistRoom(room.roomCode), "persist_room_failed");
   }
 
   private async handlePlayerReaction(socketId: string, messageId: string, payload: unknown): Promise<void> {
@@ -662,7 +699,7 @@ export class RoomAuthorityDurableObject {
     context.player.accessoryIndex = parsedPayload.accessoryIndex;
     context.room.lastActivityAt = Date.now();
     this.broadcastRoomState(context.room);
-    void this.persistRoom(context.room.roomCode);
+    this.runInBackground(this.persistRoom(context.room.roomCode), "persist_room_failed");
   }
 
   private async handleSetPromptCategory(
@@ -686,7 +723,7 @@ export class RoomAuthorityDurableObject {
 
     this.sendAck(socketId, messageId, "client:room:setPromptCategory", { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
-    void this.persistRoom(result.room.roomCode);
+    this.runInBackground(this.persistRoom(result.room.roomCode), "persist_room_failed");
   }
 
   private async handleSetBotDifficulty(
@@ -710,7 +747,7 @@ export class RoomAuthorityDurableObject {
 
     this.sendAck(socketId, messageId, "client:room:setBotDifficulty", { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
-    void this.persistRoom(result.room.roomCode);
+    this.runInBackground(this.persistRoom(result.room.roomCode), "persist_room_failed");
   }
 
   private async handleSetMatchRule(
@@ -734,7 +771,7 @@ export class RoomAuthorityDurableObject {
 
     this.sendAck(socketId, messageId, "client:room:setMatchRule", { ok: true, data: result.room });
     this.broadcastRoomState(result.room);
-    void this.persistRoom(result.room.roomCode);
+    this.runInBackground(this.persistRoom(result.room.roomCode), "persist_room_failed");
   }
 
   private async handleStartMatch(socketId: string, messageId: string, payload: unknown): Promise<void> {
@@ -761,7 +798,7 @@ export class RoomAuthorityDurableObject {
         serverStartAt: result.room.serverStartAt ?? Date.now()
       }
     });
-    void this.persistRoom(result.room.roomCode);
+    this.runInBackground(this.persistRoom(result.room.roomCode), "persist_room_failed");
     this.scheduleMatchStart(result.room.roomCode);
   }
 
@@ -839,7 +876,7 @@ export class RoomAuthorityDurableObject {
         serverStartAt: result.room.serverStartAt ?? Date.now()
       }
     });
-    void this.persistRoom(result.room.roomCode);
+    this.runInBackground(this.persistRoom(result.room.roomCode), "persist_room_failed");
     this.scheduleMatchStart(result.room.roomCode);
   }
 
@@ -891,14 +928,14 @@ export class RoomAuthorityDurableObject {
     const socket = this.sockets.get(socketId);
 
     if (!socket || socket.readyState !== OPEN_STATE) {
-      void this.disconnectSocket(socketId);
+      this.enqueueSocketEvent(socketId, () => this.disconnectSocket(socketId));
       return;
     }
 
     try {
       socket.send(JSON.stringify(message));
     } catch {
-      void this.disconnectSocket(socketId);
+      this.enqueueSocketEvent(socketId, () => this.disconnectSocket(socketId));
     }
   }
 
@@ -1071,7 +1108,10 @@ export class RoomAuthorityDurableObject {
     }
 
     this.timers.persist = setTimeout(() => {
-      void this.persistRoom(this.room?.roomCode ?? this.roomCode ?? "UNKNOWN");
+      this.runInBackground(
+        this.persistRoom(this.room?.roomCode ?? this.roomCode ?? "UNKNOWN"),
+        "persist_room_failed"
+      );
     }, ROOM_PERSIST_DEBOUNCE_MS);
   }
 
@@ -1091,7 +1131,13 @@ export class RoomAuthorityDurableObject {
   private applyPersistedRoomSnapshot(snapshot: PersistedRoomSnapshot): void {
     const playerSessions = snapshot.playerSessions ?? {};
     const disconnectedAt = snapshot.disconnectedAt ?? {};
-    const room = createRoomStateFromSnapshot(snapshot.room, playerSessions, disconnectedAt, snapshot.internal);
+    const room = createRoomStateFromSnapshot(
+      snapshot.room,
+      playerSessions,
+      disconnectedAt,
+      snapshot.internal,
+      Date.now()
+    );
 
     this.room = room;
     this.roomCode = room.roomCode;
@@ -1136,7 +1182,7 @@ export class RoomAuthorityDurableObject {
       if (!playingRoom) {
         if (this.room) {
           this.broadcastRoomState(this.room);
-          void this.persistRoom(roomCode);
+          this.runInBackground(this.persistRoom(roomCode), "persist_room_failed");
         }
         return;
       }
@@ -1147,7 +1193,7 @@ export class RoomAuthorityDurableObject {
         payload: playingRoom
       });
       this.broadcastRoomState(playingRoom);
-      void this.persistRoom(roomCode);
+      this.runInBackground(this.persistRoom(roomCode), "persist_room_failed");
       this.scheduleBotProgress(roomCode);
     }, Math.max(room.serverStartAt - Date.now(), 0));
   }
@@ -1217,9 +1263,7 @@ export class RoomAuthorityDurableObject {
       });
     }
 
-    void this.persistRoom(result.roomCode).catch(() => {
-      // Persistence is best-effort and must never delay or reject live finalization.
-    });
+    this.runInBackground(this.persistRoom(result.roomCode), "persist_room_failed");
   }
 
   private clearRoomTimers(): void {
@@ -1264,6 +1308,13 @@ export class RoomAuthorityDurableObject {
     }
 
     const now = Date.now();
+    if (
+      room.status === "finished" &&
+      now < (room.finishedAt ?? room.lastActivityAt) + FINISHED_RESULT_RETENTION_MS
+    ) {
+      return;
+    }
+
     const expiredPlayers = [...room.players.values()].filter(
       (player) => !player.isBot && !player.connected && player.disconnectedAt !== undefined && now >= player.disconnectedAt + DISCONNECT_GRACE_MS
     );
@@ -1314,14 +1365,9 @@ export class RoomAuthorityDurableObject {
     }
 
     if (changed) {
-      if (this.areHumansFinished(this.room)) {
-        this.finalizeUnfinishedBots(this.room);
-        const result = this.finalizeRoom(this.room);
-        this.notifyMatchFinalized(result);
-      } else {
-        this.broadcastRoomState(this.room);
-        await this.persistRoom(this.room.roomCode);
-      }
+      this.finalizeUnfinishedBots(this.room);
+      const result = this.finalizeRoom(this.room);
+      this.notifyMatchFinalized(result);
     }
 
     await this.scheduleMaintenanceAlarm();
@@ -1431,7 +1477,14 @@ export class RoomAuthorityDurableObject {
           continue;
         }
 
-        addDeadline(player.disconnectedAt + DISCONNECT_GRACE_MS);
+        const disconnectDeadline = player.disconnectedAt + DISCONNECT_GRACE_MS;
+        const cleanupDeadline = this.room.status === "finished"
+          ? Math.max(
+              disconnectDeadline,
+              (this.room.finishedAt ?? this.room.lastActivityAt) + FINISHED_RESULT_RETENTION_MS
+            )
+          : disconnectDeadline;
+        addDeadline(cleanupDeadline);
       }
     }
 
@@ -1515,7 +1568,7 @@ export class RoomAuthorityDurableObject {
 
     this.maintenanceFallbackTimer = setTimeout(() => {
       this.maintenanceFallbackTimer = undefined;
-      void this.alarm();
+      this.runInBackground(this.alarm(), "maintenance_alarm_failed");
     }, MAINTENANCE_ALARM_FALLBACK_MS);
   }
 
@@ -1545,7 +1598,7 @@ export class RoomAuthorityDurableObject {
     const normalizedRoomCode = normalizeRoomCode(roomCode);
     const nickname = this.room?.players.get(playerId)?.nickname ?? playerId;
 
-    void this.hooks.recordGuestSession?.({
+    this.hooks.recordGuestSession?.({
       sessionId,
       guestId: playerId,
       nickname,
@@ -2259,7 +2312,7 @@ export class RoomAuthorityDurableObject {
 
     const result = finalizeRoom(room);
 
-    void this.hooks.recordMatchResult?.({
+    this.hooks.recordMatchResult?.({
       roomCode: room.roomCode,
       round: room.round,
       prompt: room.prompt ?? pickPrompt(),
@@ -2966,10 +3019,13 @@ function createRoomStateFromSnapshot(
   room: RoomState,
   playerSessions: Record<string, string> = {},
   disconnectedAt: Record<string, number> = {},
-  internal: PersistedRoomSnapshot["internal"] = {}
+  internal: PersistedRoomSnapshot["internal"] = {},
+  restoreNow = Date.now()
 ): InternalRoom {
   const normalizedRoomCode = normalizeRoomCode(room.roomCode);
   const typingState = internal?.typingState ?? {};
+  const restoredTypingPlan = room.prompt ? buildRomajiTypingPlan(room.prompt.typing.hiragana) : null;
+  const loopingMatch = room.matchRule === "timeAttack" || room.matchRule === "hpBattle";
   const internalRoom: InternalRoom = {
     roomCode: normalizedRoomCode,
     hostPlayerId: room.hostPlayerId,
@@ -2986,12 +3042,22 @@ function createRoomStateFromSnapshot(
           socketId: player.id,
           sessionId: playerSessions[player.id] ?? player.id,
           isHost: player.id === room.hostPlayerId,
-          connected: false,
-          ready: false,
-          typingProgressIndex: typingState[player.id]?.typingProgressIndex ?? 0,
+          connected: player.isBot ? player.connected : false,
+          ready: player.isBot ? player.ready : false,
+          typingProgressIndex: typingState[player.id]?.typingProgressIndex ?? (
+            restoredTypingPlan
+              ? getRomajiProgressIndexForCanonicalProgress(
+                  restoredTypingPlan,
+                  Number.isFinite(player.progressIndex) ? player.progressIndex : 0,
+                  loopingMatch
+                )
+              : 0
+          ),
           pendingInput: typingState[player.id]?.pendingInput ?? "",
           lastInputSequence: typingState[player.id]?.lastInputSequence ?? 0,
-          ...(disconnectedAt[player.id] !== undefined ? { disconnectedAt: disconnectedAt[player.id] } : {})
+          ...(!player.isBot
+            ? { disconnectedAt: disconnectedAt[player.id] ?? restoreNow }
+            : {})
         } as InternalPlayer
       ])
     ),

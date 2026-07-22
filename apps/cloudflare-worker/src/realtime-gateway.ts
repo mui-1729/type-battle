@@ -7,7 +7,6 @@ import type {
 import { CLOUDFLARE_CLIENT_MESSAGE_TYPES } from "@type-battle/shared/cloudflare-events";
 import { readCloudflareClientIp } from "./client-ip.js";
 import { resolveRoomRoute } from "./room-routing.js";
-import { RateLimiter } from "./rate-limiter.js";
 
 type CloudflareSocketLike = {
   readyState: number;
@@ -53,6 +52,18 @@ export type RoomRateLimitInput = {
 
 export type RoomRateLimitResult = { ok: true } | { ok: false; error: string };
 
+type PersistedRateLimitRecord = {
+  count: number;
+  resetAt: number;
+};
+
+type RateLimitConfig = {
+  windowMs: number;
+  max: number;
+};
+
+type RateLimitDimension = "ip" | "guest";
+
 const OPEN_STATE = 1;
 const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
 const MAX_WEB_SOCKET_MESSAGE_BYTES = 16 * 1024;
@@ -61,12 +72,25 @@ const MAX_GATEWAY_SOCKETS = 256;
 const GATEWAY_SOCKET_IDLE_MS = 60_000;
 const ROOM_COMMAND_ERROR = "Room commands must use /rooms/:roomCode/socket.";
 export const GATEWAY_ROOM_RATE_LIMIT_PATH = "/__internal/room-rate-limit";
+const RATE_LIMIT_STORAGE_PREFIX = "rate-limit:v1:";
+const ROOM_RATE_LIMIT_CONFIG: Record<RoomRateLimitAction, Record<RateLimitDimension, RateLimitConfig>> = {
+  create: {
+    ip: { windowMs: 10 * 60 * 1000, max: 30 },
+    guest: { windowMs: 10 * 60 * 1000, max: 10 }
+  },
+  join: {
+    ip: { windowMs: 10 * 60 * 1000, max: 100 },
+    guest: { windowMs: 10 * 60 * 1000, max: 30 }
+  }
+};
 
 const ROOM_LIFECYCLE_COMMANDS = new Set<CloudflareClientMessageType>([
   "client:room:create",
   "client:room:join",
   "client:room:leave",
   "client:player:ready",
+  "client:player:reaction",
+  "client:player:accessory",
   "client:room:setPromptCategory",
   "client:room:setBotDifficulty",
   "client:room:setMatchRule",
@@ -76,13 +100,21 @@ const ROOM_LIFECYCLE_COMMANDS = new Set<CloudflareClientMessageType>([
   "client:match:rematch"
 ]);
 
+const ROOM_COMMANDS_WITH_ACK = new Set<CloudflareClientMessageType>([
+  "client:room:create",
+  "client:room:join",
+  "client:player:reaction",
+  "client:room:setPromptCategory",
+  "client:room:setBotDifficulty",
+  "client:room:setMatchRule",
+  "client:match:start",
+  "client:match:rematch"
+]);
+
 export class RealtimeGatewayDurableObject {
   private readonly sockets = new Map<string, CloudflareSocketLike>();
   private readonly socketStates = new Map<string, SocketState>();
-  private readonly roomCreateIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
-  private readonly roomCreateGuestLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 10 });
-  private readonly roomJoinIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 100 });
-  private readonly roomJoinGuestLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
+  private socketEventChain: Promise<void> = Promise.resolve();
   readonly ready: Promise<void>;
 
   constructor(private readonly state: DurableObjectState) {
@@ -133,6 +165,7 @@ export class RealtimeGatewayDurableObject {
 
   async alarm(): Promise<void> {
     await this.ready;
+    await this.cleanupExpiredRateLimits();
   }
 
   attachSocket(socket: CloudflareSocketLike, options: AttachSocketOptions = {}): string {
@@ -151,15 +184,31 @@ export class RealtimeGatewayDurableObject {
     socket.accept();
 
     socket.addEventListener("message", (event) => {
-      void this.handleSocketMessage(socketId, event.data);
+      this.enqueueSocketEvent(socketId, () => this.handleSocketMessage(socketId, event.data));
     });
 
     socket.addEventListener("close", () => {
-      this.detachSocket(socketId);
+      this.enqueueSocketEvent(socketId, () => {
+        this.detachSocket(socketId);
+      });
     });
     this.scheduleSocketIdleTimeout(socketId);
 
     return socketId;
+  }
+
+  private enqueueSocketEvent(socketId: string, operation: () => void | Promise<void>): void {
+    const current = this.socketEventChain
+      .then(operation)
+      .catch((error: unknown) => {
+        console.warn(JSON.stringify({
+          event: "gateway_socket_event_failed",
+          socketId,
+          error: error instanceof Error ? error.message : String(error)
+        }));
+      });
+    this.socketEventChain = current;
+    this.state.waitUntil(current);
   }
 
   private async handleReadinessRequest(): Promise<Response> {
@@ -213,10 +262,10 @@ export class RealtimeGatewayDurableObject {
       });
     }
 
-    return Response.json(this.checkRoomRequestRateLimit(input));
+    return Response.json(await this.checkRoomRequestRateLimit(input));
   }
 
-  private checkRoomRequestRateLimit(input: RoomRateLimitInput): RoomRateLimitResult {
+  private async checkRoomRequestRateLimit(input: RoomRateLimitInput): Promise<RoomRateLimitResult> {
     const clientIp = normalizeClientIp(input.clientIp);
     const guestId = input.guestId.trim();
 
@@ -224,39 +273,70 @@ export class RealtimeGatewayDurableObject {
       return { ok: false, error: INVALID_MESSAGE_ERROR };
     }
 
-    if (input.action === "create") {
-      if (!this.roomCreateIpLimiter.isAllowed(clientIp)) {
+    const now = Date.now();
+    const config = ROOM_RATE_LIMIT_CONFIG[input.action];
+    return await this.state.storage.transaction(async (transaction) => {
+      const ipResult = await consumeRateLimit(
+        transaction,
+        createRateLimitStorageKey(input.action, "ip", clientIp),
+        config.ip,
+        now
+      );
+
+      if (!ipResult.allowed) {
+        await scheduleRateLimitCleanup(transaction, ipResult.resetAt, now);
         return {
           ok: false,
           error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
-        };
+        } satisfies RoomRateLimitResult;
       }
 
-      if (!this.roomCreateGuestLimiter.isAllowed(guestId)) {
-        return {
-          ok: false,
-          error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
-        };
+      const guestResult = await consumeRateLimit(
+        transaction,
+        createRateLimitStorageKey(input.action, "guest", guestId),
+        config.guest,
+        now
+      );
+
+      await scheduleRateLimitCleanup(
+        transaction,
+        Math.min(ipResult.resetAt, guestResult.resetAt),
+        now
+      );
+      return guestResult.allowed
+        ? { ok: true } satisfies RoomRateLimitResult
+        : {
+            ok: false,
+            error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
+          } satisfies RoomRateLimitResult;
+    });
+  }
+
+  private async cleanupExpiredRateLimits(): Promise<void> {
+    const now = Date.now();
+    await this.state.storage.transaction(async (transaction) => {
+      const records = await transaction.list<PersistedRateLimitRecord>({
+        prefix: RATE_LIMIT_STORAGE_PREFIX
+      });
+      let nextResetAt: number | null = null;
+
+      for (const [key, record] of records) {
+        if (!isPersistedRateLimitRecord(record) || record.resetAt <= now) {
+          await transaction.delete(key);
+          continue;
+        }
+
+        if (nextResetAt === null || record.resetAt < nextResetAt) {
+          nextResetAt = record.resetAt;
+        }
       }
 
-      return { ok: true };
-    }
-
-    if (!this.roomJoinIpLimiter.isAllowed(clientIp)) {
-      return {
-        ok: false,
-        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(IP)"
-      };
-    }
-
-    if (!this.roomJoinGuestLimiter.isAllowed(guestId)) {
-      return {
-        ok: false,
-        error: "リクエストが多すぎます。しばらく時間をおいて試してください。(Guest)"
-      };
-    }
-
-    return { ok: true };
+      if (nextResetAt === null) {
+        await transaction.deleteAlarm();
+      } else {
+        await transaction.setAlarm(nextResetAt);
+      }
+    });
   }
 
   private async handleWebSocketUpgrade(request: Request): Promise<Response> {
@@ -305,10 +385,14 @@ export class RealtimeGatewayDurableObject {
     }
 
     if (ROOM_LIFECYCLE_COMMANDS.has(message.type)) {
-      this.sendAck(socketId, message.id, message.type, {
-        ok: false,
-        error: ROOM_COMMAND_ERROR
-      });
+      if (ROOM_COMMANDS_WITH_ACK.has(message.type)) {
+        this.sendAck(socketId, message.id, message.type, {
+          ok: false,
+          error: ROOM_COMMAND_ERROR
+        });
+      } else {
+        this.sendError(socketId, ROOM_COMMAND_ERROR);
+      }
       return;
     }
 
@@ -531,4 +615,54 @@ function readPromptCategory(value: unknown): PromptCategory | null {
 function normalizeClientIp(clientIp: string | undefined): string {
   const trimmed = clientIp?.trim();
   return trimmed ? trimmed : "unknown";
+}
+
+function createRateLimitStorageKey(
+  action: RoomRateLimitAction,
+  dimension: RateLimitDimension,
+  value: string
+): string {
+  return `${RATE_LIMIT_STORAGE_PREFIX}${action}:${dimension}:${encodeURIComponent(value)}`;
+}
+
+async function consumeRateLimit(
+  transaction: DurableObjectTransaction,
+  key: string,
+  config: RateLimitConfig,
+  now: number
+): Promise<{ allowed: boolean; resetAt: number }> {
+  const stored = await transaction.get<unknown>(key);
+  const record = isPersistedRateLimitRecord(stored) && now < stored.resetAt
+    ? stored
+    : { count: 0, resetAt: now + config.windowMs };
+
+  if (record.count >= config.max) {
+    return { allowed: false, resetAt: record.resetAt };
+  }
+
+  await transaction.put<PersistedRateLimitRecord>(key, {
+    count: record.count + 1,
+    resetAt: record.resetAt
+  });
+  return { allowed: true, resetAt: record.resetAt };
+}
+
+async function scheduleRateLimitCleanup(
+  transaction: DurableObjectTransaction,
+  resetAt: number,
+  now: number
+): Promise<void> {
+  const currentAlarm = await transaction.getAlarm();
+  if (currentAlarm === null || currentAlarm <= now || resetAt < currentAlarm) {
+    await transaction.setAlarm(resetAt);
+  }
+}
+
+function isPersistedRateLimitRecord(value: unknown): value is PersistedRateLimitRecord {
+  return isRecord(value) &&
+    typeof value.count === "number" &&
+    Number.isSafeInteger(value.count) &&
+    value.count >= 0 &&
+    typeof value.resetAt === "number" &&
+    Number.isFinite(value.resetAt);
 }

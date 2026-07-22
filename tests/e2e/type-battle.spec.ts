@@ -1,7 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
+  closeLatestOpenWebSocket,
   expectFixedViewport,
+  installWebSocketProbe,
   readInputGuide,
+  readWebSocketProbe,
   selectBattleMode,
   selectDailyMode,
   selectPracticeMode,
@@ -219,9 +222,22 @@ test("plays a complete two player typing match", async ({ browser }) => {
   const guestGuide = await readInputGuide(guest);
   expect(guestGuide).toBe(hostGuide);
 
+  const hostInput = host.getByLabel("入力欄");
+  const guestInput = guest.getByLabel("入力欄");
+  const splitIndex = Math.max(2, Math.floor(hostGuide.length / 2));
+  await hostInput.pressSequentially(hostGuide.slice(0, splitIndex), { delay: 10 });
+  await expect.poll(async () => Number(
+    await guest.locator('.raceLaneOne [role="progressbar"]').getAttribute("aria-valuenow")
+  )).toBeGreaterThan(0);
+
+  await guestInput.pressSequentially(guestGuide.slice(0, splitIndex), { delay: 10 });
+  await expect.poll(async () => Number(
+    await host.locator('.raceLaneTwo [role="progressbar"]').getAttribute("aria-valuenow")
+  )).toBeGreaterThan(0);
+
   await Promise.all([
-    typeInputGuide(host, hostGuide),
-    typeInputGuide(guest, guestGuide)
+    hostInput.pressSequentially(hostGuide.slice(splitIndex), { delay: 10 }),
+    guestInput.pressSequentially(guestGuide.slice(splitIndex), { delay: 10 })
   ]);
 
   await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
@@ -427,6 +443,97 @@ test("rejoins the room after reload", async ({ browser }) => {
   await hostContext.close();
 });
 
+test("reconnects the same page after a room WebSocket is interrupted", async ({ browser }) => {
+  test.setTimeout(45_000);
+
+  const hostContext = await browser.newContext();
+  const guestContext = await browser.newContext();
+  await installWebSocketProbe(guestContext);
+  const host = await hostContext.newPage();
+  const guest = await guestContext.newPage();
+
+  await host.goto("/");
+  await selectBattleMode(host);
+  await setNickname(host, "ReconnectHost");
+  await host.getByRole("button", { name: "ルームを作成" }).click();
+  const roomCode = await host.locator(".roomMeta strong").innerText();
+
+  await guest.goto("/");
+  await selectBattleMode(guest);
+  await setNickname(guest, "ReconnectGuest");
+  await guest.getByLabel("ルームコード").fill(roomCode);
+  await guest.getByTitle("ルームに参加").click();
+  await expect(host.getByTestId("lobby-prep").getByText("ReconnectGuest")).toBeVisible();
+
+  await host.getByRole("button", { name: "READYにする" }).click();
+  await guest.getByRole("button", { name: "READYにする" }).click();
+  await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expect(guest.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const guestInput = guest.getByLabel("入力欄");
+  const guestGuide = await readInputGuide(guest);
+  await guestInput.pressSequentially(guestGuide.slice(0, Math.min(4, guestGuide.length)), { delay: 20 });
+  const guestProgressOnHost = host.locator('.raceLaneTwo [role="progressbar"]');
+  await expect.poll(async () => Number(await guestProgressOnHost.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+  const progressBeforeDisconnect = Number(await guestProgressOnHost.getAttribute("aria-valuenow"));
+  const probeBeforeDisconnect = await readWebSocketProbe(guest);
+
+  await closeLatestOpenWebSocket(guest, 3001, "E2E forced disconnect");
+  await expect(guest.locator(".connection")).not.toHaveClass(/isOnline/);
+  await expect(host.locator(".statusTag.isDisconnected")).toBeVisible();
+  await expect(host.locator(".raceLaneTwo .raceRunner")).toHaveAttribute("data-status", "reconnecting");
+
+  await expect(guest.locator(".connection")).toHaveClass(/isOnline/, { timeout: 10_000 });
+  await expect.poll(async () => (await readWebSocketProbe(guest)).socketCount).toBeGreaterThan(probeBeforeDisconnect.socketCount);
+  await expect.poll(async () => (await readWebSocketProbe(guest)).closeEvents).toContainEqual({
+    code: 3001,
+    reason: "E2E forced disconnect"
+  });
+  await expect(host.locator(".statusTag.isDisconnected")).toHaveCount(0, { timeout: 10_000 });
+  await expect(host.locator(".raceLaneTwo .raceRunner")).toHaveAttribute("data-status", "active");
+  await expect(host.getByTestId("battle-stage")).not.toContainText("再接続中");
+  await expect.poll(async () => Number(await guestProgressOnHost.getAttribute("aria-valuenow")))
+    .toBeGreaterThanOrEqual(progressBeforeDisconnect);
+
+  await hostContext.close();
+  await guestContext.close();
+});
+
+test("stops reconnecting when the same session replaces its room socket", async ({ browser }) => {
+  const originalContext = await browser.newContext();
+  await installWebSocketProbe(originalContext);
+  const original = await originalContext.newPage();
+
+  await original.goto("/");
+  await selectBattleMode(original);
+  await setNickname(original, "SessionOwner");
+  await original.getByRole("button", { name: "ルームを作成" }).click();
+  const roomCode = await original.locator(".roomMeta strong").innerText();
+  const originalStorage = await originalContext.storageState();
+  const socketCountBeforeReplacement = (await readWebSocketProbe(original)).socketCount;
+
+  const replacementContext = await browser.newContext({ storageState: originalStorage });
+  const replacement = await replacementContext.newPage();
+  await replacement.goto("/");
+  await expect(replacement.locator(".connection")).toHaveClass(/isOnline/);
+  await expect(replacement.locator(".roomMeta strong")).toHaveText(roomCode, { timeout: 10_000 });
+
+  await expect.poll(async () => (await readWebSocketProbe(original)).closeEvents).toContainEqual({
+    code: 4000,
+    reason: "Rejoined from another socket."
+  });
+  await expect(original.locator(".connection")).not.toHaveClass(/isOnline/);
+  await expect(original.locator(".connection")).toHaveText("未接続");
+  await expect(original.locator('[role="status"]').filter({ hasText: "接続が終了しました" })).toBeVisible();
+  await expect(original.getByRole("button", { name: "再接続を再試行" })).toBeVisible();
+  await original.waitForTimeout(2_500);
+  await expect.poll(async () => (await readWebSocketProbe(original)).socketCount).toBe(socketCountBeforeReplacement);
+  await expect(replacement.locator(".connection")).toHaveClass(/isOnline/);
+
+  await originalContext.close();
+  await replacementContext.close();
+});
+
 test("plays all three stage modes against COM and resets between rematches", async ({ browser }) => {
   test.setTimeout(120_000);
 
@@ -563,13 +670,11 @@ test("forfeits the match after long disconnect", async ({ browser }) => {
   await expect.poll(() => localMover.getAttribute("aria-valuenow")).toBe(progressBeforePausedInput);
 
   // Wait for forfeit. Local runs can reuse an existing realtime server with the default 30s grace period.
-  await expect(host.locator(".statusTag.isForfeited")).toBeVisible({ timeout: 40_000 });
-  await expect(host.locator(".rivalBar").getByText("棄権")).toBeVisible();
-  await expect(host.getByTestId("battle-stage").locator(".raceLaneTwo .raceRunner")).toHaveAttribute(
-    "data-status",
-    "forfeited"
-  );
-  await expect(host.getByTestId("battle-stage")).toContainText("棄権");
+  const resultPanel = host.getByLabel("試合結果カード");
+  await expect(resultPanel).toBeVisible({ timeout: 40_000 });
+  await expect(resultPanel.getByText("Bob", { exact: true })).toBeVisible();
+  await expect(resultPanel.getByText("FORFEIT", { exact: true })).toBeVisible();
+  await expect(resultPanel.getByText("WINNER", { exact: true })).toBeVisible();
 
   await hostContext.close();
 });

@@ -66,6 +66,10 @@ class FakeStorage {
   }
 
   async sync() {}
+
+  async transaction(callback) {
+    return await callback(this);
+  }
 }
 
 class FakeDurableObjectState {
@@ -75,6 +79,10 @@ class FakeDurableObjectState {
 
   async blockConcurrencyWhile(callback) {
     return await callback();
+  }
+
+  waitUntil(promise) {
+    void Promise.resolve(promise).catch(() => {});
   }
 }
 

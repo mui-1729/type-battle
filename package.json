@@ -19,7 +19,7 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
-    "test:e2e": "NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL=ws://127.0.0.1:8787 npm run build && playwright test",
+    "test:e2e": "node scripts/test-e2e.mjs",
     "build": "turbo build",
     "ci": "npm run lint && npm run typecheck && npm run test && npm run build"
   },
