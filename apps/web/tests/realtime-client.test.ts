@@ -10,15 +10,15 @@ class MockWebSocket {
   readyState = 0;
   sent: string[] = [];
 
-  private listeners = new Map<string, Set<(event: { data?: string }) => void>>();
+  private listeners = new Map<string, Set<(event: { data?: string; code?: number; reason?: string }) => void>>();
 
   constructor(url: string) {
     this.url = url;
     MockWebSocket.instances.push(this);
   }
 
-  addEventListener(type: string, handler: (event: { data?: string }) => void) {
-    const handlers = this.listeners.get(type) ?? new Set<(event: { data?: string }) => void>();
+  addEventListener(type: string, handler: (event: { data?: string; code?: number; reason?: string }) => void) {
+    const handlers = this.listeners.get(type) ?? new Set<(event: { data?: string; code?: number; reason?: string }) => void>();
     handlers.add(handler);
     this.listeners.set(type, handlers);
   }
@@ -32,16 +32,16 @@ class MockWebSocket {
     this.dispatch("open");
   }
 
-  close() {
+  close(code = 1000, reason = "") {
     this.readyState = 3;
-    this.dispatch("close");
+    this.dispatch("close", { code, reason });
   }
 
   receive(data: string) {
     this.dispatch("message", { data });
   }
 
-  private dispatch(type: string, event: { data?: string } = {}) {
+  private dispatch(type: string, event: { data?: string; code?: number; reason?: string } = {}) {
     for (const handler of this.listeners.get(type) ?? []) {
       handler(event);
     }
@@ -85,10 +85,16 @@ class FakeStorage {
 }
 
 class FakeDurableObjectState {
+  readonly backgroundWork: Promise<unknown>[] = [];
+
   constructor(public readonly storage: FakeStorage) {}
 
   async blockConcurrencyWhile<T>(callback: () => Promise<T> | T): Promise<T> {
     return await callback();
+  }
+
+  waitUntil(promise: Promise<unknown>): void {
+    this.backgroundWork.push(promise);
   }
 }
 
@@ -385,6 +391,89 @@ describe("realtime client", () => {
     expect(ack).toHaveBeenCalledWith({ ok: false, error: "Room not found." });
   });
 
+  it("counts queued messages by UTF-8 bytes and fails an overflowed ack", async () => {
+    const { createRealtimeSocket } = await import("../app/_lib/realtime-client");
+    const socket = createRealtimeSocket({ transport: "cloudflare", url: "ws://localhost:8787" });
+    const clientSocket = MockWebSocket.instances[0]!;
+    const ack = vi.fn();
+
+    socket.emit(
+      "room:create",
+      {
+        nickname: "あ".repeat(11_000),
+        guestId: "guest-utf8-overflow",
+        sessionId: "session-utf8-overflow"
+      },
+      ack
+    );
+
+    expect(ack).toHaveBeenCalledWith({
+      ok: false,
+      error: "Realtime outbound queue overflowed."
+    });
+    clientSocket.open();
+    expect(clientSocket.sent).toEqual([]);
+  });
+
+  it("does not reconnect after the server replaces a duplicate session", async () => {
+    const { createRealtimeSocket } = await import("../app/_lib/realtime-client");
+    const socket = createRealtimeSocket({ transport: "cloudflare", url: "ws://localhost:8787" });
+    const disconnectHandler = vi.fn();
+    socket.on("disconnect", disconnectHandler);
+    const clientSocket = MockWebSocket.instances[0]!;
+
+    clientSocket.open();
+    clientSocket.close(4000, "Rejoined from another socket.");
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(disconnectHandler).toHaveBeenCalledWith({
+      code: 4000,
+      reason: "Rejoined from another socket.",
+      willReconnect: false
+    });
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it("reports reconnectable closes before retrying", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { createRealtimeSocket } = await import("../app/_lib/realtime-client");
+    const socket = createRealtimeSocket({ transport: "cloudflare", url: "ws://localhost:8787" });
+    const disconnectHandler = vi.fn();
+    socket.on("disconnect", disconnectHandler);
+    const clientSocket = MockWebSocket.instances[0]!;
+
+    clientSocket.open();
+    clientSocket.close(1013, "Try again later.");
+
+    expect(disconnectHandler).toHaveBeenCalledWith({
+      code: 1013,
+      reason: "Try again later.",
+      willReconnect: true
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  it("keeps exponential backoff when a connection closes before becoming stable", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { createRealtimeSocket } = await import("../app/_lib/realtime-client");
+    createRealtimeSocket({ transport: "cloudflare", url: "ws://localhost:8787" });
+
+    const first = MockWebSocket.instances[0]!;
+    first.open();
+    first.close(1013, "Try again later.");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(MockWebSocket.instances).toHaveLength(2);
+
+    const second = MockWebSocket.instances[1]!;
+    second.open();
+    second.close(1013, "Try again later.");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(MockWebSocket.instances).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(MockWebSocket.instances).toHaveLength(3);
+  });
+
   it("bridges the Cloudflare adapter to the room authority and returns acks", async () => {
     const { RoomAuthorityDurableObject } = await import("../../cloudflare-worker/src/worker");
 
@@ -456,6 +545,9 @@ describe("realtime client", () => {
     socket.emit("room:setPromptCategory", { roomCode, category: "long" }, setPromptAck);
     socket.emit("room:setBotDifficulty", { roomCode, difficulty: "hard" }, setDifficultyAck);
     socket.emit("room:setMatchRule", { roomCode, rule: "timeAttack" }, setRuleAck);
+    for (let index = 0; index < 50; index += 1) {
+      await Promise.resolve();
+    }
 
     expect(setPromptAck).toHaveBeenCalledWith(
       expect.objectContaining({

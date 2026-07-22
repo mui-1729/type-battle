@@ -10,7 +10,13 @@ export type RealtimeTransport = "cloudflare";
 
 type ConnectionEvents = {
   connect: () => void;
-  disconnect: () => void;
+  disconnect: (event: RealtimeDisconnectEvent) => void;
+};
+
+export type RealtimeDisconnectEvent = {
+  code: number;
+  reason: string;
+  willReconnect: boolean;
 };
 
 type RealtimeEventMap = ConnectionEvents & ServerToClientEvents;
@@ -62,6 +68,7 @@ const CLOUDFLARE_SERVER_EVENT_TO_APP_EVENT: Record<CloudflareServerEventName, ke
 
 const RECONNECT_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 15_000;
+const RECONNECT_STABLE_MS = 5_000;
 const ACK_TIMEOUT_MS = 10_000;
 const MAX_OUTBOUND_QUEUE_MESSAGES = 20;
 const MAX_OUTBOUND_QUEUE_BYTES = 32 * 1024;
@@ -109,6 +116,7 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
   const outboundMessages: QueuedMessage[] = [];
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let stableConnectionTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempts = 0;
   let manuallyClosed = false;
 
@@ -243,15 +251,31 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
   const connect = () => {
     socket = new WebSocket(url);
     socket.addEventListener("open", () => {
-      reconnectAttempts = 0;
+      stableConnectionTimer = setTimeout(() => {
+        reconnectAttempts = 0;
+        stableConnectionTimer = null;
+      }, RECONNECT_STABLE_MS);
       notify("connect");
       flushOutboundMessages();
     });
     socket.addEventListener("message", handleMessage);
-    socket.addEventListener("close", () => {
-      notify("disconnect");
+    socket.addEventListener("close", (event) => {
+      if (stableConnectionTimer) {
+        clearTimeout(stableConnectionTimer);
+        stableConnectionTimer = null;
+      }
 
-      if (!manuallyClosed) {
+      const willReconnect = event.code !== 4000 && !manuallyClosed;
+      notify("disconnect", {
+        code: event.code,
+        reason: event.reason,
+        willReconnect
+      });
+
+      if (event.code === 4000) {
+        manuallyClosed = true;
+        failPendingAcks(event.reason || "Realtime session was replaced by another connection.");
+      } else if (willReconnect) {
         failPendingAcks("Realtime connection closed.");
         scheduleReconnect();
       }
@@ -329,7 +353,7 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
         id,
         event: wireEvent,
         serialized: serializedMessage,
-        bytes: serializedMessage.length
+        bytes: new TextEncoder().encode(serializedMessage).byteLength
       };
       outboundMessages.push(queuedMessage);
 
@@ -354,6 +378,11 @@ function createCloudflareRealtimeSocket(url: string): RealtimeSocket {
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
+      }
+
+      if (stableConnectionTimer) {
+        clearTimeout(stableConnectionTimer);
+        stableConnectionTimer = null;
       }
 
       outboundMessages.length = 0;

@@ -10,6 +10,30 @@ const PERMANENT_ROOM_JOIN_ERRORS = new Set([
 
 export type StoredRoomJoinFailureAction = "discard" | "retry" | "pause";
 
+export type StoredRoomRecoveryState = {
+  status: "idle" | "reconnecting" | "failed";
+  message: string;
+};
+
+export function getRoomDisconnectRecoveryState(input: {
+  reason: string;
+  willReconnect: boolean;
+}): StoredRoomRecoveryState {
+  if (input.willReconnect) {
+    return {
+      status: "reconnecting",
+      message: "接続が切れました。ルームへの再接続を待っています。"
+    };
+  }
+
+  return {
+    status: "failed",
+    message: input.reason
+      ? `接続が終了しました（${input.reason}）。再接続を再試行してください。`
+      : "接続が終了しました。再接続を再試行してください。"
+  };
+}
+
 export function getStoredRoomJoinFailureAction(
   error: string,
   attempts: number

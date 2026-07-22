@@ -23,8 +23,7 @@ import type {
   PlayerResult,
   PromptCategory,
   QuickReaction,
-  RoomState,
-  TypingProgress
+  RoomState
 } from "@type-battle/shared";
 import { GameHeader } from "./_components/game-header";
 import { HomeModeMenu } from "./_components/home-mode-menu";
@@ -61,13 +60,16 @@ import {
 } from "./_lib/home-page-view-model";
 import { detectDeviceKind } from "./_lib/device-kind";
 import { advanceTypingProgress } from "./_lib/typing-input-strategy";
+import { createTypingMessageBatch } from "./_lib/typing-message-batch";
 import { shouldHandleDesktopTypingKey } from "./_lib/desktop-typing-input";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
 import { resolveRoomSnapshot } from "./_lib/room-state-order";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
 import {
   getStoredRoomJoinFailureAction,
-  getStoredRoomRejoinDelayMs
+  getStoredRoomRejoinDelayMs,
+  getRoomDisconnectRecoveryState,
+  type StoredRoomRecoveryState
 } from "./_lib/room-reconnect";
 import {
   DEVICE_KIND_LABELS,
@@ -108,11 +110,6 @@ import {
 } from "../lib/mistake-trends";
 
 type ClientSocket = RealtimeSocket;
-
-type StoredRoomRecoveryState = {
-  status: "idle" | "reconnecting" | "failed";
-  message: string;
-};
 
 type HomeMode = "battle" | "solo";
 type SoloSetupView = "menu" | "practice" | "daily" | "mistakes";
@@ -287,11 +284,15 @@ export default function HomePage() {
 
   const setPromptCategory = useCallback(
     (category: "short" | "standard" | "long") => {
-      if (!room || !socketRef.current || !currentPlayer?.isHost) {
+      const socket = socketRef.current;
+      if (!room || !socket || !currentPlayer?.isHost) {
         return;
       }
 
-      socketRef.current.emit("room:setPromptCategory", { roomCode: room.roomCode, category }, (response) => {
+      socket.emit("room:setPromptCategory", { roomCode: room.roomCode, category }, (response) => {
+        if (socketRef.current !== socket) {
+          return;
+        }
         if (!response.ok) {
           setError(response.error);
         }
@@ -302,11 +303,15 @@ export default function HomePage() {
 
   const setBotDifficulty = useCallback(
     (difficulty: "easy" | "normal" | "hard") => {
-      if (!room || !socketRef.current || !currentPlayer?.isHost) {
+      const socket = socketRef.current;
+      if (!room || !socket || !currentPlayer?.isHost) {
         return;
       }
 
-      socketRef.current.emit("room:setBotDifficulty", { roomCode: room.roomCode, difficulty }, (response) => {
+      socket.emit("room:setBotDifficulty", { roomCode: room.roomCode, difficulty }, (response) => {
+        if (socketRef.current !== socket) {
+          return;
+        }
         if (!response.ok) {
           setError(response.error);
         }
@@ -317,11 +322,15 @@ export default function HomePage() {
 
   const setMatchRule = useCallback(
     (rule: MatchRule) => {
-      if (!room || !socketRef.current || !currentPlayer?.isHost) {
+      const socket = socketRef.current;
+      if (!room || !socket || !currentPlayer?.isHost) {
         return;
       }
 
-      socketRef.current.emit("room:setMatchRule", { roomCode: room.roomCode, rule }, (response) => {
+      socket.emit("room:setMatchRule", { roomCode: room.roomCode, rule }, (response) => {
+        if (socketRef.current !== socket) {
+          return;
+        }
         if (!response.ok) {
           setError(response.error);
         }
@@ -392,8 +401,13 @@ export default function HomePage() {
     socketModeRef.current = socketMode;
   }, [socketMode]);
 
-  const attachSocketHandlers = useCallback((socket: ClientSocket) => {
+  const attachSocketHandlers = useCallback((socket: ClientSocket, kind: "practice" | "room") => {
+    const isCurrentSocket = () => socketRef.current === socket;
     const applyRoomSnapshot = (nextRoom: RoomState, beforeApply?: () => void) => {
+      if (!isCurrentSocket()) {
+        return false;
+      }
+
       const resolution = resolveRoomSnapshot(roomRef.current, resultRef.current, nextRoom);
       if (!resolution.accepted) {
         return false;
@@ -411,7 +425,7 @@ export default function HomePage() {
     };
 
     socket.on("connect", () => {
-      if (socketRef.current !== socket) {
+      if (!isCurrentSocket()) {
         return;
       }
 
@@ -419,7 +433,7 @@ export default function HomePage() {
       const currentRoom = roomRef.current;
       const currentSession = guestSessionRef.current;
 
-      if (socketModeRef.current !== "room") {
+      if (kind !== "room") {
         return;
       }
 
@@ -438,69 +452,102 @@ export default function HomePage() {
           deviceKind: detectDeviceKind()
         },
         (response) => {
-          if (!response.ok) {
-            setError(response.error);
+          if (!isCurrentSocket()) {
             return;
           }
 
+          if (!response.ok) {
+            setError(response.error);
+            setStoredRoomRecovery({
+              status: "failed",
+              message: "ルームへの再接続に失敗しました。接続を確認して再試行してください。"
+            });
+            return;
+          }
+
+          setStoredRoomRecovery({ status: "idle", message: "" });
+          setError("");
           setPlayerId(response.data.playerId);
+          storedRoomCodeRef.current = response.data.room.roomCode;
           applyRoomSnapshot(response.data.room, resetTyping);
         }
       );
     });
-    socket.on("disconnect", () => {
-      if (socketRef.current !== socket) {
+    socket.on("disconnect", ({ reason, willReconnect }) => {
+      if (!isCurrentSocket()) {
         return;
       }
 
       setConnected(false);
-      if (socketModeRef.current === "room") {
-        setStoredRoomRecovery({
-          status: "reconnecting",
-          message: "接続が切れました。ルームへの再接続を待っています。"
-        });
+      if (kind === "room") {
+        setStoredRoomRecovery(getRoomDisconnectRecoveryState({ reason, willReconnect }));
       }
     });
     socket.on("room:state", (nextRoom) => {
+      if (!isCurrentSocket()) {
+        return;
+      }
       applyRoomSnapshot(nextRoom);
     });
     socket.on("player:progress", (nextRoom) => {
+      if (!isCurrentSocket()) {
+        return;
+      }
       applyRoomSnapshot(nextRoom);
     });
     socket.on("match:countdown", ({ room: nextRoom, serverStartAt }) => {
-      resetTyping();
-      applyRoomSnapshot(nextRoom);
+      if (!isCurrentSocket()) {
+        return;
+      }
+      if (!applyRoomSnapshot(nextRoom, resetTyping)) {
+        return;
+      }
       setCountdownMs(Math.max(serverStartAt - Date.now(), 0));
     });
     socket.on("match:started", (nextRoom) => {
-      resetTyping();
+      if (!isCurrentSocket()) {
+        return;
+      }
+      if (!applyRoomSnapshot(nextRoom, resetTyping)) {
+        return;
+      }
       setCountdownMs(0);
-      applyRoomSnapshot(nextRoom);
     });
     socket.on("match:result", (nextResult) => {
+      const currentRoom = roomRef.current;
+      if (!isCurrentSocket() || !currentRoom || currentRoom.roomCode !== nextResult.roomCode) {
+        return;
+      }
+
       resultRef.current = nextResult;
       setResult(nextResult);
       setCountdownMs(0);
-      const currentRoom = roomRef.current;
-      if (currentRoom && currentRoom.roomCode === nextResult.roomCode) {
-        const finishedRoom = {
-          ...currentRoom,
-          status: "finished" as const,
-          result: nextResult
-        };
-        roomRef.current = finishedRoom;
-        setRoom(finishedRoom);
-      }
+      const finishedRoom = {
+        ...currentRoom,
+        status: "finished" as const,
+        result: nextResult
+      };
+      roomRef.current = finishedRoom;
+      setRoom(finishedRoom);
       typingInputRef.current?.blur();
     });
     socket.on("match:error", ({ message }) => {
+      if (!isCurrentSocket()) {
+        return;
+      }
       setError(message);
       setRematchError(message);
       setRematchPending(false);
     });
     socket.on("player:reaction", (payload) => {
+      if (!isCurrentSocket()) {
+        return;
+      }
       setRemoteReaction(payload);
       window.setTimeout(() => {
+        if (!isCurrentSocket()) {
+          return;
+        }
         setRemoteReaction((current) => current?.playerId === payload.playerId && current.reaction === payload.reaction ? null : current);
       }, 2_400);
     });
@@ -508,12 +555,15 @@ export default function HomePage() {
 
   const connectSocket = useCallback(
     (url: string, kind: "practice" | "room") => {
-    socketRef.current?.disconnect();
+    const previousSocket = socketRef.current;
+    socketRef.current = null;
+    storedRoomJoinInFlightRef.current = false;
+    previousSocket?.disconnect();
     const socket = createRealtimeSocket({ transport: REALTIME_TRANSPORT, url });
     socketRef.current = socket;
     socketModeRef.current = kind;
     setSocketMode(kind);
-    attachSocketHandlers(socket);
+    attachSocketHandlers(socket, kind);
     return socket;
     },
     [attachSocketHandlers]
@@ -577,10 +627,15 @@ export default function HomePage() {
           deviceKind: detectDeviceKind()
         },
         (response) => {
+          if (socketRef.current !== socket) {
+            return;
+          }
+
           storedRoomJoinInFlightRef.current = false;
 
           if (response.ok) {
             storedRoomJoinAttemptsRef.current = 0;
+            storedRoomCodeRef.current = response.data.room.roomCode;
             setStoredRoomRecovery({ status: "idle", message: "" });
             setError("");
             setPlayerId(response.data.playerId);
@@ -617,6 +672,10 @@ export default function HomePage() {
             message: `再接続に失敗しました。約 ${Math.ceil(delay / 1000)} 秒後に再試行します。`
           });
           storedRoomRetryTimerRef.current = window.setTimeout(() => {
+            storedRoomRetryTimerRef.current = null;
+            if (socketRef.current !== socket) {
+              return;
+            }
             attemptStoredRoomJoinRef.current(socket);
           }, delay);
         }
@@ -640,7 +699,7 @@ export default function HomePage() {
     setStoredRoomRecovery({ status: "reconnecting", message: "保存済みルームへ再接続しています…" });
     const socket = socketRef.current;
 
-    if (socket && socketModeRef.current === "room") {
+    if (socket && socketModeRef.current === "room" && socket.isConnected()) {
       attemptStoredRoomJoinRef.current(socket);
       return;
     }
@@ -666,6 +725,10 @@ export default function HomePage() {
       "practice:start",
       { nickname: normalizeNickname(currentNickname), category: practiceCategory },
       (response) => {
+        if (socketRef.current !== socket) {
+          return;
+        }
+
         if (!response.ok) {
           setError(response.error);
           return;
@@ -725,6 +788,10 @@ export default function HomePage() {
     setHomeMode(null);
     void primeSoundPlayback();
     socket.emit("practice:dailyStart", { nickname: normalizeNickname(currentNickname) }, (response) => {
+      if (socketRef.current !== socket) {
+        return;
+      }
+
       if (!response.ok) {
         setError(response.error);
         return;
@@ -1063,12 +1130,13 @@ export default function HomePage() {
         return;
       }
 
-      const payload: TypingProgress = {
+      const messages = createTypingMessageBatch({
         roomCode: currentRoom.roomCode,
-        input,
-        sequence: inputSequenceRef.current + 1
-      };
-      inputSequenceRef.current = payload.sequence;
+        text: input,
+        finish,
+        previousSequence: inputSequenceRef.current
+      });
+      inputSequenceRef.current = messages.at(-1)!.payload.sequence;
       setLastProgressSentAt(Date.now());
       setSyncClock(Date.now());
 
@@ -1078,11 +1146,11 @@ export default function HomePage() {
           setRoomFinishPending(true);
           typingInputRef.current?.blur();
         }
-        socket.emit("typing:finish", payload);
-        return;
       }
 
-      socket.emit("typing:progress", payload);
+      for (const message of messages) {
+        socket.emit(message.event, message.payload);
+      }
     },
     []
   );
@@ -1320,6 +1388,10 @@ export default function HomePage() {
         deviceKind: detectDeviceKind()
       },
       (response) => {
+        if (socketRef.current !== socket) {
+          return;
+        }
+
         if (!response.ok) {
           setError(response.error);
           connectPracticeSocket();
@@ -1328,6 +1400,7 @@ export default function HomePage() {
 
         setError("");
         setPlayerId(response.data.playerId);
+        storedRoomCodeRef.current = response.data.roomCode;
         setRoom(response.data.room);
         window.localStorage.setItem(ROOM_CODE_KEY, response.data.roomCode);
         updateGuestSession();
@@ -1365,6 +1438,10 @@ export default function HomePage() {
         deviceKind: detectDeviceKind()
       },
       (response) => {
+        if (socketRef.current !== socket) {
+          return;
+        }
+
         if (!response.ok) {
           setError(response.error);
           connectPracticeSocket();
@@ -1373,6 +1450,7 @@ export default function HomePage() {
 
         setError("");
         setPlayerId(response.data.playerId);
+        storedRoomCodeRef.current = response.data.room.roomCode;
         setRoom(response.data.room);
         window.localStorage.setItem(ROOM_CODE_KEY, response.data.room.roomCode);
         updateGuestSession();
@@ -1419,13 +1497,17 @@ export default function HomePage() {
   };
 
   const startMatch = useCallback(() => {
-    if (!realtimeConfigured || !socketRef.current || !room) {
+    const socket = socketRef.current;
+    if (!realtimeConfigured || !socket || !room) {
       return false;
     }
 
     prepareTypingInput();
     void primeSoundPlayback();
-    socketRef.current.emit("match:start", { roomCode: room.roomCode }, (response) => {
+    socket.emit("match:start", { roomCode: room.roomCode }, (response) => {
+      if (socketRef.current !== socket) {
+        return;
+      }
       if (!response.ok) {
         setError(response.error);
         autoStartRoomRef.current = null;
@@ -1435,12 +1517,16 @@ export default function HomePage() {
   }, [prepareTypingInput, primeSoundPlayback, realtimeConfigured, room]);
 
   const sendReaction = useCallback((reaction: QuickReaction) => {
-    if (!socketRef.current || !room || !connected) {
+    const socket = socketRef.current;
+    if (!socket || !room || !connected) {
       setError("Realtimeに接続していないため、リアクションを送信できません。");
       return false;
     }
 
-    socketRef.current.emit("player:reaction", { roomCode: room.roomCode, reaction }, (response) => {
+    socket.emit("player:reaction", { roomCode: room.roomCode, reaction }, (response) => {
+      if (socketRef.current !== socket) {
+        return;
+      }
       if (!response.ok) {
         setError(response.error);
       }
@@ -1469,14 +1555,15 @@ export default function HomePage() {
   }, [currentPlayer?.isHost, room, startMatch]);
 
   const rematch = () => {
-    if (!realtimeConfigured || !socketRef.current || !room || !currentPlayer) {
+    const socket = socketRef.current;
+    if (!realtimeConfigured || !socket || !room || !currentPlayer) {
       return;
     }
 
     const hasHumanOpponent = room.players.some((player) => player.id !== currentPlayer.id && !player.isBot);
 
     if (room.status === "finished" && hasHumanOpponent) {
-      socketRef.current.emit("player:ready", {
+      socket.emit("player:ready", {
         roomCode: room.roomCode,
         ready: !currentPlayer.ready
       });
@@ -1492,7 +1579,10 @@ export default function HomePage() {
     setRematchPending(true);
     setRematchError("");
     void primeSoundPlayback();
-    socketRef.current.emit("match:rematch", { roomCode: room.roomCode }, (response) => {
+    socket.emit("match:rematch", { roomCode: room.roomCode }, (response) => {
+      if (socketRef.current !== socket) {
+        return;
+      }
       if (!response.ok) {
         setRematchError(response.error);
         setRematchPending(false);
@@ -1646,6 +1736,17 @@ export default function HomePage() {
         exitAction={room ? { label: room.status === "finished" ? "ルームを退出" : "対戦を退出", onClick: requestRoomExit } : practiceSession || practiceResult ? { label: practiceResult ? "ひとり用メニューへ" : "練習をやめる", onClick: requestPracticeExit } : showModeSetup && homeMode === "solo" && soloSetupView !== "menu" ? { label: "ひとり用メニューへ", onClick: () => setSoloSetupView("menu") } : showModeSetup ? { label: "モード選択へ", onClick: () => setHomeMode(null) } : undefined}
       />
 
+      {storedRoomRecovery.status !== "idle" ? (
+        <div className="infoText realtimeRecoveryNotice" role="status">
+          <p>{storedRoomRecovery.message}</p>
+          {storedRoomRecovery.status === "failed" ? (
+            <button className="secondaryButton" type="button" onClick={retryStoredRoomJoin}>
+              再接続を再試行
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       {showHomeModeMenu ? (
         <HomeModeMenu
           onBattle={() => setHomeMode("battle")}
@@ -1658,17 +1759,6 @@ export default function HomePage() {
             <p className="infoText">
               Realtime の接続先が未設定のため、今は Vercel への web deploy はできますが対戦は使えません。
             </p>
-          ) : null}
-
-          {storedRoomRecovery.status !== "idle" ? (
-            <div className="infoText" role="status">
-              <p>{storedRoomRecovery.message}</p>
-              {storedRoomRecovery.status === "failed" ? (
-                <button className="secondaryButton" type="button" onClick={retryStoredRoomJoin}>
-                  再接続を再試行
-                </button>
-              ) : null}
-            </div>
           ) : null}
 
           {showModeSetup && !hasNickname && (homeMode === "battle" || soloSetupView === "menu") ? (

@@ -1,4 +1,83 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type BrowserContext, type Page } from "@playwright/test";
+
+type WebSocketProbeSnapshot = {
+  socketCount: number;
+  openSocketCount: number;
+  closeEvents: Array<{ code: number; reason: string }>;
+};
+
+export async function installWebSocketProbe(context: BrowserContext): Promise<void> {
+  await context.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+    const probe = {
+      sockets: [] as WebSocket[],
+      closeEvents: [] as Array<{ code: number; reason: string }>
+    };
+
+    Object.defineProperty(window, "__typeBattleE2EWebSocketProbe", {
+      configurable: false,
+      value: probe
+    });
+    window.WebSocket = new Proxy(NativeWebSocket, {
+      construct(target, args) {
+        const socket = Reflect.construct(target, args) as WebSocket;
+        probe.sockets.push(socket);
+        socket.addEventListener("close", (event) => {
+          probe.closeEvents.push({ code: event.code, reason: event.reason });
+        });
+        return socket;
+      }
+    });
+  });
+}
+
+export async function closeLatestOpenWebSocket(
+  page: Page,
+  code: number,
+  reason: string
+): Promise<WebSocketProbeSnapshot> {
+  return page.evaluate(({ closeCode, closeReason }) => {
+    const probe = (window as typeof window & {
+      __typeBattleE2EWebSocketProbe?: {
+        sockets: WebSocket[];
+        closeEvents: Array<{ code: number; reason: string }>;
+      };
+    }).__typeBattleE2EWebSocketProbe;
+    if (!probe) {
+      throw new Error("The E2E WebSocket probe is not installed.");
+    }
+    const socket = probe.sockets.findLast((candidate) => candidate.readyState === WebSocket.OPEN);
+    if (!socket) {
+      throw new Error("No open WebSocket was captured by the E2E probe.");
+    }
+
+    socket.close(closeCode, closeReason);
+    return {
+      socketCount: probe.sockets.length,
+      openSocketCount: probe.sockets.filter((candidate) => candidate.readyState === WebSocket.OPEN).length,
+      closeEvents: probe.closeEvents.map((event) => ({ ...event }))
+    };
+  }, { closeCode: code, closeReason: reason });
+}
+
+export async function readWebSocketProbe(page: Page): Promise<WebSocketProbeSnapshot> {
+  return page.evaluate(() => {
+    const probe = (window as typeof window & {
+      __typeBattleE2EWebSocketProbe?: {
+        sockets: WebSocket[];
+        closeEvents: Array<{ code: number; reason: string }>;
+      };
+    }).__typeBattleE2EWebSocketProbe;
+    if (!probe) {
+      throw new Error("The E2E WebSocket probe is not installed.");
+    }
+    return {
+      socketCount: probe.sockets.length,
+      openSocketCount: probe.sockets.filter((socket) => socket.readyState === WebSocket.OPEN).length,
+      closeEvents: probe.closeEvents.map((event) => ({ ...event }))
+    };
+  });
+}
 
 export async function expectFixedViewport(page: Page): Promise<void> {
   const metrics = await page.evaluate(() => {

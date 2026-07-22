@@ -523,6 +523,17 @@ textarea::placeholder {
   background: var(--accent-soft);
 }
 
+.realtimeRecoveryNotice {
+  display: grid;
+  gap: 10px;
+  max-width: 1380px;
+  margin: 0 auto 18px;
+}
+
+.realtimeRecoveryNotice .secondaryButton {
+  justify-self: start;
+}
+
 .infoText strong {
   font-weight: 800;
 }
