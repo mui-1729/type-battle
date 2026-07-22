@@ -166,6 +166,7 @@ const FINISHED_RESULT_RETENTION_MS = 5 * 60_000;
 const DISCONNECT_GRACE_MS = 30_000;
 const ROOM_PERSIST_DEBOUNCE_MS = 1_000;
 const MAINTENANCE_ALARM_FALLBACK_MS = 5_000;
+const STALE_MAINTENANCE_ALARM_RETRY_MS = 60_000;
 const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
 const MAX_ROOM_SOCKETS = 16;
 const UNJOINED_SOCKET_IDLE_MS = 30_000;
@@ -1416,11 +1417,11 @@ export class RoomAuthorityDurableObject {
     const now = Date.now();
     await this.cleanupRecordsByPrefix<GuestSessionStorageRecord>(
       GUEST_SESSION_STORAGE_PREFIX,
-      (record) => Date.parse(record.lastSeenAt) + GUEST_SESSION_RETENTION_MS < now
+      (record) => Date.parse(record.lastSeenAt) + GUEST_SESSION_RETENTION_MS <= now
     );
     await this.cleanupRecordsByPrefix<MatchResultStorageRecord>(
       MATCH_RESULT_STORAGE_PREFIX,
-      (record) => Date.parse(record.createdAt) + MATCH_RESULT_RETENTION_MS < now
+      (record) => Date.parse(record.createdAt) + MATCH_RESULT_RETENTION_MS <= now
     );
     await this.refreshRetentionAlarmAt();
   }
@@ -1446,11 +1447,15 @@ export class RoomAuthorityDurableObject {
     const now = Date.now();
     let nextAlarmAt: number | null = null;
 
-    const addDeadline = (deadline: number): void => {
+    const addDeadline = (deadline: number, backOffWhenStale = false): void => {
       if (!Number.isFinite(deadline)) {
         return;
       }
-      const candidate = Math.max(deadline, now);
+      const candidate = deadline <= now
+        ? backOffWhenStale
+          ? now + STALE_MAINTENANCE_ALARM_RETRY_MS
+          : now
+        : deadline;
       if (nextAlarmAt === null || candidate < nextAlarmAt) {
         nextAlarmAt = candidate;
       }
@@ -1458,7 +1463,7 @@ export class RoomAuthorityDurableObject {
 
     const retentionAlarmAt = await this.getRetentionAlarmAt();
     if (retentionAlarmAt !== null) {
-      addDeadline(retentionAlarmAt);
+      addDeadline(retentionAlarmAt, true);
     }
 
     if (!this.room) {
@@ -1511,11 +1516,13 @@ export class RoomAuthorityDurableObject {
         event: "retention_alarm_read_failed",
         error: error instanceof Error ? error.message : String(error)
       }));
-      return null;
+      return Date.now() + STALE_MAINTENANCE_ALARM_RETRY_MS;
     }
 
     await this.refreshRetentionAlarmAt();
-    return this.retentionAlarmAt ?? null;
+    return this.retentionAlarmAt === undefined
+      ? Date.now() + STALE_MAINTENANCE_ALARM_RETRY_MS
+      : this.retentionAlarmAt;
   }
 
   private async refreshRetentionAlarmAt(): Promise<void> {
@@ -1537,6 +1544,7 @@ export class RoomAuthorityDurableObject {
         await this.state.storage.put(RETENTION_ALARM_STORAGE_KEY, nextDeadline);
       }
     } catch (error) {
+      this.retentionAlarmAt = Date.now() + STALE_MAINTENANCE_ALARM_RETRY_MS;
       console.warn(JSON.stringify({
         event: "retention_alarm_refresh_failed",
         error: error instanceof Error ? error.message : String(error)
