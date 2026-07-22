@@ -32,6 +32,7 @@ await new Promise((resolve, reject) => {
   const sessionId = crypto.randomUUID();
   let playerId = "";
   let prompt = null;
+  let startSent = false;
   let progressSent = false;
   let settled = false;
   const timeout = setTimeout(() => {
@@ -68,6 +69,7 @@ await new Promise((resolve, reject) => {
       id: crypto.randomUUID(),
       type: "client:room:create",
       payload: {
+        roomCode,
         nickname: "Smoke",
         guestId,
         sessionId,
@@ -89,10 +91,23 @@ await new Promise((resolve, reject) => {
         playerId = message.payload.data.playerId;
         socket.send(JSON.stringify({
           id: crypto.randomUUID(),
-          type: "client:match:start",
-          payload: { roomCode }
+          type: "client:player:ready",
+          payload: { roomCode, ready: true }
         }));
         return;
+      }
+
+      if (message.type === "server:room:state" && !startSent) {
+        const player = message.payload?.players?.find((candidate) => candidate.id === playerId);
+        if (player?.ready) {
+          startSent = true;
+          socket.send(JSON.stringify({
+            id: crypto.randomUUID(),
+            type: "client:match:start",
+            payload: { roomCode }
+          }));
+          return;
+        }
       }
 
       if (message.type === "server:ack" && message.command === "client:match:start") {
