@@ -8,16 +8,26 @@ import { readCloudflareClientIp } from "../src/client-ip.js";
 
 class FakeStorage {
   readonly values = new Map<string, unknown>();
+  readonly failGetKeys = new Set<string>();
   readonly failPutPrefixes = new Set<string>();
+  readonly failListPrefixes = new Set<string>();
   alarmAt: number | null = null;
   failAlarmWrites = false;
   roomPutGate: Promise<void> | null = null;
 
   async get<T = unknown>(key: string): Promise<T | undefined> {
+    if (this.failGetKeys.has(key)) {
+      throw new Error(`get failed for ${key}`);
+    }
+
     return this.values.get(key) as T | undefined;
   }
 
   async list<T = unknown>(options?: { prefix?: string }): Promise<Map<string, T>> {
+    if (options?.prefix && this.failListPrefixes.has(options.prefix)) {
+      throw new Error(`list failed for ${options.prefix}`);
+    }
+
     const result = new Map<string, T>();
 
     for (const [key, value] of this.values) {
@@ -433,7 +443,7 @@ describe("cloudflare gateway", () => {
 
     await gateway.ready;
     gateway.attachSocket(idleSocket as unknown as WebSocket);
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
     expect(idleSocket.readyState).toBe(3);
 
     const sockets = Array.from({ length: 256 }, () => new FakeSocket());
@@ -590,7 +600,7 @@ describe("room authority", () => {
       error: expect.stringContaining("Guest")
     });
 
-    vi.setSystemTime(Date.now() + 10 * 60 * 1000 + 1);
+    vi.setSystemTime(storage.alarmAt!);
     await secondGateway.alarm();
     expect([...storage.values.keys()].filter((key) => key.startsWith("rate-limit:v1:"))).toHaveLength(0);
     expect(storage.alarmAt).toBeNull();
@@ -634,6 +644,83 @@ describe("room authority", () => {
     vi.setSystemTime(resetAt!);
 
     await expect((await gateway.fetch(request())).json()).resolves.toEqual({ ok: true });
+  });
+
+  it("coalesces rate-limit cleanup deadlines into five-minute buckets", async () => {
+    const storage = new FakeStorage();
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const request = (guestId: string) => new Request(
+      `https://type-battle.internal${GATEWAY_ROOM_RATE_LIMIT_PATH}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "create",
+          clientIp: "203.0.113.12",
+          guestId
+        })
+      }
+    );
+
+    const initialTime = Date.parse("2026-07-23T00:01:23.000Z");
+    vi.setSystemTime(initialTime);
+    await gateway.ready;
+    await gateway.fetch(request("guest-bucket-one"));
+    const firstAlarmAt = storage.alarmAt;
+
+    vi.setSystemTime(initialTime + 60_000);
+    await gateway.fetch(request("guest-bucket-two"));
+
+    expect(firstAlarmAt).toBe(Date.parse("2026-07-23T00:15:00.000Z"));
+    expect(storage.alarmAt).toBe(firstAlarmAt);
+    const resetTimes = [...storage.values.entries()]
+      .filter(([key]) => key.startsWith("rate-limit:v1:"))
+      .map(([, value]) => (value as { resetAt: number }).resetAt);
+    expect(new Set(resetTimes)).toEqual(new Set([
+      initialTime + 10 * 60_000,
+      initialTime + 11 * 60_000
+    ]));
+  });
+
+  it("deletes a stale rate-limit alarm when no records remain", async () => {
+    const storage = new FakeStorage();
+    storage.alarmAt = Date.now() - 1;
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+
+    await gateway.ready;
+    await gateway.alarm();
+
+    expect(storage.alarmAt).toBeNull();
+  });
+
+  it("does not postpone a due rate-limit cleanup alarm when traffic arrives", async () => {
+    const now = Date.parse("2026-07-23T00:20:00.000Z");
+    vi.setSystemTime(now);
+    const storage = new FakeStorage();
+    storage.alarmAt = now - 1;
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+
+    await gateway.ready;
+    await gateway.fetch(new Request(
+      `https://type-battle.internal${GATEWAY_ROOM_RATE_LIMIT_PATH}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "create",
+          clientIp: "203.0.113.13",
+          guestId: "guest-due-alarm"
+        })
+      }
+    ));
+
+    expect(storage.alarmAt).toBe(now - 1);
   });
 
   it("continues consuming the IP quota when the guest quota rejects a request", async () => {
@@ -1231,6 +1318,92 @@ describe("room authority", () => {
     sendTypingInput(rejoinedSocket, "RJ34KL", remainingInput);
     await flushAsyncWork();
     expect(parseMessages(rejoinedSocket).some((message) => message.type === "server:match:result")).toBe(true);
+  });
+
+  it("deletes retention records exactly at their expiration deadline", async () => {
+    const now = Date.parse("2026-07-23T03:00:00.000Z");
+    vi.setSystemTime(now);
+    const storage = new FakeStorage();
+    storage.values.set("guest-session:RT23EX:guest-expired", {
+      sessionId: "session-expired",
+      guestId: "guest-expired",
+      nickname: "Expired",
+      roomCode: "RT23EX",
+      createdAt: new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(),
+      lastSeenAt: new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString()
+    });
+    storage.values.set("retention-alarm-at", now);
+    storage.alarmAt = now;
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+
+    await roomAuthority.ready;
+    await roomAuthority.alarm();
+
+    expect(storage.values.has("guest-session:RT23EX:guest-expired")).toBe(false);
+    expect(storage.values.has("retention-alarm-at")).toBe(false);
+    expect(storage.alarmAt).toBeNull();
+  });
+
+  it("backs off stale maintenance alarms by at least one minute when retention cleanup fails", async () => {
+    const now = Date.parse("2026-07-23T04:00:00.000Z");
+    vi.setSystemTime(now);
+    const storage = new FakeStorage();
+    storage.values.set("retention-alarm-at", now - 1);
+    storage.alarmAt = now - 1;
+    storage.failListPrefixes.add("guest-session:");
+    storage.failListPrefixes.add("match-result:");
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await roomAuthority.ready;
+    await roomAuthority.alarm();
+
+    expect(storage.alarmAt).toBe(now + 60_000);
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("retries retention maintenance after the stored deadline cannot be read", async () => {
+    const now = Date.parse("2026-07-23T04:30:00.000Z");
+    vi.setSystemTime(now);
+    const storage = new FakeStorage();
+    storage.failGetKeys.add("retention-alarm-at");
+    storage.failListPrefixes.add("guest-session:");
+    storage.failListPrefixes.add("match-result:");
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await roomAuthority.ready;
+    await roomAuthority.alarm();
+
+    expect(storage.alarmAt).toBe(now + 60_000);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("retention_alarm_read_failed"));
+  });
+
+  it("retries retention refresh after a cached empty state encounters a list failure", async () => {
+    const now = Date.parse("2026-07-23T04:45:00.000Z");
+    vi.setSystemTime(now);
+    const storage = new FakeStorage();
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await roomAuthority.ready;
+    await roomAuthority.alarm();
+    expect(storage.alarmAt).toBeNull();
+
+    storage.failListPrefixes.add("guest-session:");
+    storage.failListPrefixes.add("match-result:");
+    await roomAuthority.alarm();
+
+    expect(storage.alarmAt).toBe(now + 60_000);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("retention_alarm_refresh_failed"));
   });
 
   it("derives the romaji cursor when a legacy snapshot has no internal typing state", async () => {
