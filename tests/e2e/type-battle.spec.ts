@@ -551,6 +551,8 @@ test("plays all three stage modes against COM and resets between rematches", asy
     { key: "timeAttack", label: "タイムアタック" },
     { key: "hpBattle", label: "HPバトル" }
   ] as const;
+  const logoWordmark = host.locator(".gameLogo.isCompact .gameLogoWordmark > span");
+  let initialLogoFontSize = "";
 
   for (const [index, mode] of modes.entries()) {
     if (index === 0) {
@@ -565,6 +567,12 @@ test("plays all three stage modes against COM and resets between rematches", asy
     const localPlayer = mode.key === "hpBattle" ? stage.locator(".hpBattlePlayerLeft") : stage.locator(".raceLaneOne");
     const opponentPlayer = mode.key === "hpBattle" ? stage.locator(".hpBattlePlayerRight") : stage.locator(".raceLaneTwo");
     const input = host.getByLabel("入力欄");
+    const logoFontSize = await logoWordmark.evaluate((element) => getComputedStyle(element).fontSize);
+    if (index === 0) {
+      initialLogoFontSize = logoFontSize;
+    } else {
+      expect(logoFontSize, `title font size changed for ${mode.key}`).toBe(initialLogoFontSize);
+    }
     await expect(stage).toHaveAttribute("data-mode", mode.key);
     await expect(stage).toHaveAttribute("data-phase", "playing");
     await expect(localPlayer.locator(".raceLaneIdentity strong, .hpBattleIdentity strong")).toHaveText("Alice");

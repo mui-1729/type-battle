@@ -168,7 +168,8 @@ select {
   height: var(--visual-viewport-height, 100dvh);
   min-height: 0;
   padding: 24px clamp(22px, 4vw, 76px) 34px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   color: var(--game-ink);
   background: var(--game-scene-background);
 }
@@ -1000,8 +1001,6 @@ select {
 
 /* HP battle */
 .isBattle-hpBattle .brandBlock { position: absolute; top: -8px; left: 50%; width: min(720px, 50vw); transform: translateX(-50%); }
-.isBattle-hpBattle .gameLogo.isCompact .gameLogoWordmark > span { font-size: clamp(52px, 5vw, 86px); }
-.isBattle-hpBattle .gameLogo.isCompact .stickFigure { width: 62px; height: 70px; }
 .battleStage[data-mode="hpBattle"] { height: clamp(450px, 58vh, 620px); }
 .battleStage[data-mode="hpBattle"] .battleStageMode { color: #fff; background: linear-gradient(#d9322c,#a90706); }
 .hpBattleStageScene { height: 100%; padding: 0; background: transparent; }
@@ -1123,7 +1122,7 @@ select {
 }
 
 @media (max-width: 760px) {
-  .appShell { height: var(--visual-viewport-height, 100dvh); min-height: 0; padding: 14px 12px; overflow: hidden; }
+  .appShell { height: var(--visual-viewport-height, 100dvh); min-height: 0; padding: 14px 12px; overflow-x: hidden; overflow-y: auto; }
   .topBar { min-height: 64px; }
   .headerHowTo { min-height: 50px; padding: 0 14px; border-radius: 14px; font-size: 14px; }
   .topBar .iconButton { width: 50px; height: 50px; min-height: 50px; }
