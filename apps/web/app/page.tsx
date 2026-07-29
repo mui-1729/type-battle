@@ -1706,6 +1706,15 @@ export default function HomePage() {
   }, [exitRequest, leaveRoom, returnToPracticeMenu]);
 
   const retryPractice = activePracticeMode === "daily" ? startDailyChallenge : repeatPractice;
+  const dailyRetryDisabledReason =
+    activePracticeMode === "daily" &&
+    (visibleDailyChallengeRecord?.attempts ?? 0) >= DAILY_CHALLENGE_MAX_ATTEMPTS
+      ? `今日の挑戦上限（${DAILY_CHALLENGE_MAX_ATTEMPTS}回）に達しました。次のデイリーチャレンジは${new Intl.DateTimeFormat("ja-JP", {
+          timeZone: "Asia/Tokyo",
+          hour: "numeric",
+          minute: "2-digit"
+        }).format(dailyChallengeInfo.nextChallengeAt)}から挑戦できます。`
+      : "";
 
   const copyRoomCode = async () => {
     if (!room) {
@@ -2073,6 +2082,7 @@ export default function HomePage() {
                   onRetry={room ? rematch : retryPractice}
                   practiceMode={activePracticeMode}
                   canRetry={!room || Boolean(currentPlayer?.connected)}
+                  retryDisabledReason={!room ? dailyRetryDisabledReason : ""}
                   retryPending={rematchPending}
                   retryError={rematchError}
                   rematchReady={Boolean(currentPlayer?.ready)}
