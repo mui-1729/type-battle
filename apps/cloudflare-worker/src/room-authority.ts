@@ -97,6 +97,7 @@ type PersistedPlayerTypingState = {
   typingProgressIndex?: number;
   pendingInput?: string;
   lastInputSequence?: number;
+  rateAcceptedCanonicalProgress?: number;
 };
 
 type RoomAuthorityEnv = {
@@ -115,6 +116,7 @@ type InternalPlayer = PlayerState & {
   typingProgressIndex: number;
   pendingInput: string;
   lastInputSequence: number;
+  rateAcceptedCanonicalProgress: number;
 };
 
 type InternalRoom = {
@@ -181,6 +183,10 @@ const MISTAKE_GUARD_STREAK = 20;
 const MAX_MISTAKE_GUARDS = 3;
 const BOT_PLAYER_ID = "bot_com_1";
 const BOT_NICKNAME = "COM";
+// Permit a small initial/network batch, then a deliberately generous sustained
+// human rate. Progress is canonical kana, so romaji does not consume more budget.
+const TYPING_INITIAL_BURST_CANONICAL = 12;
+const TYPING_MAX_CANONICAL_PER_SECOND = 20;
 
 const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistakeChance: number }> = {
   easy: { charsPerTick: 1, mistakeChance: 0.05 },
@@ -1081,7 +1087,8 @@ export class RoomAuthorityDurableObject {
       typingState[playerId] = {
         typingProgressIndex: player.typingProgressIndex,
         pendingInput: player.pendingInput,
-        lastInputSequence: player.lastInputSequence
+        lastInputSequence: player.lastInputSequence,
+        rateAcceptedCanonicalProgress: player.rateAcceptedCanonicalProgress
       };
     }
 
@@ -2418,6 +2425,7 @@ function createPlayer(
     typingProgressIndex: 0,
     pendingInput: "",
     lastInputSequence: 0,
+    rateAcceptedCanonicalProgress: 0,
     wpm: 0,
     accuracy: 100
   };
@@ -2449,6 +2457,7 @@ function addBotPlayer(room: InternalRoom): void {
     typingProgressIndex: 0,
     pendingInput: "",
     lastInputSequence: 0,
+    rateAcceptedCanonicalProgress: 0,
     wpm: 0,
     accuracy: 100
   });
@@ -2493,6 +2502,7 @@ function resetPlayers(room: InternalRoom, preserveConnectionState = false): void
     player.typingProgressIndex = 0;
     player.pendingInput = "";
     player.lastInputSequence = 0;
+    player.rateAcceptedCanonicalProgress = 0;
     player.wpm = 0;
     player.accuracy = 100;
     if (maxHp !== undefined) {
@@ -2601,6 +2611,7 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
 
   const previousProgressIndex = player.progressIndex;
   const previousMistakes = player.mistakes;
+  const playerBeforeInput = { ...player };
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
   const loopingMatch = room.matchRule === "timeAttack" || room.matchRule === "hpBattle";
@@ -2650,6 +2661,31 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
   if (!loopingMatch) {
     player.progressIndex = clamp(player.progressIndex, 0, promptLength);
   }
+
+  const allowedCanonicalProgress = TYPING_INITIAL_BURST_CANONICAL
+    + Math.floor(
+      Math.max(now - startedAt, 0) * TYPING_MAX_CANONICAL_PER_SECOND / 1_000
+    );
+  if (
+    attackDamageDelta > TYPING_INITIAL_BURST_CANONICAL
+    || player.rateAcceptedCanonicalProgress + attackDamageDelta > allowedCanonicalProgress
+  ) {
+    // Reject the command atomically. Keep its sequence consumed so replaying or
+    // rechunking the same command cannot alter authoritative gameplay state.
+    Object.assign(player, playerBeforeInput);
+    player.lastInputSequence = payload.sequence;
+    console.warn(JSON.stringify({
+      event: "typing_progress_rate_rejected",
+      roomCode: room.roomCode,
+      playerId: player.id,
+      acceptedCanonicalProgress: player.rateAcceptedCanonicalProgress,
+      attemptedCanonicalDelta: attackDamageDelta,
+      allowedCanonicalProgress
+    }));
+    return false;
+  }
+  player.rateAcceptedCanonicalProgress += attackDamageDelta;
+
   player.wpm = calculateWpm(player.correctCharacters, now - startedAt);
   player.accuracy = calculateAccuracy(player.correctCharacters, player.totalTypedCharacters);
 
@@ -3063,6 +3099,8 @@ function createRoomStateFromSnapshot(
           ),
           pendingInput: typingState[player.id]?.pendingInput ?? "",
           lastInputSequence: typingState[player.id]?.lastInputSequence ?? 0,
+          rateAcceptedCanonicalProgress: typingState[player.id]?.rateAcceptedCanonicalProgress
+            ?? Math.max(Number.isFinite(player.progressIndex) ? player.progressIndex : 0, 0),
           ...(!player.isBot
             ? { disconnectedAt: disconnectedAt[player.id] ?? restoreNow }
             : {})
@@ -3146,6 +3184,11 @@ function parseSnapshotInternal(value: unknown): PersistedRoomSnapshot["internal"
         ...(typeof state.pendingInput === "string" ? { pendingInput: state.pendingInput } : {}),
         ...(typeof state.lastInputSequence === "number" && Number.isSafeInteger(state.lastInputSequence)
           ? { lastInputSequence: state.lastInputSequence }
+          : {}),
+        ...(typeof state.rateAcceptedCanonicalProgress === "number"
+          && Number.isSafeInteger(state.rateAcceptedCanonicalProgress)
+          && state.rateAcceptedCanonicalProgress >= 0
+          ? { rateAcceptedCanonicalProgress: state.rateAcceptedCanonicalProgress }
           : {})
       };
     }
