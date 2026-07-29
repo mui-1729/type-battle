@@ -350,6 +350,90 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await guestContext.close();
 });
 
+test("shows acknowledged reactions, filters disabled incoming reactions, and supports mobile keyboard input", async ({ browser }) => {
+  const hostContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const guestContext = await browser.newContext({ viewport: { width: 320, height: 568 } });
+  await installWebSocketProbe(hostContext);
+  const host = await hostContext.newPage();
+  const guest = await guestContext.newPage();
+
+  await host.goto("/");
+  await selectBattleMode(host);
+  await setNickname(host, "Alice");
+  await host.getByRole("button", { name: "ルームを作成" }).click();
+  const roomCode = await host.locator(".roomMeta strong").innerText();
+
+  await guest.goto("/");
+  await selectBattleMode(guest);
+  await setNickname(guest, "Bob");
+  await guest.getByLabel("ルームコード").fill(roomCode);
+  await guest.getByTitle("ルームに参加").click();
+  await expect(host.getByTestId("lobby-prep").getByText("Bob")).toBeVisible();
+
+  const lobbyReactions = host.locator(".lobbyReactionCard");
+  await lobbyReactions.getByRole("button", { name: "よろしく" }).click();
+  await expect(lobbyReactions.getByRole("status").first()).toContainText("よろしく を送信しました");
+  await expect(lobbyReactions.getByRole("button", { name: "よろしく" })).toBeDisabled();
+  await expect(guest.locator(".lobbyReactionBubble").getByText("よろしく")).toBeVisible();
+
+  await host.getByRole("button", { name: "READYにする" }).click();
+  await guest.getByRole("button", { name: "READYにする" }).click();
+  await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expect(guest.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await typeInputGuide(host, await readInputGuide(host));
+  await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
+  await expect(guest.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
+
+  const hostResultReactions = host.locator(".resultReactions");
+  const guestResultReactions = guest.locator(".resultReactions");
+  await hostResultReactions.getByRole("button", { name: "ナイス" }).click();
+  await expect(hostResultReactions.getByRole("status").first()).toContainText("ナイス を送信しました");
+  await expect(guestResultReactions.getByText("Alice: 「ナイス」")).toBeVisible();
+  await expect(guest.locator('[data-player-id]').filter({ hasText: "Alice" }).locator(".resultReactionBubble")).toHaveText("ナイス");
+
+  await guest.getByTitle("設定を開く").click();
+  const incomingReactionSetting = guest.getByLabel("相手の定型リアクションを表示");
+  await incomingReactionSetting.uncheck();
+  await guest.getByRole("button", { name: "閉じる", exact: true }).click();
+  await expect(guestResultReactions.getByText("相手のリアクションは非表示です。自分からは送信できます。")).toBeVisible();
+  await expect(guestResultReactions.getByText("Alice: 「ナイス」")).toHaveCount(0);
+
+  const guestKeyboardReaction = guestResultReactions.getByRole("button", { name: "くやしい" });
+  await guestKeyboardReaction.focus();
+  await expect(guestKeyboardReaction).toBeFocused();
+  await guest.keyboard.press("Enter");
+  await expect(guestResultReactions.getByRole("status").first()).toContainText("くやしい を送信しました");
+  await expect(hostResultReactions.getByText("Bob: 「くやしい」")).toBeVisible();
+  await expect(guestKeyboardReaction).toBeDisabled();
+  const mobileReactionGeometry = await guestResultReactions.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+      left: rect.left,
+      right: rect.right
+    };
+  });
+  expect(mobileReactionGeometry.documentWidth).toBeLessThanOrEqual(mobileReactionGeometry.viewportWidth);
+  expect(mobileReactionGeometry.left).toBeGreaterThanOrEqual(0);
+  expect(mobileReactionGeometry.right).toBeLessThanOrEqual(mobileReactionGeometry.viewportWidth);
+
+  await expect(hostResultReactions.getByRole("button", { name: "もう一戦" })).toBeEnabled({ timeout: 5_000 });
+  await hostResultReactions.getByRole("button", { name: "もう一戦" }).click();
+  await expect(hostResultReactions.getByRole("status").first()).toContainText("もう一戦 を送信しました");
+  await expect(guestResultReactions.getByText("Alice: 「もう一戦」")).toHaveCount(0);
+  await expect(guest.locator(".resultReactionBubble").getByText("もう一戦")).toHaveCount(0);
+
+  await expect(hostResultReactions.getByRole("button", { name: "準備OK" })).toBeEnabled({ timeout: 5_000 });
+  await closeLatestOpenWebSocket(host, 4001, "reaction ack failure");
+  await expect(host.locator(".connection")).toContainText("未接続");
+  await hostResultReactions.getByRole("button", { name: "準備OK" }).click();
+  await expect(hostResultReactions.getByRole("alert")).toContainText("リアクションを送信できません");
+
+  await hostContext.close();
+  await guestContext.close();
+});
+
 test("keeps room exit available on mobile and confirms before leaving", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");

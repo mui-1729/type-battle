@@ -1,8 +1,8 @@
 import { Check, ChevronLeft, ChevronRight, Clipboard, MessageCircle } from "lucide-react";
-import { useState } from "react";
 import { QUICK_REACTIONS } from "@type-battle/shared";
 import type { BotDifficulty, MatchRule, PlayerState, PromptCategory, QuickReaction, RoomState } from "@type-battle/shared";
 import { getAccessory, type PlayerAccessory } from "../../lib/player-accessories";
+import { isReactionInputDisabled, type ReactionFeedback } from "../_lib/reaction-feedback";
 import { BOT_DIFFICULTY_LABELS, MATCH_RULE_DETAILS, PROMPT_CATEGORY_LABELS } from "../_lib/ui-labels";
 import { PlayerIdentity } from "./player-identity";
 import { StickFigure } from "./stick-figure";
@@ -19,8 +19,10 @@ type LobbyPrepProps = {
   onMatchRuleChange: (rule: MatchRule) => void;
   onPromptCategoryChange: (category: PromptCategory) => void;
   onBotDifficultyChange: (difficulty: BotDifficulty) => void;
-  onReaction: (reaction: QuickReaction) => boolean;
+  onReaction: (reaction: QuickReaction) => void;
+  reactionFeedback: ReactionFeedback;
   remoteReaction: { playerId: string; reaction: QuickReaction } | null;
+  remoteReactionsEnabled: boolean;
 };
 
 export function LobbyPrep({
@@ -35,7 +37,9 @@ export function LobbyPrep({
   onPromptCategoryChange,
   onBotDifficultyChange,
   onReaction,
-  remoteReaction
+  reactionFeedback,
+  remoteReaction,
+  remoteReactionsEnabled
 }: LobbyPrepProps) {
   const localPlayer = room.players.find((player) => player.id === localPlayerId) ?? null;
   const humanPlayers = room.players.filter((player) => !player.isBot);
@@ -46,7 +50,7 @@ export function LobbyPrep({
     : null;
   const isHost = Boolean(localPlayer?.isHost);
   const selectedAccessory = getAccessory(localPlayer?.accessoryIndex ?? accessoryIndex);
-  const [reaction, setReaction] = useReactionCooldown(onReaction);
+  const reactionInputDisabled = isReactionInputDisabled(reactionFeedback);
 
   return (
     <section className="lobbyPrep" aria-labelledby="lobby-prep-title" data-testid="lobby-prep">
@@ -74,7 +78,7 @@ export function LobbyPrep({
           isLocal={playerOne?.id === localPlayerId}
           ready={Boolean(playerOne?.ready)}
           accessory={playerOne?.id === localPlayerId ? selectedAccessory : getAccessory(playerOne?.accessoryIndex ?? (playerOne?.isBot ? 1 : 0))}
-          reaction={playerOne?.id === localPlayerId ? reaction : remoteReaction && remoteReaction.playerId === playerOne?.id ? remoteReaction.reaction : ""}
+          reaction={playerOne?.id === localPlayerId ? reactionFeedback.reaction ?? "" : remoteReaction && remoteReaction.playerId === playerOne?.id ? remoteReaction.reaction : ""}
           {...(playerOne?.id === localPlayerId
             ? { onPreviousAccessory, onNextAccessory }
             : {})}
@@ -86,7 +90,7 @@ export function LobbyPrep({
           isLocal={playerTwo?.id === localPlayerId}
           ready={Boolean(playerTwo?.ready)}
           accessory={playerTwo?.id === localPlayerId ? selectedAccessory : getAccessory(playerTwo?.accessoryIndex ?? (playerTwo?.isBot ? 1 : 0))}
-          reaction={playerTwo?.id === localPlayerId ? reaction : remoteReaction && remoteReaction.playerId === playerTwo?.id ? remoteReaction.reaction : ""}
+          reaction={playerTwo?.id === localPlayerId ? reactionFeedback.reaction ?? "" : remoteReaction && remoteReaction.playerId === playerTwo?.id ? remoteReaction.reaction : ""}
           {...(playerTwo?.id === localPlayerId
             ? { onPreviousAccessory, onNextAccessory }
             : {})}
@@ -159,19 +163,27 @@ export function LobbyPrep({
           <div className="reactionGrid" aria-label="定型リアクション">
             {QUICK_REACTIONS.map((item) => (
               <button
-                className={reaction === item ? "reactionButton active" : "reactionButton"}
+                className={reactionFeedback.reaction === item ? "reactionButton active" : "reactionButton"}
                 key={item}
                 type="button"
-                onClick={() => setReaction(item)}
-                aria-pressed={reaction === item}
+                onClick={() => onReaction(item)}
+                aria-pressed={reactionFeedback.reaction === item}
+                aria-busy={reactionFeedback.phase === "sending"}
+                disabled={reactionInputDisabled}
               >
                 {item}
               </button>
             ))}
           </div>
-          <p className="lobbyReactionStatus" role="status" aria-live="polite">
-            {reaction ? `${reaction} を送りました` : "自由入力なし・3秒に1回送信できます"}
-          </p>
+          {reactionFeedback.phase === "error" ? (
+            <p className="lobbyReactionStatus errorText" role="alert">{reactionFeedback.message}</p>
+          ) : (
+            <p className="lobbyReactionStatus" role="status" aria-live="polite">
+              {reactionFeedback.message || (remoteReactionsEnabled
+                ? "自由入力なし・3秒に1回送信できます"
+                : "相手のリアクションは非表示です。自分からは送信できます。")}
+            </p>
+          )}
           {remoteReaction && remoteReaction.playerId !== localPlayerId ? (
             <p className="lobbyRemoteReaction" role="status" aria-live="polite">
               {reactionPlayer?.nickname ?? "相手"}: 「{remoteReaction.reaction}」
@@ -239,7 +251,7 @@ function LobbyPlayerCard({
         />
         <span className={ready ? "readyBadge active" : "readyBadge"}>{ready ? "READY" : "WAITING"}</span>
       </div>
-      {reaction ? <span className="lobbyReactionBubble" role="status" aria-live="polite">{reaction}</span> : null}
+      {reaction ? <span className="lobbyReactionBubble" aria-hidden="true">{reaction}</span> : null}
       <div className="lobbyFigureArea">
         {player ? (
           <>
@@ -265,25 +277,4 @@ function LobbyPlayerCard({
       ) : null}
     </SurfaceCard>
   );
-}
-
-function useReactionCooldown(onReaction: (reaction: QuickReaction) => boolean): [QuickReaction | "", (reaction: QuickReaction) => void] {
-  const [reaction, setReactionState] = useState<QuickReaction | "">("");
-  const [cooldownUntil, setCooldownUntil] = useState(0);
-
-  const setReaction = (nextReaction: QuickReaction) => {
-    if (Date.now() < cooldownUntil) {
-      return;
-    }
-
-    if (!onReaction(nextReaction)) {
-      return;
-    }
-
-    setReactionState(nextReaction);
-    setCooldownUntil(Date.now() + 3_000);
-    window.setTimeout(() => setReactionState(""), 2_400);
-  };
-
-  return [reaction, setReaction];
 }

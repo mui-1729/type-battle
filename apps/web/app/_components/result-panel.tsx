@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, RotateCcw, Settings, Sparkles, X } from "luc
 import { useId, useState } from "react";
 import type { MatchResult, MatchRule, QuickReaction } from "@type-battle/shared";
 import { QUICK_REACTIONS } from "@type-battle/shared";
+import { isReactionInputDisabled, type ReactionFeedback } from "../_lib/reaction-feedback";
 import { MATCH_RULE_DETAILS, getPlayerDeviceLabel } from "../_lib/ui-labels";
 import { PlayerIdentity } from "./player-identity";
 import { DialogOverlay } from "./dialog-overlay";
@@ -23,6 +24,9 @@ type ResultPanelProps = {
   onNextAccessory?: () => void;
   onOpenSettings?: () => void;
   onReaction?: (reaction: QuickReaction) => void;
+  reactionFeedback?: ReactionFeedback;
+  remoteReaction?: { playerId: string; reaction: QuickReaction } | null;
+  remoteReactionsEnabled?: boolean;
   rematchReady?: boolean;
   onPracticeNext?: (() => void) | undefined;
   onPracticeMenu?: (() => void) | undefined;
@@ -46,6 +50,9 @@ export function ResultPanel({
   onNextAccessory,
   onOpenSettings,
   onReaction,
+  reactionFeedback,
+  remoteReaction = null,
+  remoteReactionsEnabled = true,
   rematchReady = false,
   onPracticeNext,
   onPracticeMenu,
@@ -60,6 +67,10 @@ export function ResultPanel({
   const title = isRoomResult ? (doubleKo ? "DOUBLE KO" : "試合結果") : practiceMode === "daily" ? "デイリーチャレンジの記録" : "練習の記録";
   const retryLabel = isRoomResult ? "再戦READY" : practiceMode === "daily" ? "もう一度挑戦" : "もう一度練習";
   const localResult = result.players.find((player) => player.id === localPlayerId) ?? result.players[0];
+  const remoteReactionPlayer = remoteReaction
+    ? result.players.find((player) => player.id === remoteReaction.playerId) ?? null
+    : null;
+  const reactionInputDisabled = reactionFeedback ? isReactionInputDisabled(reactionFeedback) : false;
 
   return (
     <SurfaceCard className={`resultPanel ${doubleKo ? "resultPanelDraw" : ""}`} data-result-outcome={doubleKo ? "double-ko" : localResult?.rank === 1 ? "win" : "loss"}>
@@ -107,6 +118,11 @@ export function ResultPanel({
           return (
             <article className={`resultCard ${isWinner ? "isWinner" : ""}`} data-player-id={player.id} data-outcome={doubleKo ? "draw" : isWinner ? "winner" : "loser"} key={player.id}>
               {isWinner ? <span className="resultSpotlight" aria-hidden="true" /> : null}
+              {isLocal && reactionFeedback?.reaction ? (
+                <span className="resultReactionBubble" aria-hidden="true">{reactionFeedback.reaction}</span>
+              ) : remoteReaction?.playerId === player.id ? (
+                <span className="resultReactionBubble" aria-hidden="true">{remoteReaction.reaction}</span>
+              ) : null}
               <div className="resultCardTopline"><span>{player.isHost ? "1P" : "2P"}</span>{isLocal ? <strong>YOU</strong> : null}</div>
               <PlayerIdentity nickname={player.nickname} kind={player.isBot ? "com" : isLocal ? "you" : player.isHost ? "one" : "two"} slot={player.isHost ? "1P" : "2P"} compact />
               <strong className="resultOutcome">{doubleKo ? "DRAW" : isWinner ? "WINNER" : player.finishStatus === "forfeited" ? "FORFEIT" : "—"}</strong>
@@ -165,7 +181,32 @@ export function ResultPanel({
       {isRoomResult && onReaction ? (
         <div className="resultReactions" aria-label="定型リアクション">
           <span><Sparkles size={15} /> REACTION</span>
-          <div>{QUICK_REACTIONS.map((reaction) => <button type="button" key={reaction} onClick={() => onReaction(reaction)}>{reaction}</button>)}</div>
+          <div>{QUICK_REACTIONS.map((reaction) => (
+            <button
+              type="button"
+              key={reaction}
+              onClick={() => onReaction(reaction)}
+              aria-pressed={reactionFeedback?.reaction === reaction}
+              aria-busy={reactionFeedback?.phase === "sending"}
+              disabled={reactionInputDisabled}
+            >
+              {reaction}
+            </button>
+          ))}</div>
+          {reactionFeedback?.phase === "error" ? (
+            <p className="resultReactionStatus errorText" role="alert">{reactionFeedback.message}</p>
+          ) : (
+            <p className="resultReactionStatus" role="status" aria-live="polite">
+              {reactionFeedback?.message || (remoteReactionsEnabled
+                ? "3秒に1回送信できます。"
+                : "相手のリアクションは非表示です。自分からは送信できます。")}
+            </p>
+          )}
+          {remoteReaction && remoteReaction.playerId !== localPlayerId ? (
+            <p className="resultRemoteReaction" role="status" aria-live="polite">
+              {remoteReactionPlayer?.nickname ?? "相手"}: 「{remoteReaction.reaction}」
+            </p>
+          ) : null}
         </div>
       ) : null}
     </SurfaceCard>

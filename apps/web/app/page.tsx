@@ -67,6 +67,18 @@ import { resolveRoomSnapshot } from "./_lib/room-state-order";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
 import { getPracticeSocketToRelease } from "./_lib/practice-socket-lifecycle";
 import {
+  INITIAL_REACTION_FEEDBACK,
+  REACTION_COOLDOWN_MS,
+  REACTION_DISPLAY_MS,
+  clearReactionDisplayTimer,
+  createCooldownReactionFeedback,
+  createReactionErrorFeedback,
+  createSendingReactionFeedback,
+  createSentReactionFeedback,
+  replaceReactionDisplayTimer,
+  type ReactionFeedback
+} from "./_lib/reaction-feedback";
+import {
   getStoredRoomJoinFailureAction,
   getStoredRoomRejoinDelayMs,
   getRoomDisconnectRecoveryState,
@@ -140,6 +152,7 @@ export default function HomePage() {
   const [connected, setConnected] = useState(false);
   const [guestSession, setGuestSession] = useState<GuestSession | null>(null);
   const [playerId, setPlayerId] = useState("");
+  const playerIdRef = useRef("");
   const [settings, setSettings] = useState<PlayerSettings>(DEFAULT_PLAYER_SETTINGS);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -153,6 +166,12 @@ export default function HomePage() {
   const [joinCode, setJoinCode] = useState("");
   const [room, setRoom] = useState<RoomState | null>(null);
   const [remoteReaction, setRemoteReaction] = useState<{ playerId: string; reaction: QuickReaction } | null>(null);
+  const [reactionFeedback, setReactionFeedback] = useState<ReactionFeedback>(INITIAL_REACTION_FEEDBACK);
+  const reactionRequestPendingRef = useRef(false);
+  const reactionCooldownUntilRef = useRef(0);
+  const reactionDisplayTimerRef = useRef<number | null>(null);
+  const reactionCooldownTimerRef = useRef<number | null>(null);
+  const remoteReactionTimerRef = useRef<number | null>(null);
   const [result, setResult] = useState<MatchResult | null>(null);
   const [practiceSession, setPracticeSession] = useState<PracticeSession | null>(null);
   const [practiceResult, setPracticeResult] = useState<MatchResult | null>(null);
@@ -410,6 +429,51 @@ export default function HomePage() {
     socketModeRef.current = socketMode;
   }, [socketMode]);
 
+  useEffect(() => {
+    playerIdRef.current = playerId;
+  }, [playerId]);
+
+  const clearReactionFeedbackTimers = useCallback(() => {
+    if (reactionDisplayTimerRef.current !== null) {
+      window.clearTimeout(reactionDisplayTimerRef.current);
+      reactionDisplayTimerRef.current = null;
+    }
+    if (reactionCooldownTimerRef.current !== null) {
+      window.clearTimeout(reactionCooldownTimerRef.current);
+      reactionCooldownTimerRef.current = null;
+    }
+  }, []);
+
+  const resetReactionFeedback = useCallback(() => {
+    clearReactionFeedbackTimers();
+    reactionRequestPendingRef.current = false;
+    reactionCooldownUntilRef.current = 0;
+    setReactionFeedback(INITIAL_REACTION_FEEDBACK);
+  }, [clearReactionFeedbackTimers]);
+
+  const clearRemoteReaction = useCallback(() => {
+    remoteReactionTimerRef.current = clearReactionDisplayTimer(remoteReactionTimerRef.current);
+    setRemoteReaction(null);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearReactionFeedbackTimers();
+      remoteReactionTimerRef.current = clearReactionDisplayTimer(remoteReactionTimerRef.current);
+    };
+  }, [clearReactionFeedbackTimers]);
+
+  useEffect(() => {
+    resetReactionFeedback();
+    clearRemoteReaction();
+  }, [clearRemoteReaction, resetReactionFeedback, room?.roomCode]);
+
+  useEffect(() => {
+    if (!settings.reactionsEnabled) {
+      clearRemoteReaction();
+    }
+  }, [clearRemoteReaction, settings.reactionsEnabled]);
+
   const attachSocketHandlers = useCallback((socket: ClientSocket, kind: "practice" | "room") => {
     const isCurrentSocket = () => socketRef.current === socket;
     const applyRoomSnapshot = (nextRoom: RoomState, beforeApply?: () => void) => {
@@ -488,6 +552,12 @@ export default function HomePage() {
       }
 
       setConnected(false);
+      reactionRequestPendingRef.current = false;
+      setReactionFeedback((current) =>
+        current.phase === "sending"
+          ? createReactionErrorFeedback("接続が切れたため、リアクションを送信できませんでした。")
+          : current
+      );
       if (kind === "room") {
         setStoredRoomRecovery(getRoomDisconnectRecoveryState({ reason, willReconnect }));
       }
@@ -549,16 +619,21 @@ export default function HomePage() {
       setRematchPending(false);
     });
     socket.on("player:reaction", (payload) => {
-      if (!isCurrentSocket()) {
+      if (
+        !isCurrentSocket() ||
+        !settingsRef.current.reactionsEnabled ||
+        payload.playerId === playerIdRef.current
+      ) {
         return;
       }
       setRemoteReaction(payload);
-      window.setTimeout(() => {
-        if (!isCurrentSocket()) {
-          return;
+      remoteReactionTimerRef.current = replaceReactionDisplayTimer(
+        remoteReactionTimerRef.current,
+        () => {
+          remoteReactionTimerRef.current = null;
+          setRemoteReaction(null);
         }
-        setRemoteReaction((current) => current?.playerId === payload.playerId && current.reaction === payload.reaction ? null : current);
-      }, 2_400);
+      );
     });
   }, [resetTyping]);
 
@@ -1555,21 +1630,50 @@ export default function HomePage() {
 
   const sendReaction = useCallback((reaction: QuickReaction) => {
     const socket = socketRef.current;
-    if (!socket || !room || !connected) {
-      setError("Realtimeに接続していないため、リアクションを送信できません。");
-      return false;
+    const now = Date.now();
+
+    if (reactionRequestPendingRef.current) {
+      return;
     }
 
+    if (now < reactionCooldownUntilRef.current) {
+      setReactionFeedback(createCooldownReactionFeedback());
+      return;
+    }
+
+    if (!socket || !room || !connected) {
+      setReactionFeedback(createReactionErrorFeedback("Realtimeに接続していないため、リアクションを送信できません。"));
+      return;
+    }
+
+    clearReactionFeedbackTimers();
+    reactionRequestPendingRef.current = true;
+    setReactionFeedback(createSendingReactionFeedback(reaction));
     socket.emit("player:reaction", { roomCode: room.roomCode, reaction }, (response) => {
       if (socketRef.current !== socket) {
+        reactionRequestPendingRef.current = false;
         return;
       }
+      reactionRequestPendingRef.current = false;
       if (!response.ok) {
-        setError(response.error);
+        reactionCooldownUntilRef.current = 0;
+        setReactionFeedback(createReactionErrorFeedback(response.error));
+        return;
       }
+
+      reactionCooldownUntilRef.current = Date.now() + REACTION_COOLDOWN_MS;
+      setReactionFeedback(createSentReactionFeedback(reaction));
+      reactionDisplayTimerRef.current = window.setTimeout(() => {
+        reactionDisplayTimerRef.current = null;
+        setReactionFeedback(createCooldownReactionFeedback());
+      }, REACTION_DISPLAY_MS);
+      reactionCooldownTimerRef.current = window.setTimeout(() => {
+        reactionCooldownTimerRef.current = null;
+        reactionCooldownUntilRef.current = 0;
+        setReactionFeedback(INITIAL_REACTION_FEEDBACK);
+      }, REACTION_COOLDOWN_MS);
     });
-    return true;
-  }, [connected, room]);
+  }, [clearReactionFeedbackTimers, connected, room]);
 
   useEffect(() => {
     if (!room || room.status !== "waiting") {
@@ -2075,7 +2179,9 @@ export default function HomePage() {
                   onPromptCategoryChange={setPromptCategory}
                   onBotDifficultyChange={setBotDifficulty}
                   onReaction={sendReaction}
-                  remoteReaction={remoteReaction}
+                  reactionFeedback={reactionFeedback}
+                  remoteReaction={settings.reactionsEnabled ? remoteReaction : null}
+                  remoteReactionsEnabled={settings.reactionsEnabled}
                 />
               ) : activeResult ? (
                 <ResultPanel
@@ -2096,7 +2202,10 @@ export default function HomePage() {
                     onPreviousAccessory: () => shiftAccessory(-1),
                     onNextAccessory: () => shiftAccessory(1),
                     onOpenSettings: () => setMatchSettingsOpen(true),
-                    onReaction: sendReaction
+                    onReaction: sendReaction,
+                    reactionFeedback,
+                    remoteReaction: settings.reactionsEnabled ? remoteReaction : null,
+                    remoteReactionsEnabled: settings.reactionsEnabled
                   } : {})}
                   {...(room ? { matchRule: activeResult.matchRule ?? room.matchRule } : {})}
                 />

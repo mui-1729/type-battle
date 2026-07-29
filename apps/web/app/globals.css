@@ -1682,6 +1682,27 @@ textarea::placeholder {
   font-size: 11px;
 }
 
+.resultReactions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.resultReactionStatus,
+.resultRemoteReaction {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.resultReactionStatus {
+  color: var(--muted);
+}
+
+.resultRemoteReaction {
+  color: var(--accent-2);
+  font-weight: 800;
+}
+
 .matchSettingsModal {
   display: grid;
   gap: 18px;
@@ -2866,10 +2887,10 @@ textarea::placeholder {
   overflow: hidden;
 }
 
-.lobbyReactionBubble {
+.lobbyReactionBubble,
+.resultReactionBubble {
   position: absolute;
   z-index: 2;
-  top: 58px;
   left: 50%;
   max-width: calc(100% - 36px);
   padding: 8px 12px;
@@ -2885,13 +2906,22 @@ textarea::placeholder {
   animation: lobbyReactionBubbleIn 2400ms ease both;
 }
 
+.lobbyReactionBubble {
+  top: 58px;
+}
+
+.resultReactionBubble {
+  top: 48px;
+}
+
 @keyframes lobbyReactionBubbleIn {
   0%, 100% { opacity: 0; transform: translate(-50%, -6px) scale(0.96); }
   12%, 82% { opacity: 1; transform: translate(-50%, 0) scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lobbyReactionBubble {
+  .lobbyReactionBubble,
+  .resultReactionBubble {
     animation: none;
   }
 }
