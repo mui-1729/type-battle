@@ -1180,7 +1180,7 @@ test("contains settings focus and restores focus and scroll state on Escape", as
 });
 
 test("keeps player settings compact at normal height and scrolls only its body when short", async ({ page }) => {
-  await page.setViewportSize({ width: 800, height: 900 });
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto("/");
   await dismissTutorial(page);
   await page.getByTitle("設定を開く").click();
