@@ -1178,3 +1178,39 @@ test("contains settings focus and restores focus and scroll state on Escape", as
     appShell: document.querySelector<HTMLElement>(".appShell")?.style.overflow
   }))).toEqual({ document: "clip", body: "scroll", appShell: "auto" });
 });
+
+test("keeps player settings compact at normal height and scrolls only its body when short", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  await dismissTutorial(page);
+  await page.getByTitle("設定を開く").click();
+
+  const dialog = page.getByRole("dialog", { name: "プレイヤー設定" });
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => dialog.evaluate((element) => element.scrollHeight === element.clientHeight)).toBe(true);
+  await expect.poll(() => dialog.locator(".playerSettingsBody").evaluate((element) => element.scrollHeight === element.clientHeight)).toBe(true);
+
+  await page.setViewportSize({ width: 320, height: 480 });
+  await expect.poll(() => dialog.evaluate((element) => element.scrollHeight === element.clientHeight)).toBe(true);
+  await expect.poll(() => dialog.locator(".playerSettingsBody").evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await expect(page.getByRole("button", { name: "設定を閉じる" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "閉じる", exact: true })).toBeVisible();
+});
+
+test("labels room participation and disables it until a code is entered", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await page.goto("/");
+  await dismissTutorial(page);
+  await selectBattleMode(page);
+
+  const joinButton = page.getByRole("button", { name: "参加", exact: true });
+  await expect(joinButton).toBeVisible();
+  await expect(joinButton).toBeDisabled();
+  await expect.poll(() => joinButton.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.left >= 0 && bounds.right <= window.innerWidth;
+  })).toBe(true);
+  await page.getByLabel("ルームコード").fill("ABC123");
+  await expect(joinButton).toBeEnabled();
+  await expect(joinButton).toHaveAttribute("aria-busy", "false");
+});

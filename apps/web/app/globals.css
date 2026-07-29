@@ -422,7 +422,12 @@ textarea::placeholder {
 }
 
 .joinRow {
-  grid-template-columns: minmax(0, 1fr) 48px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.joinButton {
+  min-width: 96px;
+  white-space: nowrap;
 }
 
 .roomMeta {
@@ -1047,7 +1052,8 @@ textarea::placeholder {
 }
 
 .stickFigureFace {
-  stroke-width: 3;
+  fill: currentColor;
+  stroke: none;
 }
 
 .stickFigure[data-side="right"] {
@@ -2295,7 +2301,7 @@ textarea::placeholder {
   }
 
   .joinRow {
-    grid-template-columns: minmax(0, 1fr) 46px;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .roomMeta strong {
@@ -2406,7 +2412,37 @@ textarea::placeholder {
 
 .settingsGrid {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
+}
+
+.settingsGridWide {
+  grid-column: 1 / -1;
+}
+
+.playerSettingsBody {
+  display: grid;
+  gap: 18px;
+  min-height: 0;
+}
+
+.playerSettingsModal {
+  width: min(680px, 100%);
+  overflow: hidden;
+}
+
+.playerSettingsModal .toggleGroup {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.playerSettingsModal .settingsGridWide .toggleGroup {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.playerSettingsModal .toggleLabel {
+  align-content: center;
+  padding: 10px;
+  line-height: 1.35;
 }
 
 .toggleGroup {
@@ -2443,6 +2479,49 @@ textarea::placeholder {
   justify-content: flex-end;
   padding-top: 4px;
   border-top: 1px solid var(--line);
+}
+
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after {
+  scroll-behavior: auto !important;
+  transition: none !important;
+  animation: none !important;
+}
+
+@media (max-width: 620px) {
+  .settingsGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settingsGridWide {
+    grid-column: auto;
+  }
+
+  .playerSettingsModal .toggleGroup,
+  .playerSettingsModal .settingsGridWide .toggleGroup {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-height: 620px) {
+  .playerSettingsBody {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
+@media (max-width: 360px) {
+  .joinRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .joinButton {
+    min-width: 82px;
+    padding-inline: 12px;
+  }
 }
 
 .featureList {
