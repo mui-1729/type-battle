@@ -12,21 +12,39 @@ type PlayerSettingsModalProps = {
   onOpenTutorial?: () => void;
 };
 
-export function PlayerSettingsModal({ settings, setSettings, setNickname, onClose, onOpenTutorial }: PlayerSettingsModalProps) {
+export function PlayerSettingsModal({
+  settings,
+  setSettings,
+  setNickname,
+  onClose,
+  onOpenTutorial,
+}: PlayerSettingsModalProps) {
   const titleId = useId();
   return (
-    <DialogOverlay titleId={titleId} onClose={onClose}>
-        <div className="modalHeader">
-          <div>
-            <p className="eyebrow">PLAYER</p>
-            <h2 id={titleId}>プレイヤー設定</h2>
-          </div>
-          <button className="iconButton" type="button" onClick={onClose} aria-label="設定を閉じる">
-            <X size={20} />
-          </button>
+    <DialogOverlay
+      className="playerSettingsModal"
+      titleId={titleId}
+      onClose={onClose}
+    >
+      <div className="modalHeader">
+        <div>
+          <p className="eyebrow">PLAYER</p>
+          <h2 id={titleId}>プレイヤー設定</h2>
         </div>
+        <button
+          className="iconButton"
+          type="button"
+          onClick={onClose}
+          aria-label="設定を閉じる"
+        >
+          <X size={20} />
+        </button>
+      </div>
 
-        <p className="modalCopy">表示、入力、音の設定は変更すると自動で保存されます。</p>
+      <div className="playerSettingsBody">
+        <p className="modalCopy">
+          表示、入力、音の設定は変更すると自動で保存されます。
+        </p>
 
         <div className="settingsGrid">
           <div className="fieldGroup">
@@ -47,7 +65,9 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                   key={theme}
                   type="button"
                   className={settings.theme === theme ? "active" : ""}
-                  onClick={() => setSettings((current) => ({ ...current, theme }))}
+                  onClick={() =>
+                    setSettings((current) => ({ ...current, theme }))
+                  }
                 >
                   {THEME_LABELS[theme]}
                 </button>
@@ -55,7 +75,7 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
             </div>
           </div>
 
-          <div className="fieldGroup">
+          <div className="fieldGroup settingsGridWide">
             <label>表示とアクセシビリティ</label>
             <div className="toggleGroup">
               <label className="toggleLabel">
@@ -63,7 +83,10 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                   type="checkbox"
                   checked={settings.inputGuideEnabled}
                   onChange={(event) =>
-                    setSettings((current) => ({ ...current, inputGuideEnabled: event.target.checked }))
+                    setSettings((current) => ({
+                      ...current,
+                      inputGuideEnabled: event.target.checked,
+                    }))
                   }
                   suppressHydrationWarning
                 />
@@ -74,7 +97,10 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                   type="checkbox"
                   checked={settings.reducedMotion}
                   onChange={(event) =>
-                    setSettings((current) => ({ ...current, reducedMotion: event.target.checked }))
+                    setSettings((current) => ({
+                      ...current,
+                      reducedMotion: event.target.checked,
+                    }))
                   }
                   suppressHydrationWarning
                 />
@@ -84,7 +110,12 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                 <input
                   type="checkbox"
                   checked={settings.reactionsEnabled}
-                  onChange={(event) => setSettings((current) => ({ ...current, reactionsEnabled: event.target.checked }))}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      reactionsEnabled: event.target.checked,
+                    }))
+                  }
                   suppressHydrationWarning
                 />
                 相手の定型リアクションを表示
@@ -100,7 +131,9 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                   key={fontSize}
                   type="button"
                   className={settings.fontSize === fontSize ? "active" : ""}
-                  onClick={() => setSettings((current) => ({ ...current, fontSize }))}
+                  onClick={() =>
+                    setSettings((current) => ({ ...current, fontSize }))
+                  }
                 >
                   {FONT_SIZE_LABELS[fontSize]}
                 </button>
@@ -116,7 +149,10 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                   type="checkbox"
                   checked={settings.soundEnabled}
                   onChange={(event) =>
-                    setSettings((current) => ({ ...current, soundEnabled: event.target.checked }))
+                    setSettings((current) => ({
+                      ...current,
+                      soundEnabled: event.target.checked,
+                    }))
                   }
                   suppressHydrationWarning
                 />
@@ -127,7 +163,10 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
                   type="checkbox"
                   checked={settings.countdownSoundEnabled}
                   onChange={(event) =>
-                    setSettings((current) => ({ ...current, countdownSoundEnabled: event.target.checked }))
+                    setSettings((current) => ({
+                      ...current,
+                      countdownSoundEnabled: event.target.checked,
+                    }))
                   }
                   suppressHydrationWarning
                 />
@@ -136,15 +175,22 @@ export function PlayerSettingsModal({ settings, setSettings, setNickname, onClos
             </div>
           </div>
         </div>
+      </div>
 
-        <div className="modalActions">
-          {onOpenTutorial ? (
-            <button className="secondaryButton" type="button" onClick={onOpenTutorial}>遊び方を再表示</button>
-          ) : null}
-          <button className="primaryButton" type="button" onClick={onClose}>
-            閉じる
+      <div className="modalActions">
+        {onOpenTutorial ? (
+          <button
+            className="secondaryButton"
+            type="button"
+            onClick={onOpenTutorial}
+          >
+            遊び方を再表示
           </button>
-        </div>
+        ) : null}
+        <button className="primaryButton" type="button" onClick={onClose}>
+          閉じる
+        </button>
+      </div>
     </DialogOverlay>
   );
 }

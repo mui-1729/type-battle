@@ -5,6 +5,7 @@ import { Button, SectionHeading, SurfaceCard } from "../app/_components/ui";
 import { PlayerIdentity } from "../app/_components/player-identity";
 import { HomeModeMenu } from "../app/_components/home-mode-menu";
 import { LobbyPrep } from "../app/_components/lobby-prep";
+import { StickFigure } from "../app/_components/stick-figure";
 import { INITIAL_REACTION_FEEDBACK } from "../app/_lib/reaction-feedback";
 import type { RoomState } from "@type-battle/shared";
 
@@ -12,6 +13,22 @@ beforeAll(() => vi.stubGlobal("React", React));
 afterAll(() => vi.unstubAllGlobals());
 
 describe("shared UI foundation", () => {
+  it("renders stick figure eyes as dots instead of stroked bars", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(StickFigure, {
+        side: "left",
+        pose: "idle",
+        status: "waiting",
+      }),
+    );
+
+    expect(markup).toContain('<g class="stickFigureFace">');
+    expect(
+      markup.match(/<circle cx="(?:28|35)\.5" cy="16" r="1.5"><\/circle>/g),
+    ).toHaveLength(2);
+    expect(markup).not.toContain('d="M28 16h1M35 16h1"');
+  });
+
   it("keeps button variants and accessible pressed state composable", () => {
     const markup = renderToStaticMarkup(
       React.createElement(Button, { variant: "primary", "aria-pressed": true }, "Start")

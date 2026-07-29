@@ -156,6 +156,7 @@ export default function HomePage() {
   const [settings, setSettings] = useState<PlayerSettings>(DEFAULT_PLAYER_SETTINGS);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [joinPending, setJoinPending] = useState(false);
   const [tutorialStep, setTutorialStep] = useState<number | null>(null);
   const [matchSettingsOpen, setMatchSettingsOpen] = useState(false);
   const [exitRequest, setExitRequest] = useState<ExitRequest | null>(null);
@@ -1541,6 +1542,7 @@ export default function HomePage() {
 
     void primeSoundPlayback();
     const socket = connectRoomSocket(roomCode);
+    setJoinPending(true);
     socket.emit(
       "room:join",
       {
@@ -1551,6 +1553,7 @@ export default function HomePage() {
         deviceKind: detectDeviceKind()
       },
       (response) => {
+        setJoinPending(false);
         if (socketRef.current !== socket) {
           return;
         }
@@ -1963,13 +1966,15 @@ export default function HomePage() {
                   suppressHydrationWarning
                 />
                 <button
-                  className="iconButton"
+                  className="primaryButton joinButton"
                   type="button"
                   onClick={joinRoom}
                   title="ルームに参加"
-                  disabled={!realtimeConfigured}
+                  disabled={!realtimeConfigured || !joinCode.trim() || joinPending}
+                  aria-busy={joinPending}
                 >
                   <Users size={18} />
+                  {joinPending ? "参加中…" : "参加"}
                 </button>
               </div>
             </div>
