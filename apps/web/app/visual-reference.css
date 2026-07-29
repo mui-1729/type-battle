@@ -1129,7 +1129,17 @@ select {
   .feedbackCard { align-self: start; gap: 16px; padding: 20px; border-radius: 22px; }
   .feedbackKinds { grid-template-columns: 1fr; gap: 10px; }
   .feedbackKinds > div { min-height: 72px; padding: 12px; }
-  .homeModeMenu { align-content: start; gap: 24px; width: 100%; min-height: 0; margin-top: 10px; }
+  .homeModeMenu {
+    align-content: start;
+    gap: 24px;
+    width: 100%;
+    min-height: 0;
+    margin-top: 10px;
+    padding-bottom: 14px;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+  }
   .homeModeGrid { grid-template-columns: 1fr; gap: 18px; width: min(460px, 100%); }
   .modeCardButton { grid-template-columns: 130px 1fr; grid-template-rows: 1fr; align-items: center; min-height: 170px; padding: 15px; }
   .modeCardScene { min-height: 130px; }
