@@ -1495,6 +1495,12 @@ select {
 }
 
 @media (max-width: 420px) {
+  .cosmeticViewTabs button {
+    padding-inline: 8px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
   .isHome .homeCustomizationCopy > span {
     display: none;
   }
