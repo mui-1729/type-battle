@@ -2,6 +2,7 @@ import { advanceRomajiProgress, buildRomajiTypingPlan, getRomajiTypingUnitIndex 
 import { calculateAccuracy, calculateWpm } from "./scoring.js";
 import { advanceProgress, createEmptyProgress } from "./typing-progress.js";
 import type { Prompt, TypingProgress } from "./game-state.js";
+import { getTimeAttackPromptPosition, resolveTimeAttackPrompts } from "./time-attack.js";
 import type { InternalPlayer, InternalRoom } from "./room-engine.js";
 
 const HP_BATTLE_MAX_HP = 100;
@@ -20,6 +21,9 @@ export function applyProgress(player: InternalPlayer, room: InternalRoom, payloa
   const promptLength = getPromptLength(room);
   if (!room.prompt || promptLength <= 0) {
     return false;
+  }
+  if (room.matchRule === "timeAttack" && room.timeAttackPromptIds?.length) {
+    return applyTimeAttackProgress(player, room, payload);
   }
 
   const previousProgressIndex = player.progressIndex;
@@ -102,6 +106,55 @@ export function applyProgress(player: InternalPlayer, room: InternalRoom, payloa
   }
 
   return true;
+}
+
+function applyTimeAttackProgress(player: InternalPlayer, room: InternalRoom, payload: TypingProgress): boolean {
+  const prompts = resolveTimeAttackPrompts(room.timeAttackPromptIds, room.prompt!);
+  const now = Date.now();
+  const startedAt = room.serverStartAt ?? now;
+  const kanaInput = containsKana(payload.input);
+
+  for (const typedChar of Array.from(payload.input)) {
+    const position = getTimeAttackPromptPosition(prompts, player.progressIndex);
+    if (!position) break;
+    if (kanaInput) {
+      const before = createProgressState(player, position.progressIndex);
+      const after = advanceProgress(before, position.prompt.typing.hiragana[position.progressIndex], typedChar);
+      applyGuardedProgress(player, before, after);
+      player.progressIndex += Math.max(after.progressIndex - before.progressIndex, 0);
+      player.typingProgressIndex = getTimeAttackGuideProgress(prompts, player.progressIndex);
+    } else {
+      const plan = buildRomajiTypingPlan(position.prompt.typing.hiragana);
+      const guideBase = getTimeAttackGuideBase(prompts, position.promptIndex);
+      const localGuideIndex = Math.max(0, player.typingProgressIndex - guideBase);
+      const before = createProgressState(player, localGuideIndex);
+      const unitIndex = getRomajiTypingUnitIndex(plan, localGuideIndex);
+      const after = advanceRomajiProgress(before, plan, typedChar);
+      const completedUnit = after.progressIndex > before.progressIndex ? plan.units[unitIndex] : undefined;
+      applyGuardedProgress(player, before, after);
+      player.typingProgressIndex += Math.max(after.progressIndex - before.progressIndex, 0);
+      if (completedUnit) {
+        player.progressIndex += Array.from(completedUnit.hiragana).length;
+      }
+    }
+  }
+  player.wpm = calculateWpm(player.correctCharacters, now - startedAt);
+  player.accuracy = calculateAccuracy(player.correctCharacters, player.totalTypedCharacters);
+  return true;
+}
+
+function getTimeAttackGuideBase(prompts: Prompt[], promptIndex: number): number {
+  return prompts.slice(0, promptIndex).reduce(
+    (total, prompt) => total + buildRomajiTypingPlan(prompt.typing.hiragana).guide.length,
+    0
+  );
+}
+
+function getTimeAttackGuideProgress(prompts: Prompt[], canonicalProgress: number): number {
+  const position = getTimeAttackPromptPosition(prompts, canonicalProgress);
+  if (!position) return 0;
+  return getTimeAttackGuideBase(prompts, position.promptIndex)
+    + getRomajiProgressIndexForCanonicalProgress(position.prompt, position.progressIndex);
 }
 
 export function applyBotProgress(

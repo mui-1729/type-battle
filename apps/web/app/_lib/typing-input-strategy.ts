@@ -23,6 +23,7 @@ export type TypingInputStrategy = {
   romajiPlan: RomajiTypingPlan | null;
   loop: boolean;
   inputMode?: "kana" | "romaji";
+  progressBase?: number;
 };
 
 export function advanceTypingProgress({
@@ -33,8 +34,23 @@ export function advanceTypingProgress({
   displayText,
   romajiPlan,
   loop,
-  inputMode = deviceKind === "mobile" ? "kana" : "romaji"
+  inputMode = deviceKind === "mobile" ? "kana" : "romaji",
+  progressBase = 0
 }: TypingInputStrategy): ProgressUpdate {
+  if (progressBase > 0) {
+    const localPrevious = { ...previous, progressIndex: Math.max(0, previous.progressIndex - progressBase) };
+    const next = advanceTypingProgress({
+      previous: localPrevious,
+      typedText,
+      deviceKind,
+      canonicalText,
+      displayText,
+      romajiPlan,
+      loop: false,
+      inputMode
+    });
+    return { ...next, progress: { ...next.progress, progressIndex: next.progress.progressIndex + progressBase } };
+  }
   const nextMode = containsKanaInput(typedText) ? "kana" : "romaji";
   let modePrevious = previous;
 
