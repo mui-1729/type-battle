@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isWebSocketUpgrade,
   isCloudflareClientMessageType,
-  parseAccessoryPayload,
+  parseEquipmentPayload,
   parseBotDifficultyPayload,
   parseClientMessage,
   parseCreateRoomPayload,
@@ -81,12 +81,25 @@ describe("room protocol", () => {
     });
     expect(parseReactionPayload({ roomCode: "AB23CD", reaction: "unknown" })).toBeNull();
 
-    expect(parseAccessoryPayload({ roomCode: "AB23CD", accessoryIndex: 0 })).toEqual({
+    expect(parseEquipmentPayload({
       roomCode: "AB23CD",
-      accessoryIndex: 0
+      headAccessoryId: "cap",
+      heldItemId: "wood-sword"
+    })).toEqual({
+      roomCode: "AB23CD",
+      headAccessoryId: "cap",
+      heldItemId: "wood-sword"
     });
-    expect(parseAccessoryPayload({ roomCode: "AB23CD", accessoryIndex: 4 })).toBeNull();
-    expect(parseAccessoryPayload({ roomCode: "AB23CD", accessoryIndex: 1.5 })).toBeNull();
+    expect(parseEquipmentPayload({
+      roomCode: "AB23CD",
+      headAccessoryId: "unknown",
+      heldItemId: "wood-sword"
+    })).toBeNull();
+    expect(parseEquipmentPayload({
+      roomCode: "AB23CD",
+      headAccessoryId: "cap",
+      heldItemId: "unknown"
+    })).toBeNull();
 
     expect(parsePromptCategoryPayload({ roomCode: "AB23CD", category: "long" })).toEqual({
       roomCode: "AB23CD",

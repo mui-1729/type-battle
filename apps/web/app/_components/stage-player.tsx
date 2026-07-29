@@ -43,7 +43,7 @@ export function StagePlayer({
           <strong title={player.nickname}>{player.nickname}</strong>
           <span>{getPlayerSupplement(player, actionLabel)}</span>
         </div>
-        <StickFigure side={player.side} pose={pose} status={player.status} accessoryIndex={player.accessoryIndex} />
+        <StickFigure side={player.side} pose={pose} status={player.status} headAccessoryId={player.headAccessoryId} heldItemId={player.heldItemId} />
       </div>
     </div>
   );

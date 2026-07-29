@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft, BookOpen, Settings } from "lucide-react";
-import type { RoomState } from "@type-battle/shared";
+import type { EquipmentSelection, RoomState } from "@type-battle/shared";
 import { GameLogo } from "./game-logo";
 import { StatusPill } from "./status-pill";
 
@@ -10,9 +10,10 @@ type GameHeaderProps = {
   onOpenSettings: () => void;
   exitAction?: { label: string; onClick: () => void } | undefined;
   status?: RoomState["status"] | "result" | undefined;
+  equipment: EquipmentSelection;
 };
 
-export function GameHeader({ connected, realtimeConfigured, onOpenSettings, exitAction, status }: GameHeaderProps) {
+export function GameHeader({ connected, realtimeConfigured, onOpenSettings, exitAction, status, equipment }: GameHeaderProps) {
   return (
     <section className="topBar" aria-label="ゲーム状態">
       {exitAction ? (
@@ -25,7 +26,7 @@ export function GameHeader({ connected, realtimeConfigured, onOpenSettings, exit
       ) : null}
       {status ? <StatusPill status={status} /> : null}
       <div className="brandBlock">
-        <GameLogo compact />
+        <GameLogo compact equipment={equipment} />
       </div>
       <Link className="headerHowTo" href="/how-to-play"><BookOpen size={22} />遊び方</Link>
       <div className="headerActions">

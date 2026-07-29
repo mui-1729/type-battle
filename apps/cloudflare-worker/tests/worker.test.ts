@@ -405,8 +405,8 @@ describe("cloudflare gateway", () => {
     }));
     socket.receive(JSON.stringify({
       id: "msg-root-accessory",
-      type: "client:player:accessory",
-      payload: { roomCode: "AB23CD", accessoryIndex: 1 }
+      type: "client:player:equipment",
+      payload: { roomCode: "AB23CD", headAccessoryId: "cap", heldItemId: "wood-sword" }
     }));
     await flushAsyncWork();
 
@@ -1060,14 +1060,20 @@ describe("room authority", () => {
 
     hostSocket.receive(JSON.stringify({
       id: "msg-accessory-reaction",
-      type: "client:player:accessory",
-      payload: { roomCode: "RX23YZ", accessoryIndex: 2 }
+      type: "client:player:equipment",
+      payload: { roomCode: "RX23YZ", headAccessoryId: "headband", heldItemId: "umbrella" }
     }));
     await flushAsyncWork();
     const accessoryState = [...parseMessages(guestSocket)]
       .reverse()
-      .find((message) => message.type === "server:room:state")?.payload as { players?: Array<{ id: string; accessoryIndex?: number }> } | undefined;
-    expect(accessoryState?.players).toContainEqual(expect.objectContaining({ id: "guest-reaction-alice", accessoryIndex: 2 }));
+      .find((message) => message.type === "server:room:state")?.payload as {
+        players?: Array<{ id: string; headAccessoryId?: string; heldItemId?: string }>;
+      } | undefined;
+    expect(accessoryState?.players).toContainEqual(expect.objectContaining({
+      id: "guest-reaction-alice",
+      headAccessoryId: "headband",
+      heldItemId: "umbrella"
+    }));
 
     hostSocket.receive(JSON.stringify({
       id: "msg-reaction-first",
@@ -1151,8 +1157,8 @@ describe("room authority", () => {
     }));
     guestSocket.receive(JSON.stringify({
       id: "msg-guest-control-accessory",
-      type: "client:player:accessory",
-      payload: { roomCode: "CR23TL", accessoryIndex: 2 }
+      type: "client:player:equipment",
+      payload: { roomCode: "CR23TL", headAccessoryId: "headband", heldItemId: "umbrella" }
     }));
     await flushAsyncWork();
 
@@ -1160,7 +1166,8 @@ describe("room authority", () => {
       expect.objectContaining({
         id: "guest-control-rate-bob",
         ready: true,
-        accessoryIndex: 2
+        headAccessoryId: "headband",
+        heldItemId: "umbrella"
       })
     );
     hostSocket.messages.length = 0;
@@ -1169,12 +1176,12 @@ describe("room authority", () => {
 
     hostSocket.receive(JSON.stringify({
       id: "msg-control-rejected",
-      type: "client:player:accessory",
-      payload: { roomCode: "CR23TL", accessoryIndex: 1 }
+      type: "client:player:equipment",
+      payload: { roomCode: "CR23TL", headAccessoryId: "sunglasses", heldItemId: "umbrella" }
     }));
     await flushAsyncWork();
 
-    expect(findLastAck(hostSocket, "client:player:accessory")).toMatchObject({
+    expect(findLastAck(hostSocket, "client:player:equipment")).toMatchObject({
       replyTo: "msg-control-rejected",
       payload: {
         ok: false,
@@ -1185,22 +1192,26 @@ describe("room authority", () => {
     expect(parseMessages(guestSocket).filter((message) => message.type === "server:room:state")).toEqual([]);
     expect(storage.putCalls).toEqual([]);
     const persistedAfterRejection = storage.values.get("room") as {
-      room: { players: Array<{ id: string; accessoryIndex?: number }> };
+      room: { players: Array<{ id: string; headAccessoryId?: string }> };
     };
     expect(persistedAfterRejection.room.players.find(
       (player) => player.id === "guest-control-rate"
-    )).not.toHaveProperty("accessoryIndex", 1);
+    )).not.toHaveProperty("headAccessoryId", "sunglasses");
 
     await vi.advanceTimersByTimeAsync(250);
     hostSocket.receive(JSON.stringify({
       id: "msg-control-recovered",
-      type: "client:player:accessory",
-      payload: { roomCode: "CR23TL", accessoryIndex: 1 }
+      type: "client:player:equipment",
+      payload: { roomCode: "CR23TL", headAccessoryId: "sunglasses", heldItemId: "umbrella" }
     }));
     await flushAsyncWork();
 
     expect(getLatestRoomState(hostSocket).players).toContainEqual(
-      expect.objectContaining({ id: "guest-control-rate", accessoryIndex: 1 })
+      expect.objectContaining({
+        id: "guest-control-rate",
+        headAccessoryId: "sunglasses",
+        heldItemId: "umbrella"
+      })
     );
     expect(storage.putCalls).toEqual(["room"]);
   });
@@ -1293,8 +1304,8 @@ describe("room authority", () => {
     await flushAsyncWork();
     socket.receive(JSON.stringify({
       id: "msg-accessory-control-noop-initial",
-      type: "client:player:accessory",
-      payload: { roomCode: "NP23QR", accessoryIndex: 1 }
+      type: "client:player:equipment",
+      payload: { roomCode: "NP23QR", headAccessoryId: "cap", heldItemId: "wood-sword" }
     }));
     await flushAsyncWork();
     await Promise.all(state.backgroundWork);
@@ -1303,7 +1314,11 @@ describe("room authority", () => {
 
     const commands = [
       ["client:player:ready", { roomCode: "NP23QR", ready: false }],
-      ["client:player:accessory", { roomCode: "NP23QR", accessoryIndex: 1 }],
+      ["client:player:equipment", {
+        roomCode: "NP23QR",
+        headAccessoryId: "cap",
+        heldItemId: "wood-sword"
+      }],
       ["client:room:setPromptCategory", { roomCode: "NP23QR", category: "standard" }],
       ["client:room:setBotDifficulty", { roomCode: "NP23QR", difficulty: "normal" }],
       ["client:room:setMatchRule", { roomCode: "NP23QR", rule: "race" }]

@@ -1,11 +1,25 @@
-import { ChevronLeft, ChevronRight, RotateCcw, Settings, Sparkles, X } from "lucide-react";
+import { Coins, RotateCcw, Settings, Sparkles, X } from "lucide-react";
 import { useId, useState } from "react";
-import type { MatchResult, MatchRule, QuickReaction } from "@type-battle/shared";
-import { QUICK_REACTIONS } from "@type-battle/shared";
+import type {
+  EquipmentSelection,
+  HeadAccessoryId,
+  HeldItemId,
+  MatchResult,
+  MatchRule,
+  PlayerState,
+  QuickReaction,
+} from "@type-battle/shared";
+import {
+  DEFAULT_EQUIPMENT,
+  HEAD_ACCESSORY_CATALOG,
+  HELD_ITEM_CATALOG,
+  QUICK_REACTIONS,
+} from "@type-battle/shared";
 import { isReactionInputDisabled, type ReactionFeedback } from "../_lib/reaction-feedback";
 import { MATCH_RULE_DETAILS, getPlayerDeviceLabel } from "../_lib/ui-labels";
 import { PlayerIdentity } from "./player-identity";
 import { DialogOverlay } from "./dialog-overlay";
+import { StickFigure } from "./stick-figure";
 import { Button, SurfaceCard } from "./ui";
 
 type ResultPanelProps = {
@@ -19,9 +33,11 @@ type ResultPanelProps = {
   retryPending?: boolean;
   retryError?: string;
   localPlayerId?: string;
-  accessoryIndex?: number;
-  onPreviousAccessory?: () => void;
-  onNextAccessory?: () => void;
+  equipment?: EquipmentSelection;
+  livePlayers?: readonly PlayerState[] | undefined;
+  ownedHeadAccessoryIds?: readonly HeadAccessoryId[];
+  ownedHeldItemIds?: readonly HeldItemId[];
+  onEquipmentChange?: (equipment: EquipmentSelection) => void;
   onOpenSettings?: () => void;
   onReaction?: (reaction: QuickReaction) => void;
   reactionFeedback?: ReactionFeedback;
@@ -32,6 +48,14 @@ type ResultPanelProps = {
   onPracticeMenu?: (() => void) | undefined;
   onExit?: (() => void) | undefined;
   exitLabel?: string | undefined;
+  coinReward?: {
+    completion: number;
+    victory: number;
+    highAccuracy: number;
+    perfect: number;
+    total: number;
+  } | null;
+  styleCoinBalance?: number;
 };
 
 export function ResultPanel({
@@ -45,9 +69,11 @@ export function ResultPanel({
   retryPending = false,
   retryError = "",
   localPlayerId = "",
-  accessoryIndex = 0,
-  onPreviousAccessory,
-  onNextAccessory,
+  equipment = DEFAULT_EQUIPMENT,
+  livePlayers,
+  ownedHeadAccessoryIds,
+  ownedHeldItemIds,
+  onEquipmentChange,
   onOpenSettings,
   onReaction,
   reactionFeedback,
@@ -57,7 +83,9 @@ export function ResultPanel({
   onPracticeNext,
   onPracticeMenu,
   onExit,
-  exitLabel = "ホームへ戻る"
+  exitLabel = "ホームへ戻る",
+  coinReward = null,
+  styleCoinBalance = 0,
 }: ResultPanelProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsTitleId = useId();
@@ -115,6 +143,7 @@ export function ResultPanel({
         {result.players.map((player) => {
           const isWinner = !doubleKo && player.rank === 1;
           const isLocal = player.id === localPlayerId;
+          const livePlayer = livePlayers?.find((entry) => entry.id === player.id);
           return (
             <article className={`resultCard ${isWinner ? "isWinner" : ""}`} data-player-id={player.id} data-outcome={doubleKo ? "draw" : isWinner ? "winner" : "loser"} key={player.id}>
               {isWinner ? <span className="resultSpotlight" aria-hidden="true" /> : null}
@@ -125,6 +154,15 @@ export function ResultPanel({
               ) : null}
               <div className="resultCardTopline"><span>{player.isHost ? "1P" : "2P"}</span>{isLocal ? <strong>YOU</strong> : null}</div>
               <PlayerIdentity nickname={player.nickname} kind={player.isBot ? "com" : isLocal ? "you" : player.isHost ? "one" : "two"} slot={player.isHost ? "1P" : "2P"} compact />
+              <div className="resultFigure" aria-hidden="true">
+                <StickFigure
+                  side={player.isHost ? "left" : "right"}
+                  pose={isWinner ? "win" : "lose"}
+                  status="finished"
+                  headAccessoryId={isLocal ? equipment.headAccessoryId : livePlayer?.headAccessoryId ?? player.headAccessoryId}
+                  heldItemId={isLocal ? equipment.heldItemId : livePlayer?.heldItemId ?? player.heldItemId}
+                />
+              </div>
               <strong className="resultOutcome">{doubleKo ? "DRAW" : isWinner ? "WINNER" : player.finishStatus === "forfeited" ? "FORFEIT" : "—"}</strong>
               <div className="resultPrimaryStats">
                 <ResultStat label="WPM" value={`${player.wpm}`} />
@@ -132,17 +170,61 @@ export function ResultPanel({
                 <ResultStat label="MISS" value={`${player.mistakes}`} />
                 <ResultStat label={getModeStatLabel(rule)} value={getModeStatValue(player, rule)} />
               </div>
-              {isLocal && onPreviousAccessory && onNextAccessory ? (
-                <div className="resultAccessoryPicker" aria-label="アクセサリー変更">
-                  <button type="button" onClick={onPreviousAccessory} aria-label="前のアクセサリー"><ChevronLeft size={17} /></button>
-                  <span>ACCESSORY {accessoryIndex + 1}</span>
-                  <button type="button" onClick={onNextAccessory} aria-label="次のアクセサリー"><ChevronRight size={17} /></button>
+              {isLocal && onEquipmentChange && ownedHeadAccessoryIds && ownedHeldItemIds ? (
+                <div className="resultAccessoryPicker quickEquipmentPicker" aria-label="装備変更">
+                  <label>
+                    <span>頭</span>
+                    <select
+                      aria-label="結果画面の頭装備"
+                      value={equipment.headAccessoryId}
+                      onChange={(event) => onEquipmentChange({
+                        ...equipment,
+                        headAccessoryId: event.target.value as HeadAccessoryId,
+                      })}
+                    >
+                      {HEAD_ACCESSORY_CATALOG.filter(({ id }) => ownedHeadAccessoryIds.includes(id)).map((item) => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>手持ち</span>
+                    <select
+                      aria-label="結果画面の手持ち装備"
+                      value={equipment.heldItemId}
+                      onChange={(event) => onEquipmentChange({
+                        ...equipment,
+                        heldItemId: event.target.value as HeldItemId,
+                      })}
+                    >
+                      {HELD_ITEM_CATALOG.filter(({ id }) => ownedHeldItemIds.includes(id)).map((item) => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               ) : null}
             </article>
           );
         })}
       </div>
+
+      {coinReward ? (
+        <section className="styleCoinReward" aria-label="獲得スタイルコイン" aria-live="polite">
+          <div>
+            <Coins size={22} />
+            <span>獲得スタイルコイン</span>
+            <strong>+{coinReward.total} SC</strong>
+          </div>
+          <ul>
+            <li><span>完了</span><strong>+{coinReward.completion}</strong></li>
+            {coinReward.victory > 0 ? <li><span>勝利</span><strong>+{coinReward.victory}</strong></li> : null}
+            {coinReward.highAccuracy > 0 ? <li><span>正確率95%以上</span><strong>+{coinReward.highAccuracy}</strong></li> : null}
+            {coinReward.perfect > 0 ? <li><span>ノーミス</span><strong>+{coinReward.perfect}</strong></li> : null}
+          </ul>
+          <p>所持コイン <strong>{styleCoinBalance} SC</strong></p>
+        </section>
+      ) : null}
 
       <Button className="resultDetailsButton" variant="secondary" type="button" onClick={() => setDetailsOpen(true)}>
         詳しい結果
@@ -165,8 +247,8 @@ export function ResultPanel({
                 <strong>{player.nickname}</strong>
                 <span>最大連続 {player.maxStreak}</span>
                 <span>finish gap {player.finishGap === undefined ? "—" : `${player.finishGap}ms`}</span>
-                <span>{player.accuracy === 100 && player.mistakes === 0 ? "PERFECT" : "通常記録"}</span>
-                <span>獲得ポイント {getResultPoints(player)}</span>
+                <span>{player.totalTypedCharacters > 0 && player.accuracy === 100 && player.mistakes === 0 ? "PERFECT" : "通常記録"}</span>
+                <span>スコア {getResultPoints(player)}</span>
                 <span>苦手文字・主な誤入力 —</span>
                 <small>端末 {getPlayerDeviceLabel(player)}</small>
               </div>

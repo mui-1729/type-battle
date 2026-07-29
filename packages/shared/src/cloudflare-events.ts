@@ -10,6 +10,7 @@ import type {
 import type {
   AckResponse,
   BotDifficulty,
+  EquipmentSelection,
   MatchResult,
   MatchRule,
   PromptCategory,
@@ -40,8 +41,8 @@ type CloudflareClientCommandMap = {
     request: RoomCodePayload & { reaction: QuickReaction };
     response: null;
   };
-  "client:player:accessory": {
-    request: RoomCodePayload & { accessoryIndex: number };
+  "client:player:equipment": {
+    request: RoomCodePayload & EquipmentSelection;
     response: null;
   };
   "client:room:setPromptCategory": {
@@ -106,7 +107,7 @@ export const CLOUDFLARE_CLIENT_MESSAGE_TYPES = [
   "client:room:leave",
   "client:player:ready",
   "client:player:reaction",
-  "client:player:accessory",
+  "client:player:equipment",
   "client:room:setPromptCategory",
   "client:room:setBotDifficulty",
   "client:room:setMatchRule",

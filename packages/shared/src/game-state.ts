@@ -1,3 +1,5 @@
+import type { HeadAccessoryId, HeldItemId } from "./cosmetics.js";
+
 export type MatchStatus = "waiting" | "countdown" | "playing" | "finished";
 
 export type BotDifficulty = "easy" | "normal" | "hard";
@@ -27,7 +29,8 @@ export type PlayerState = {
   mistakes: number;
   mistakeGuards?: number;
   deviceKind?: DeviceKind;
-  accessoryIndex?: number;
+  headAccessoryId?: HeadAccessoryId;
+  heldItemId?: HeldItemId;
   hp?: number;
   maxHp?: number;
   maxStreak: number;
@@ -93,6 +96,11 @@ export type TypingProgress = {
 };
 
 export type TypingFinish = TypingProgress;
+
+export type EquipmentSelection = {
+  headAccessoryId: HeadAccessoryId;
+  heldItemId: HeldItemId;
+};
 
 export type AckResponse<T = unknown> =
   | {

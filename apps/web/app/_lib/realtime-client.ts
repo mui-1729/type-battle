@@ -44,7 +44,7 @@ const CLOUDFLARE_CLIENT_EVENT_MAP: Record<keyof ClientToServerEvents, Cloudflare
   "room:leave": "client:room:leave",
   "player:ready": "client:player:ready",
   "player:reaction": "client:player:reaction",
-  "player:accessory": "client:player:accessory",
+  "player:equipment": "client:player:equipment",
   "room:setPromptCategory": "client:room:setPromptCategory",
   "room:setBotDifficulty": "client:room:setBotDifficulty",
   "room:setMatchRule": "client:room:setMatchRule",

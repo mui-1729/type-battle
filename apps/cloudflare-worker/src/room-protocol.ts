@@ -1,11 +1,15 @@
 import {
   isValidRoomCode,
+  isHeadAccessoryId,
+  isHeldItemId,
   validateNickname,
   QUICK_REACTIONS
 } from "@type-battle/shared";
 import type {
   BotDifficulty,
   DeviceKind,
+  HeadAccessoryId,
+  HeldItemId,
   MatchRule,
   PromptCategory,
   QuickReaction,
@@ -60,8 +64,9 @@ export type ReactionPayload = RoomCodePayload & {
   reaction: QuickReaction;
 };
 
-export type AccessoryPayload = RoomCodePayload & {
-  accessoryIndex: number;
+export type EquipmentPayload = RoomCodePayload & {
+  headAccessoryId: HeadAccessoryId;
+  heldItemId: HeldItemId;
 };
 
 export type PromptCategoryPayload = RoomCodePayload & {
@@ -179,18 +184,21 @@ export function parseReactionPayload(payload: unknown): ReactionPayload | null {
   return roomCode && reaction ? { roomCode, reaction } : null;
 }
 
-export function parseAccessoryPayload(payload: unknown): AccessoryPayload | null {
+export function parseEquipmentPayload(payload: unknown): EquipmentPayload | null {
   if (!isRecord(payload)) {
     return null;
   }
 
   const roomCode = readRoomCode(payload.roomCode);
-  const accessoryIndex = typeof payload.accessoryIndex === "number" && Number.isInteger(payload.accessoryIndex)
-    ? payload.accessoryIndex
+  const headAccessoryId = isHeadAccessoryId(payload.headAccessoryId)
+    ? payload.headAccessoryId
+    : null;
+  const heldItemId = isHeldItemId(payload.heldItemId)
+    ? payload.heldItemId
     : null;
 
-  return roomCode && accessoryIndex !== null && accessoryIndex >= 0 && accessoryIndex <= 3
-    ? { roomCode, accessoryIndex }
+  return roomCode && headAccessoryId && heldItemId
+    ? { roomCode, headAccessoryId, heldItemId }
     : null;
 }
 

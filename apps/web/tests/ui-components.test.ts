@@ -29,6 +29,25 @@ describe("shared UI foundation", () => {
     expect(markup).not.toContain('d="M28 16h1M35 16h1"');
   });
 
+  it("renders both equipment slots as SVG cosmetics", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(StickFigure, {
+        side: "right",
+        pose: "ready",
+        status: "waiting",
+        headAccessoryId: "sunglasses",
+        heldItemId: "umbrella",
+      }),
+    );
+
+    expect(markup).toContain('data-head-accessory="sunglasses"');
+    expect(markup).toContain('data-held-item="umbrella"');
+    expect(markup).toContain('data-cosmetic-slot="head"');
+    expect(markup).toContain('data-cosmetic-id="sunglasses"');
+    expect(markup).toContain('data-cosmetic-slot="held"');
+    expect(markup).toContain('data-cosmetic-id="umbrella"');
+  });
+
   it("keeps button variants and accessible pressed state composable", () => {
     const markup = renderToStaticMarkup(
       React.createElement(Button, { variant: "primary", "aria-pressed": true }, "Start")
@@ -75,13 +94,19 @@ describe("shared UI foundation", () => {
     const markup = renderToStaticMarkup(
       React.createElement(HomeModeMenu, {
         onBattle: vi.fn(),
-        onSolo: vi.fn()
+        onSolo: vi.fn(),
+        equipment: { headAccessoryId: "cap", heldItemId: "wood-sword" },
+        styleCoins: 25,
+        onOpenShop: vi.fn(),
+        onOpenEquipment: vi.fn(),
       })
     );
 
     expect(markup).toContain("対戦する");
     expect(markup).toContain("ひとりで遊ぶ");
     expect(markup).toContain("遊び方を見る");
+    expect(markup).toContain("ショップ");
+    expect(markup).toContain("装備を変更");
     expect((markup.match(/modeCard(?:Battle|Solo)/g) ?? [])).toHaveLength(2);
   });
 
@@ -133,9 +158,10 @@ describe("shared UI foundation", () => {
       React.createElement(LobbyPrep, {
         room,
         localPlayerId: "host",
-        accessoryIndex: 1,
-        onPreviousAccessory: vi.fn(),
-        onNextAccessory: vi.fn(),
+        equipment: { headAccessoryId: "cap", heldItemId: "wood-sword" },
+        ownedHeadAccessoryIds: ["none", "cap", "headband"],
+        ownedHeldItemIds: ["none", "wood-sword"],
+        onEquipmentChange: vi.fn(),
         onCopyRoomCode: vi.fn(),
         onToggleReady: vi.fn(),
         onMatchRuleChange: vi.fn(),
@@ -153,8 +179,8 @@ describe("shared UI foundation", () => {
     expect(markup).toContain("2P");
     expect(markup).toContain("Alice");
     expect(markup).toContain("Bob");
-    expect(markup.match(/aria-label="前のアクセサリ"/g)).toHaveLength(1);
-    expect(markup.match(/aria-label="次のアクセサリ"/g)).toHaveLength(1);
+    expect(markup.match(/aria-label="頭装備"/g)).toHaveLength(1);
+    expect(markup.match(/aria-label="手持ち装備"/g)).toHaveLength(1);
     expect(markup).toContain("両者READYで開始します");
     expect(markup).toContain("Bob: 「よろしく」");
     expect(markup.match(/lobbyReactionBubble/g)).toHaveLength(1);
@@ -190,9 +216,10 @@ describe("shared UI foundation", () => {
       React.createElement(LobbyPrep, {
         room,
         localPlayerId: "host",
-        accessoryIndex: 0,
-        onPreviousAccessory: vi.fn(),
-        onNextAccessory: vi.fn(),
+        equipment: { headAccessoryId: "cap", heldItemId: "wood-sword" },
+        ownedHeadAccessoryIds: ["none", "cap", "headband"],
+        ownedHeldItemIds: ["none", "wood-sword"],
+        onEquipmentChange: vi.fn(),
         onCopyRoomCode: vi.fn(),
         onToggleReady: vi.fn(),
         onMatchRuleChange: vi.fn(),

@@ -1,7 +1,21 @@
-import { Check, ChevronLeft, ChevronRight, Clipboard, MessageCircle } from "lucide-react";
-import { QUICK_REACTIONS } from "@type-battle/shared";
-import type { BotDifficulty, MatchRule, PlayerState, PromptCategory, QuickReaction, RoomState } from "@type-battle/shared";
-import { getAccessory, type PlayerAccessory } from "../../lib/player-accessories";
+import { Check, Clipboard, MessageCircle } from "lucide-react";
+import {
+  DEFAULT_EQUIPMENT,
+  HEAD_ACCESSORY_CATALOG,
+  HELD_ITEM_CATALOG,
+  QUICK_REACTIONS,
+} from "@type-battle/shared";
+import type {
+  BotDifficulty,
+  EquipmentSelection,
+  HeadAccessoryId,
+  HeldItemId,
+  MatchRule,
+  PlayerState,
+  PromptCategory,
+  QuickReaction,
+  RoomState,
+} from "@type-battle/shared";
 import { isReactionInputDisabled, type ReactionFeedback } from "../_lib/reaction-feedback";
 import { BOT_DIFFICULTY_LABELS, MATCH_RULE_DETAILS, PROMPT_CATEGORY_LABELS } from "../_lib/ui-labels";
 import { PlayerIdentity } from "./player-identity";
@@ -11,9 +25,10 @@ import { Button, SectionHeading, SurfaceCard } from "./ui";
 type LobbyPrepProps = {
   room: RoomState;
   localPlayerId: string;
-  accessoryIndex: number;
-  onPreviousAccessory: () => void;
-  onNextAccessory: () => void;
+  equipment: EquipmentSelection;
+  ownedHeadAccessoryIds: readonly HeadAccessoryId[];
+  ownedHeldItemIds: readonly HeldItemId[];
+  onEquipmentChange: (equipment: EquipmentSelection) => void;
   onCopyRoomCode: () => void;
   onToggleReady: () => void;
   onMatchRuleChange: (rule: MatchRule) => void;
@@ -28,9 +43,10 @@ type LobbyPrepProps = {
 export function LobbyPrep({
   room,
   localPlayerId,
-  accessoryIndex,
-  onPreviousAccessory,
-  onNextAccessory,
+  equipment,
+  ownedHeadAccessoryIds,
+  ownedHeldItemIds,
+  onEquipmentChange,
   onCopyRoomCode,
   onToggleReady,
   onMatchRuleChange,
@@ -49,7 +65,10 @@ export function LobbyPrep({
     ? room.players.find((player) => player.id === remoteReaction.playerId) ?? null
     : null;
   const isHost = Boolean(localPlayer?.isHost);
-  const selectedAccessory = getAccessory(localPlayer?.accessoryIndex ?? accessoryIndex);
+  const selectedEquipment = {
+    headAccessoryId: localPlayer?.headAccessoryId ?? equipment.headAccessoryId,
+    heldItemId: localPlayer?.heldItemId ?? equipment.heldItemId,
+  };
   const reactionInputDisabled = isReactionInputDisabled(reactionFeedback);
 
   return (
@@ -58,7 +77,7 @@ export function LobbyPrep({
         <SectionHeading
           eyebrow="MATCH READY"
           title="試合の準備"
-          description="アクセサリを選び、準備ができたらREADY。両者の準備完了で自動的に始まります。"
+          description="頭装備と手持ち装備を選び、準備ができたらREADY。両者の準備完了で自動的に始まります。"
           id="lobby-prep-title"
         />
         <div className="lobbyRoomCode" aria-label={`ルームコード ${room.roomCode}`}>
@@ -77,10 +96,13 @@ export function LobbyPrep({
           slot="1P"
           isLocal={playerOne?.id === localPlayerId}
           ready={Boolean(playerOne?.ready)}
-          accessory={playerOne?.id === localPlayerId ? selectedAccessory : getAccessory(playerOne?.accessoryIndex ?? (playerOne?.isBot ? 1 : 0))}
+          equipment={playerOne?.id === localPlayerId ? selectedEquipment : {
+            headAccessoryId: playerOne?.headAccessoryId ?? DEFAULT_EQUIPMENT.headAccessoryId,
+            heldItemId: playerOne?.heldItemId ?? DEFAULT_EQUIPMENT.heldItemId,
+          }}
           reaction={playerOne?.id === localPlayerId ? reactionFeedback.reaction ?? "" : remoteReaction && remoteReaction.playerId === playerOne?.id ? remoteReaction.reaction : ""}
           {...(playerOne?.id === localPlayerId
-            ? { onPreviousAccessory, onNextAccessory }
+            ? { ownedHeadAccessoryIds, ownedHeldItemIds, onEquipmentChange }
             : {})}
         />
         <LobbyPlayerCard
@@ -89,10 +111,13 @@ export function LobbyPrep({
           slot="2P"
           isLocal={playerTwo?.id === localPlayerId}
           ready={Boolean(playerTwo?.ready)}
-          accessory={playerTwo?.id === localPlayerId ? selectedAccessory : getAccessory(playerTwo?.accessoryIndex ?? (playerTwo?.isBot ? 1 : 0))}
+          equipment={playerTwo?.id === localPlayerId ? selectedEquipment : {
+            headAccessoryId: playerTwo?.headAccessoryId ?? DEFAULT_EQUIPMENT.headAccessoryId,
+            heldItemId: playerTwo?.heldItemId ?? DEFAULT_EQUIPMENT.heldItemId,
+          }}
           reaction={playerTwo?.id === localPlayerId ? reactionFeedback.reaction ?? "" : remoteReaction && remoteReaction.playerId === playerTwo?.id ? remoteReaction.reaction : ""}
           {...(playerTwo?.id === localPlayerId
-            ? { onPreviousAccessory, onNextAccessory }
+            ? { ownedHeadAccessoryIds, ownedHeldItemIds, onEquipmentChange }
             : {})}
         />
       </div>
@@ -221,9 +246,10 @@ type LobbyPlayerCardProps = {
   slot: "1P" | "2P";
   isLocal?: boolean;
   ready: boolean;
-  accessory: PlayerAccessory;
-  onPreviousAccessory?: () => void;
-  onNextAccessory?: () => void;
+  equipment: EquipmentSelection;
+  ownedHeadAccessoryIds?: readonly HeadAccessoryId[];
+  ownedHeldItemIds?: readonly HeldItemId[];
+  onEquipmentChange?: (equipment: EquipmentSelection) => void;
   reaction?: QuickReaction | "";
 };
 
@@ -233,9 +259,10 @@ function LobbyPlayerCard({
   slot,
   isLocal = false,
   ready,
-  accessory,
-  onPreviousAccessory,
-  onNextAccessory,
+  equipment,
+  ownedHeadAccessoryIds,
+  ownedHeldItemIds,
+  onEquipmentChange,
   reaction = ""
 }: LobbyPlayerCardProps) {
   const kind = player?.isBot ? "com" : isLocal ? "you" : slot === "1P" ? "one" : "two";
@@ -254,25 +281,49 @@ function LobbyPlayerCard({
       {reaction ? <span className="lobbyReactionBubble" aria-hidden="true">{reaction}</span> : null}
       <div className="lobbyFigureArea">
         {player ? (
-          <>
-            <span className="lobbyAccessory" aria-label={`アクセサリ ${accessory.label}`}>
-              {accessory.glyph}
-            </span>
-            <StickFigure side={slot === "1P" ? "left" : "right"} pose={ready ? "ready" : "idle"} status="waiting" />
-          </>
+          <StickFigure
+            side={slot === "1P" ? "left" : "right"}
+            pose={ready ? "ready" : "idle"}
+            status="waiting"
+            headAccessoryId={equipment.headAccessoryId}
+            heldItemId={equipment.heldItemId}
+          />
         ) : (
           <div className="lobbyEmptyFigure" aria-hidden="true">?</div>
         )}
       </div>
-      {isLocal && player ? (
-        <div className="accessoryPicker" aria-label="自分のアクセサリ">
-          <button type="button" onClick={onPreviousAccessory} aria-label="前のアクセサリ">
-            <ChevronLeft size={18} />
-          </button>
-          <span>{accessory.label}</span>
-          <button type="button" onClick={onNextAccessory} aria-label="次のアクセサリ">
-            <ChevronRight size={18} />
-          </button>
+      {isLocal && player && onEquipmentChange && ownedHeadAccessoryIds && ownedHeldItemIds ? (
+        <div className="accessoryPicker quickEquipmentPicker" aria-label="自分の装備">
+          <label>
+            <span>頭</span>
+            <select
+              aria-label="頭装備"
+              value={equipment.headAccessoryId}
+              onChange={(event) => onEquipmentChange({
+                ...equipment,
+                headAccessoryId: event.target.value as HeadAccessoryId,
+              })}
+            >
+              {HEAD_ACCESSORY_CATALOG.filter(({ id }) => ownedHeadAccessoryIds.includes(id)).map((item) => (
+                <option key={item.id} value={item.id}>{item.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>手持ち</span>
+            <select
+              aria-label="手持ち装備"
+              value={equipment.heldItemId}
+              onChange={(event) => onEquipmentChange({
+                ...equipment,
+                heldItemId: event.target.value as HeldItemId,
+              })}
+            >
+              {HELD_ITEM_CATALOG.filter(({ id }) => ownedHeldItemIds.includes(id)).map((item) => (
+                <option key={item.id} value={item.id}>{item.name}</option>
+              ))}
+            </select>
+          </label>
         </div>
       ) : null}
     </SurfaceCard>
