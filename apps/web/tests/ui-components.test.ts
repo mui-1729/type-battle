@@ -5,6 +5,7 @@ import { Button, SectionHeading, SurfaceCard } from "../app/_components/ui";
 import { PlayerIdentity } from "../app/_components/player-identity";
 import { HomeModeMenu } from "../app/_components/home-mode-menu";
 import { LobbyPrep } from "../app/_components/lobby-prep";
+import { INITIAL_REACTION_FEEDBACK } from "../app/_lib/reaction-feedback";
 import type { RoomState } from "@type-battle/shared";
 
 beforeAll(() => vi.stubGlobal("React", React));
@@ -124,7 +125,9 @@ describe("shared UI foundation", () => {
         onPromptCategoryChange: vi.fn(),
         onBotDifficultyChange: vi.fn(),
         onReaction: vi.fn(),
-        remoteReaction: { playerId: "guest", reaction: "よろしく" }
+        reactionFeedback: INITIAL_REACTION_FEEDBACK,
+        remoteReaction: { playerId: "guest", reaction: "よろしく" },
+        remoteReactionsEnabled: true
       })
     );
 
@@ -138,5 +141,55 @@ describe("shared UI foundation", () => {
     expect(markup).toContain("両者READYで開始します");
     expect(markup).toContain("Bob: 「よろしく」");
     expect(markup.match(/lobbyReactionBubble/g)).toHaveLength(1);
+  });
+
+  it("explains hidden incoming reactions while keeping lobby sending available", () => {
+    const room = {
+      roomCode: "ABC123",
+      hostPlayerId: "host",
+      status: "waiting",
+      matchRule: "race",
+      botDifficulty: "normal",
+      promptCategory: "standard",
+      maxPlayers: 2,
+      players: [{
+        id: "host",
+        nickname: "Alice",
+        connected: true,
+        ready: false,
+        isHost: true,
+        isBot: false,
+        progressIndex: 0,
+        correctCharacters: 0,
+        totalTypedCharacters: 0,
+        mistakes: 0,
+        maxStreak: 0,
+        currentStreak: 0,
+        wpm: 0,
+        accuracy: 100
+      }]
+    } satisfies RoomState;
+    const markup = renderToStaticMarkup(
+      React.createElement(LobbyPrep, {
+        room,
+        localPlayerId: "host",
+        accessoryIndex: 0,
+        onPreviousAccessory: vi.fn(),
+        onNextAccessory: vi.fn(),
+        onCopyRoomCode: vi.fn(),
+        onToggleReady: vi.fn(),
+        onMatchRuleChange: vi.fn(),
+        onPromptCategoryChange: vi.fn(),
+        onBotDifficultyChange: vi.fn(),
+        onReaction: vi.fn(),
+        reactionFeedback: INITIAL_REACTION_FEEDBACK,
+        remoteReaction: null,
+        remoteReactionsEnabled: false
+      })
+    );
+
+    expect(markup).toContain("相手のリアクションは非表示です。自分からは送信できます。");
+    expect(markup).not.toContain("reactionButton active");
+    expect(markup).not.toContain("reactionButton\" disabled");
   });
 });

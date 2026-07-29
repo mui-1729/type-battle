@@ -845,9 +845,9 @@ select {
 .accessoryPicker span { visibility: hidden; }
 .lobbyPlayerCard .readyBadge { position: absolute; bottom: 18px; left: 20px; z-index: 3; min-height: 50px; padding: 8px 16px; color: color-mix(in srgb, var(--game-ink) 72%, transparent); border: 1px solid var(--game-card-border); border-radius: 14px; background: color-mix(in srgb, var(--game-card) 92%, transparent); font-size: 16px; }
 .lobbyPlayerCard .readyBadge.active { color: var(--game-success-text); }
-.lobbyPrepControls { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 100px; gap: 18px; width: min(1320px, 100%); height: 100px; margin: 0 auto; }
+.lobbyPrepControls { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 128px; gap: 18px; width: min(1320px, 100%); height: 128px; margin: 0 auto; }
 .lobbySettingsCard,
-.lobbyReactionCard { display: flex; align-items: center; gap: 18px; height: 100px; min-height: 0; padding: 12px 20px; overflow: hidden; border: 3px solid var(--game-card-border); border-radius: 22px; background: var(--game-card); box-shadow: var(--game-card-shadow); }
+.lobbyReactionCard { display: flex; align-items: center; gap: 18px; height: 128px; min-height: 0; padding: 12px 20px; overflow: hidden; border: 3px solid var(--game-card-border); border-radius: 22px; background: var(--game-card); box-shadow: var(--game-card-shadow); }
 .lobbySettingsHeading h3 { font-size: 15px; }
 .lobbySettingsCard { grid-template-columns: none; grid-template-rows: none; }
 .lobbySettingsCard .lobbySettingsHeading { display: block; flex: 0 0 95px; height: auto; min-height: 0; }
@@ -857,10 +857,14 @@ select {
 .lobbyChoice.active { color: #064ec9; border-color: #1782f2; background: #e9f5ff; }
 .lobbyChoice small { display: none; }
 .lobbySettingRow { display: none; }
-.lobbyReactionCard .lobbySettingsHeading { display: block; flex: 0 0 130px; height: auto; min-height: 0; }
-.reactionGrid { flex: 1; grid-template-columns: repeat(3, 1fr); }
+.lobbyReactionCard { display: grid; grid-template-columns: 130px minmax(0, 1fr); grid-template-rows: auto 18px 18px; column-gap: 18px; row-gap: 2px; }
+.lobbyReactionCard .lobbySettingsHeading { display: block; grid-column: 1; grid-row: 1; height: auto; min-height: 0; }
+.reactionGrid { grid-column: 2; grid-row: 1; grid-template-columns: repeat(3, 1fr); }
 .reactionButton { min-height: 46px; }
-.lobbyReactionStatus { display: none; }
+.lobbyReactionStatus,
+.lobbyRemoteReaction { display: block; grid-column: 1 / -1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lobbyReactionStatus { grid-row: 2; }
+.lobbyRemoteReaction { grid-row: 3; }
 .lobbyReadySummary { display: flex; justify-content: center; width: min(1320px, 100%); margin: 0 auto; }
 .lobbyReadySummary > .readyBadge,
 .lobbyReadySummary > span:not(.readyBadge) { display: none; }

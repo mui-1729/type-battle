@@ -3,6 +3,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { MatchResult } from "@type-battle/shared";
 import { ResultPanel } from "../app/_components/result-panel";
+import { createReactionErrorFeedback, createSentReactionFeedback } from "../app/_lib/reaction-feedback";
 
 beforeAll(() => vi.stubGlobal("React", React));
 afterAll(() => vi.unstubAllGlobals());
@@ -104,5 +105,58 @@ describe("ResultPanel", () => {
     expect(markup).toContain('role="status"');
     expect(markup).toContain("今日の挑戦上限（5回）に達しました");
     expect(markup).toContain("0:00から挑戦できます");
+  });
+
+  it("shows acknowledged cooldown and names the remote result reaction", () => {
+    const twoPlayerResult: MatchResult = {
+      ...result,
+      players: [
+        result.players[0]!,
+        {
+          ...result.players[0]!,
+          id: "player-2",
+          nickname: "Bob",
+          isHost: false,
+          rank: 2
+        }
+      ]
+    };
+    const markup = renderToStaticMarkup(
+      React.createElement(ResultPanel, {
+        result: twoPlayerResult,
+        isRoomResult: true,
+        localPlayerId: "player-1",
+        onRetry: vi.fn(),
+        onReaction: vi.fn(),
+        reactionFeedback: createSentReactionFeedback("ナイス"),
+        remoteReaction: { playerId: "player-2", reaction: "よろしく" },
+        remoteReactionsEnabled: true
+      })
+    );
+
+    expect(markup).toContain("ナイス を送信しました。次は3秒後に送信できます。");
+    expect(markup).toContain("Bob: 「よろしく」");
+    expect(markup.match(/resultReactionBubble/g)).toHaveLength(2);
+    expect(markup).toContain('aria-live="polite"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain("disabled");
+  });
+
+  it("renders reaction ACK errors as alerts without disabling retry", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ResultPanel, {
+        result,
+        isRoomResult: true,
+        localPlayerId: "player-1",
+        onRetry: vi.fn(),
+        onReaction: vi.fn(),
+        reactionFeedback: createReactionErrorFeedback("リアクションを送信できませんでした。"),
+        remoteReactionsEnabled: false
+      })
+    );
+
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("リアクションを送信できませんでした。");
+    expect(markup).not.toMatch(/resultReactions[^]*<button[^>]*disabled/);
   });
 });
