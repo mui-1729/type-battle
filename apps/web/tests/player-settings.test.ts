@@ -15,6 +15,13 @@ function createStorage(initial?: string) {
 }
 
 describe("player settings", () => {
+  it("asks first-time players to choose a nickname", () => {
+    expect(loadPlayerSettings(createStorage())).toMatchObject({
+      nickname: "",
+      tutorialSeen: false
+    });
+  });
+
   it("migrates old settings with safe defaults", () => {
     const settings = loadPlayerSettings(createStorage(JSON.stringify({ nickname: "Alice", soundEnabled: false })));
     expect(settings).toMatchObject({

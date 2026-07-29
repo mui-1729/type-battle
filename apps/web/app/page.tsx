@@ -38,8 +38,8 @@ import { ResultPanel } from "./_components/result-panel";
 import { RivalBar } from "./_components/rival-bar";
 import { Stat } from "./_components/stat";
 import { TypingInput } from "./_components/typing-input";
-import { StatusPill } from "./_components/status-pill";
 import { TypingPrompt } from "./_components/typing-prompt";
+import { TutorialOverlay } from "./_components/tutorial-overlay";
 import { PlayerIdentity } from "./_components/player-identity";
 import { PracticeStage } from "./_components/practice-stage";
 import { SectionHeading, SurfaceCard } from "./_components/ui";
@@ -137,6 +137,7 @@ export default function HomePage() {
   const [settings, setSettings] = useState<PlayerSettings>(DEFAULT_PLAYER_SETTINGS);
   const [settingsHydrated, setSettingsHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState<number | null>(null);
   const [matchSettingsOpen, setMatchSettingsOpen] = useState(false);
   const [exitRequest, setExitRequest] = useState<ExitRequest | null>(null);
   const [homeMode, setHomeMode] = useState<HomeMode | null>(null);
@@ -926,6 +927,7 @@ export default function HomePage() {
     nicknameRef.current = loadedSettings.nickname;
     setSettings(loadedSettings);
     setSettingsHydrated(true);
+    setTutorialStep(loadedSettings.tutorialSeen ? null : 0);
 
     if (!realtimeConfigured) {
       setConnected(false);
@@ -1726,6 +1728,19 @@ export default function HomePage() {
   const showHomeModeMenu = !room && !practiceSession && !practiceResult && homeMode === null && !isRecoveringStoredRoom;
   const showModeSetup = !room && !practiceSession && !practiceResult && homeMode !== null;
   const hasNickname = nickname.trim().length > 0;
+  const completeTutorial = () => {
+    setTutorialStep(null);
+    setSettings((current) => ({ ...current, tutorialSeen: true }));
+  };
+  const advanceTutorial = () => {
+    setTutorialStep((current) => {
+      if (current === null || current >= 2) {
+        setSettings((settings) => ({ ...settings, tutorialSeen: true }));
+        return null;
+      }
+      return current + 1;
+    });
+  };
   const openSoloSetupView = (view: Exclude<SoloSetupView, "menu">) => {
     if (view !== "mistakes") {
       const validationError = validateNickname(nicknameRef.current);
@@ -1756,6 +1771,7 @@ export default function HomePage() {
   return (
     <main
       className={`appShell ${visualState}${activeResult ? " hasResult" : ""}${visualViewportHeight === null ? "" : " hasConstrainedViewport"}`}
+      data-settings-hydrated={settingsHydrated}
       style={visualViewportHeight === null ? undefined : { "--visual-viewport-height": `${visualViewportHeight}px` } as CSSProperties}
     >
       <GameHeader
@@ -1763,6 +1779,7 @@ export default function HomePage() {
         realtimeConfigured={realtimeConfigured}
         onOpenSettings={() => setSettingsOpen(true)}
         exitAction={room ? { label: room.status === "finished" ? "ルームを退出" : "対戦を退出", onClick: requestRoomExit } : practiceSession || practiceResult ? { label: practiceResult ? "ひとり用メニューへ" : "練習をやめる", onClick: requestPracticeExit } : showModeSetup && homeMode === "solo" && soloSetupView !== "menu" ? { label: "ひとり用メニューへ", onClick: () => setSoloSetupView("menu") } : showModeSetup ? { label: "モード選択へ", onClick: () => setHomeMode(null) } : undefined}
+        status={room && room.status !== "waiting" ? (result ? "result" : room.status) : practiceSession || practiceResult ? (practiceResult ? "result" : "playing") : undefined}
       />
 
       {storedRoomRecovery.status !== "idle" ? (
@@ -2029,14 +2046,6 @@ export default function HomePage() {
         >
           {room || practiceSession || practiceResult ? (
             <>
-              <div className="matchHeader">
-                <StatusPill
-                  status={
-                    room ? (result ? "result" : room.status) : practiceResult ? "result" : "playing"
-                  }
-                />
-              </div>
-
               {room?.status === "countdown" ? (
                 <div className="countdown">{Math.max(1, Math.ceil(countdownMs / 1000))}</div>
               ) : null}
@@ -2195,7 +2204,14 @@ export default function HomePage() {
           setSettings={setSettings}
           setNickname={setNickname}
           onClose={() => setSettingsOpen(false)}
+          onOpenTutorial={() => {
+            setSettingsOpen(false);
+            setTutorialStep(0);
+          }}
         />
+      ) : null}
+      {tutorialStep !== null ? (
+        <TutorialOverlay step={tutorialStep} onNext={advanceTutorial} onClose={completeTutorial} />
       ) : null}
       {exitRequest === "room" ? (
         <ExitConfirmationModal

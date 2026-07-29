@@ -13,7 +13,7 @@ export type PlayerSettings = {
 export const PLAYER_SETTINGS_STORAGE_KEY = "type-battle:settings";
 
 export const DEFAULT_PLAYER_SETTINGS: PlayerSettings = {
-  nickname: "Player",
+  nickname: "",
   theme: "system",
   soundEnabled: true,
   countdownSoundEnabled: true,

@@ -890,8 +890,6 @@ select {
 .isBattle:not(.isBattle-hpBattle) .brandBlock { margin-top: 18px; }
 .isBattle-hpBattle .headerActions,
 .isPractice .headerActions { margin-left: auto; }
-.isBattle .matchHeader,
-.isPractice .matchHeader { position: absolute; top: -82px; left: 0; z-index: 5; }
 .isBattle .statusPill,
 .isPractice .statusPill { min-height: 50px; padding: 0 20px; color: var(--game-ink); border: 2px solid var(--game-card-border); border-radius: 16px; background: var(--game-card); box-shadow: var(--game-card-shadow); font-size: 17px; }
 .isBattle .progressBlock,
@@ -908,20 +906,7 @@ select {
   opacity: 0;
   pointer-events: none;
 }
-.isBattle.hasResult .sidePanel {
-  position: relative;
-  top: auto;
-  bottom: auto;
-  left: auto;
-  z-index: 20;
-  width: min(470px, calc(100vw - 36px));
-  margin: 0 auto 18px;
-  padding: 14px;
-  opacity: 1;
-  pointer-events: none;
-}
-.isBattle.hasResult .sidePanel > * { display: none; }
-.isBattle.hasResult .sidePanel > .difficultySelector { display: grid; pointer-events: auto; }
+.isBattle.hasResult .sidePanel { display: none; }
 .typingInput { position: fixed; left: -9999px; width: 1px; height: 1px; min-height: 1px; opacity: .01; }
 
 .battleStage {

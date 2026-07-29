@@ -27,6 +27,19 @@ test("keeps the match settings overlay contained and scrollable on mobile", asyn
   await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
 
   const opener = host.getByRole("button", { name: "次の試合設定" });
+  await expect(opener).toBeInViewport();
+  await expect(host.getByRole("button", { name: "再戦READY" })).toBeInViewport();
+  expect(await host.evaluate(() => ({
+    documentHeight: document.documentElement.scrollHeight,
+    viewportHeight: window.innerHeight,
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth
+  }))).toEqual({
+    documentHeight: 844,
+    viewportHeight: 844,
+    documentWidth: 390,
+    viewportWidth: 390
+  });
   await opener.click();
   const dialog = host.getByRole("dialog", { name: "次の試合設定" });
   await expect(dialog).toBeVisible();

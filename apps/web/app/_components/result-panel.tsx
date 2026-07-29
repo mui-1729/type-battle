@@ -69,6 +69,24 @@ export function ResultPanel({
         <span className="resultPanelMeta">{doubleKo ? "引き分け" : `${result.players.length} 名`}</span>
       </div>
 
+      <div className="resultActions">
+        {!isRoomResult && onPracticeMenu ? (
+          <div className="practiceResultActions">
+            {onPracticeNext ? <Button variant="secondary" type="button" onClick={onPracticeNext}>次の文章</Button> : null}
+            <Button variant="secondary" type="button" onClick={onPracticeMenu}>ひとり用メニューへ</Button>
+          </div>
+        ) : null}
+        {isRoomResult && onOpenSettings ? <Button variant="secondary" type="button" onClick={onOpenSettings}><Settings size={17} /> 次の試合設定</Button> : null}
+        {onExit ? <Button variant="secondary" type="button" onClick={onExit}>{exitLabel}</Button> : null}
+        {canRetry ? (
+          <Button variant="primary" type="button" onClick={onRetry} disabled={retryPending} aria-busy={retryPending}>
+            <RotateCcw size={18} />
+            {retryPending && isRoomResult ? "READYを送信中…" : isRoomResult && rematchReady ? "READYを取り消す" : retryLabel}
+          </Button>
+        ) : <p className="infoText" role="status">相手の再戦READYを待っています。</p>}
+        {retryError ? <p className="errorText" role="alert">{retryError}</p> : null}
+      </div>
+
       <div className="resultCards" aria-label="試合結果カード">
         {result.players.map((player) => {
           const isWinner = !doubleKo && player.rank === 1;
@@ -137,24 +155,6 @@ export function ResultPanel({
           <div>{QUICK_REACTIONS.map((reaction) => <button type="button" key={reaction} onClick={() => onReaction(reaction)}>{reaction}</button>)}</div>
         </div>
       ) : null}
-
-      <div className="resultActions">
-        {!isRoomResult && onPracticeMenu ? (
-          <div className="practiceResultActions">
-            {onPracticeNext ? <Button variant="secondary" type="button" onClick={onPracticeNext}>次の文章</Button> : null}
-            <Button variant="secondary" type="button" onClick={onPracticeMenu}>ひとり用メニューへ</Button>
-          </div>
-        ) : null}
-        {isRoomResult && onOpenSettings ? <Button variant="secondary" type="button" onClick={onOpenSettings}><Settings size={17} /> 次の試合設定</Button> : null}
-        {onExit ? <Button variant="secondary" type="button" onClick={onExit}>{exitLabel}</Button> : null}
-        {canRetry ? (
-          <Button variant="primary" type="button" onClick={onRetry} disabled={retryPending} aria-busy={retryPending}>
-            <RotateCcw size={18} />
-            {retryPending && isRoomResult ? "READYを送信中…" : isRoomResult && rematchReady ? "READYを取り消す" : retryLabel}
-          </Button>
-        ) : <p className="infoText" role="status">相手の再戦READYを待っています。</p>}
-        {retryError ? <p className="errorText" role="alert">{retryError}</p> : null}
-      </div>
     </SurfaceCard>
   );
 }
