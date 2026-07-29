@@ -1091,6 +1091,130 @@ describe("room authority", () => {
     expect(parseMessages(guestSocket).filter((message) => message.type === "server:player:reaction")).toHaveLength(2);
   });
 
+  it("shares one recovering token budget across mixed control commands", async () => {
+    const storage = new FakeStorage();
+    const state = new FakeDurableObjectState(storage);
+    const roomAuthority = new RoomAuthorityDurableObject(state as unknown as DurableObjectState);
+    const socket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(socket as unknown as WebSocket, { roomCode: "CR23TL" });
+    socket.receive(JSON.stringify({
+      id: "msg-create-control-rate",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-control-rate",
+        sessionId: "session-control-rate"
+      }
+    }));
+    await flushAsyncWork();
+    await Promise.all(state.backgroundWork);
+    socket.messages.length = 0;
+    storage.putCalls.length = 0;
+
+    const noOpCommands = [
+      ["client:player:ready", { roomCode: "CR23TL", ready: false }],
+      ["client:room:setPromptCategory", { roomCode: "CR23TL", category: "standard" }],
+      ["client:room:setBotDifficulty", { roomCode: "CR23TL", difficulty: "normal" }],
+      ["client:room:setMatchRule", { roomCode: "CR23TL", rule: "race" }],
+      ["client:player:ready", { roomCode: "CR23TL", ready: false }],
+      ["client:room:setPromptCategory", { roomCode: "CR23TL", category: "standard" }],
+      ["client:room:setBotDifficulty", { roomCode: "CR23TL", difficulty: "normal" }],
+      ["client:room:setMatchRule", { roomCode: "CR23TL", rule: "race" }]
+    ] as const;
+    for (const [index, [type, payload]] of noOpCommands.entries()) {
+      socket.receive(JSON.stringify({ id: `msg-control-noop-${index}`, type, payload }));
+    }
+    socket.receive(JSON.stringify({
+      id: "msg-control-rejected",
+      type: "client:player:accessory",
+      payload: { roomCode: "CR23TL", accessoryIndex: 1 }
+    }));
+    await flushAsyncWork();
+
+    expect(findLastAck(socket, "client:player:accessory")).toMatchObject({
+      replyTo: "msg-control-rejected",
+      payload: {
+        ok: false,
+        error: "操作が多すぎます。少し待ってから再試行してください。"
+      }
+    });
+    expect(parseMessages(socket).filter((message) => message.type === "server:room:state")).toEqual([]);
+    expect(storage.putCalls).toEqual([]);
+    expect(storage.values.get("room")).toMatchObject({
+      room: {
+        players: [expect.not.objectContaining({ accessoryIndex: 1 })]
+      }
+    });
+
+    await vi.advanceTimersByTimeAsync(250);
+    socket.receive(JSON.stringify({
+      id: "msg-control-recovered",
+      type: "client:player:accessory",
+      payload: { roomCode: "CR23TL", accessoryIndex: 1 }
+    }));
+    await flushAsyncWork();
+
+    expect(getLatestRoomState(socket).players).toContainEqual(
+      expect.objectContaining({ id: "guest-control-rate", accessoryIndex: 1 })
+    );
+    expect(storage.putCalls).toEqual(["room"]);
+  });
+
+  it("does not broadcast or persist equal ready, accessory, or match settings", async () => {
+    const storage = new FakeStorage();
+    const state = new FakeDurableObjectState(storage);
+    const roomAuthority = new RoomAuthorityDurableObject(state as unknown as DurableObjectState);
+    const socket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(socket as unknown as WebSocket, { roomCode: "NP23QR" });
+    socket.receive(JSON.stringify({
+      id: "msg-create-control-noop",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-control-noop",
+        sessionId: "session-control-noop"
+      }
+    }));
+    await flushAsyncWork();
+    socket.receive(JSON.stringify({
+      id: "msg-accessory-control-noop-initial",
+      type: "client:player:accessory",
+      payload: { roomCode: "NP23QR", accessoryIndex: 1 }
+    }));
+    await flushAsyncWork();
+    await Promise.all(state.backgroundWork);
+    socket.messages.length = 0;
+    storage.putCalls.length = 0;
+
+    const commands = [
+      ["client:player:ready", { roomCode: "NP23QR", ready: false }],
+      ["client:player:accessory", { roomCode: "NP23QR", accessoryIndex: 1 }],
+      ["client:room:setPromptCategory", { roomCode: "NP23QR", category: "standard" }],
+      ["client:room:setBotDifficulty", { roomCode: "NP23QR", difficulty: "normal" }],
+      ["client:room:setMatchRule", { roomCode: "NP23QR", rule: "race" }]
+    ] as const;
+    for (const [index, [type, payload]] of commands.entries()) {
+      socket.receive(JSON.stringify({ id: `msg-equal-control-${index}`, type, payload }));
+    }
+    await flushAsyncWork();
+
+    expect(parseMessages(socket).filter((message) => message.type === "server:room:state")).toEqual([]);
+    expect(storage.putCalls).toEqual([]);
+    expect(findLastAck(socket, "client:room:setPromptCategory")).toMatchObject({
+      payload: { ok: true, data: { promptCategory: "standard" } }
+    });
+    expect(findLastAck(socket, "client:room:setBotDifficulty")).toMatchObject({
+      payload: { ok: true, data: { botDifficulty: "normal" } }
+    });
+    expect(findLastAck(socket, "client:room:setMatchRule")).toMatchObject({
+      payload: { ok: true, data: { matchRule: "race" } }
+    });
+  });
+
   it("clears READY states when the host changes the next match settings", async () => {
     const roomAuthority = new RoomAuthorityDurableObject(
       new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
