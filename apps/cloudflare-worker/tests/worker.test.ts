@@ -275,6 +275,21 @@ function sendTypingInput(socket: FakeSocket, roomCode: string, input: string): v
   });
 }
 
+async function sendPacedTypingInput(socket: FakeSocket, roomCode: string, input: string): Promise<void> {
+  const chunks = input.match(/.{1,8}/g) ?? [];
+
+  for (const [index, chunk] of chunks.entries()) {
+    if (index > 0) {
+      await vi.advanceTimersByTimeAsync(500);
+    }
+    socket.receive(JSON.stringify({
+      id: `msg-paced-typing-${index + 1}`,
+      type: index === chunks.length - 1 ? "client:typing:finish" : "client:typing:progress",
+      payload: { roomCode, input: chunk, sequence: index + 1 }
+    }));
+  }
+}
+
 function getCountdownRoom(socket: FakeSocket): RoomState {
   const message = parseMessages(socket).find((entry) => entry.type === "server:match:countdown");
   return (message?.payload as { room?: RoomState } | undefined)?.room as RoomState;
@@ -1082,7 +1097,7 @@ describe("room authority", () => {
     );
     await vi.advanceTimersByTimeAsync(3_000);
 
-    sendTypingInput(socket, "AB23CD", getCountdownRoom(socket).prompt?.typing.romaji ?? "");
+    await sendPacedTypingInput(socket, "AB23CD", getCountdownRoom(socket).prompt?.typing.romaji ?? "");
     await flushAsyncWork();
 
     expect(storage.values.get("match-result:AB23CD:1")).toMatchObject({
@@ -1147,7 +1162,7 @@ describe("room authority", () => {
       releasePersistence = resolve;
     });
     storage.failPutPrefixes.add("room");
-    sendTypingInput(hostSocket, "RF34GH", getCountdownRoom(hostSocket).prompt?.typing.romaji ?? "");
+    await sendPacedTypingInput(hostSocket, "RF34GH", getCountdownRoom(hostSocket).prompt?.typing.romaji ?? "");
     await flushAsyncWork();
 
     for (const socket of [hostSocket, guestSocket]) {
@@ -1182,6 +1197,166 @@ describe("room authority", () => {
     await flushAsyncWork();
 
     expect(guestSocket.messages).toHaveLength(guestMessageCount);
+  });
+
+  it("rejects an impossible whole-prompt HP burst without progress, damage, or finalization", async () => {
+    const storage = new FakeStorage();
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const attackerSocket = new FakeSocket();
+    const opponentSocket = new FakeSocket();
+    const rejoinedSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(attackerSocket as unknown as WebSocket, { roomCode: "AT34CK" });
+    roomAuthority.attachSocket(opponentSocket as unknown as WebSocket, { roomCode: "AT34CK" });
+    attackerSocket.receive(JSON.stringify({
+      id: "msg-create-rate-attack",
+      type: "client:room:create",
+      payload: {
+        nickname: "Attacker",
+        guestId: "guest-rate-attacker",
+        sessionId: "session-rate-attacker",
+        deviceKind: "desktop"
+      }
+    }));
+    await flushAsyncWork();
+    opponentSocket.receive(JSON.stringify({
+      id: "msg-join-rate-opponent",
+      type: "client:room:join",
+      payload: {
+        roomCode: "AT34CK",
+        nickname: "Opponent",
+        guestId: "guest-rate-opponent",
+        sessionId: "session-rate-opponent",
+        deviceKind: "mobile"
+      }
+    }));
+    await flushAsyncWork();
+    attackerSocket.receive(JSON.stringify({
+      id: "msg-rule-rate-attack",
+      type: "client:room:setMatchRule",
+      payload: { roomCode: "AT34CK", rule: "hpBattle" }
+    }));
+    for (const [socket, id] of [[attackerSocket, "attacker"], [opponentSocket, "opponent"]] as const) {
+      socket.receive(JSON.stringify({
+        id: `msg-ready-rate-attack-${id}`,
+        type: "client:player:ready",
+        payload: { roomCode: "AT34CK", ready: true }
+      }));
+    }
+    attackerSocket.receive(JSON.stringify({
+      id: "msg-start-rate-attack",
+      type: "client:match:start",
+      payload: { roomCode: "AT34CK" }
+    }));
+    await vi.advanceTimersByTimeAsync(3_000);
+    await flushAsyncWork();
+
+    const prompt = getCountdownRoom(attackerSocket).prompt!;
+    expect(Array.from(prompt.typing.hiragana).length).toBeGreaterThan(12);
+    attackerSocket.receive(JSON.stringify({
+      id: "msg-whole-prompt-rate-attack",
+      type: "client:typing:finish",
+      payload: { roomCode: "AT34CK", input: prompt.typing.romaji, sequence: 1 }
+    }));
+    await flushAsyncWork();
+
+    let room = getLatestRoomState(attackerSocket);
+    expect(room.status).toBe("playing");
+    expect(room.players).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "guest-rate-attacker", progressIndex: 0, hp: 100 }),
+      expect.objectContaining({ id: "guest-rate-opponent", progressIndex: 0, hp: 100 })
+    ]));
+    expect(parseMessages(attackerSocket).some((message) => message.type === "server:match:result")).toBe(false);
+
+    // Reattaching the same authenticated guest does not create a fresh budget.
+    roomAuthority.attachSocket(rejoinedSocket as unknown as WebSocket, { roomCode: "AT34CK" });
+    rejoinedSocket.receive(JSON.stringify({
+      id: "msg-rejoin-rate-attack",
+      type: "client:room:join",
+      payload: {
+        roomCode: "AT34CK",
+        nickname: "Attacker",
+        guestId: "guest-rate-attacker",
+        sessionId: "session-rate-attacker",
+        deviceKind: "desktop"
+      }
+    }));
+    await flushAsyncWork();
+    // Waiting fills only the fixed-capacity bucket. Rechunking into individually
+    // valid commands at the same instant cannot spend more than 12 total tokens.
+    await vi.advanceTimersByTimeAsync(10_000);
+    const kana = Array.from(prompt.typing.hiragana);
+    rejoinedSocket.receive(JSON.stringify({
+      id: "msg-rechunked-rate-attack-1",
+      type: "client:typing:progress",
+      payload: { roomCode: "AT34CK", input: kana.slice(0, 12).join(""), sequence: 2 }
+    }));
+    rejoinedSocket.receive(JSON.stringify({
+      id: "msg-rechunked-rate-attack-2",
+      type: "client:typing:progress",
+      payload: { roomCode: "AT34CK", input: kana.slice(12, 24).join(""), sequence: 3 }
+    }));
+    await flushAsyncWork();
+
+    room = getLatestRoomState(rejoinedSocket);
+    expect(room.players).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "guest-rate-attacker", progressIndex: 12, hp: 100 }),
+      expect.objectContaining({ id: "guest-rate-opponent", progressIndex: 0, hp: 88 })
+    ]));
+    expect(parseMessages(rejoinedSocket).some((message) => message.type === "server:match:result")).toBe(false);
+
+    // Closing persists the depleted bucket. A new authority restored from the
+    // same storage must not grant a fresh reconnect/restart burst.
+    rejoinedSocket.close();
+    await flushAsyncWork();
+    const restartedAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const restartedSocket = new FakeSocket();
+    await restartedAuthority.ready;
+    restartedAuthority.attachSocket(restartedSocket as unknown as WebSocket, { roomCode: "AT34CK" });
+    restartedSocket.receive(JSON.stringify({
+      id: "msg-rejoin-after-rate-restart",
+      type: "client:room:join",
+      payload: {
+        roomCode: "AT34CK",
+        nickname: "Attacker",
+        guestId: "guest-rate-attacker",
+        sessionId: "session-rate-attacker",
+        deviceKind: "desktop"
+      }
+    }));
+    await flushAsyncWork();
+    restartedSocket.receive(JSON.stringify({
+      id: "msg-rate-attack-after-restart",
+      type: "client:typing:progress",
+      payload: { roomCode: "AT34CK", input: kana.slice(12, 20).join(""), sequence: 4 }
+    }));
+    await flushAsyncWork();
+
+    let restartedRoom = (findLastAck(restartedSocket, "client:room:join") as {
+      payload?: { data?: { room?: RoomState } };
+    }).payload?.data?.room as RoomState;
+    expect(restartedRoom.players).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "guest-rate-attacker", progressIndex: 12, hp: 100 }),
+      expect.objectContaining({ id: "guest-rate-opponent", progressIndex: 0, hp: 88 })
+    ]));
+
+    await vi.advanceTimersByTimeAsync(500);
+    restartedSocket.receive(JSON.stringify({
+      id: "msg-rate-refill-after-restart",
+      type: "client:typing:progress",
+      payload: { roomCode: "AT34CK", input: kana.slice(12, 20).join(""), sequence: 5 }
+    }));
+    await flushAsyncWork();
+    restartedRoom = getLatestRoomState(restartedSocket);
+    expect(restartedRoom.players).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "guest-rate-attacker", progressIndex: 20, hp: 100 }),
+      expect.objectContaining({ id: "guest-rate-opponent", progressIndex: 0, hp: 80 })
+    ]));
   });
 
   it("deals equal HP damage for equivalent desktop romaji and mobile kana input", async () => {
@@ -1250,7 +1425,7 @@ describe("room authority", () => {
 
     // A full cycle also verifies HP battles loop without charging romaji guide
     // keystrokes as extra damage at the prompt boundary.
-    sendTypingInput(desktopSocket, "HP34DM", plan.guide);
+    await sendPacedTypingInput(desktopSocket, "HP34DM", plan.guide);
     await flushAsyncWork();
     expect(getLatestRoomState(desktopSocket).players)
       .toEqual(expect.arrayContaining([
@@ -1258,7 +1433,7 @@ describe("room authority", () => {
         expect.objectContaining({ id: "guest-hp-mobile", hp: 100 - canonicalLength })
       ]));
 
-    sendTypingInput(mobileSocket, "HP34DM", prompt.typing.hiragana);
+    await sendPacedTypingInput(mobileSocket, "HP34DM", prompt.typing.hiragana);
     await flushAsyncWork();
     expect(getLatestRoomState(mobileSocket).players)
       .toEqual(expect.arrayContaining([
@@ -1309,7 +1484,7 @@ describe("room authority", () => {
       payload: { roomCode: "PL34MN" }
     }));
     await vi.advanceTimersByTimeAsync(3_000);
-    sendTypingInput(hostSocket, "PL34MN", getCountdownRoom(hostSocket).prompt?.typing.romaji ?? "");
+    await sendPacedTypingInput(hostSocket, "PL34MN", getCountdownRoom(hostSocket).prompt?.typing.romaji ?? "");
     await flushAsyncWork();
 
     const resultCountBeforeLeave = parseMessages(hostSocket)
@@ -1584,7 +1759,8 @@ describe("room authority", () => {
       });
 
     const remainingInput = plan.units.slice(1).map((unit) => unit.guide).join("");
-    sendTypingInput(rejoinedSocket, "LG34MN", remainingInput);
+    await vi.advanceTimersByTimeAsync(600);
+    await sendPacedTypingInput(rejoinedSocket, "LG34MN", remainingInput);
     await flushAsyncWork();
     expect(parseMessages(rejoinedSocket).some((message) => message.type === "server:match:result")).toBe(true);
   });
