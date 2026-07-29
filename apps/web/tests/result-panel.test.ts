@@ -86,4 +86,23 @@ describe("ResultPanel", () => {
     expect(markup).toContain("もう一度練習");
     expect(markup).toContain("<button");
   });
+
+  it("disables an exhausted daily retry and explains when it resets", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ResultPanel, {
+        result,
+        isRoomResult: false,
+        practiceMode: "daily",
+        onRetry: vi.fn(),
+        retryDisabledReason: "今日の挑戦上限（5回）に達しました。次のデイリーチャレンジは0:00から挑戦できます。"
+      })
+    );
+
+    expect(markup).toContain("もう一度挑戦");
+    expect(markup).toContain("disabled");
+    expect(markup).toMatch(/aria-describedby="[^"]+"/);
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain("今日の挑戦上限（5回）に達しました");
+    expect(markup).toContain("0:00から挑戦できます");
+  });
 });

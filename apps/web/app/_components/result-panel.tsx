@@ -14,6 +14,7 @@ type ResultPanelProps = {
   matchRule?: MatchRule;
   practiceMode?: "practice" | "daily";
   canRetry?: boolean;
+  retryDisabledReason?: string;
   retryPending?: boolean;
   retryError?: string;
   localPlayerId?: string;
@@ -36,6 +37,7 @@ export function ResultPanel({
   matchRule,
   practiceMode = "practice",
   canRetry = true,
+  retryDisabledReason = "",
   retryPending = false,
   retryError = "",
   localPlayerId = "",
@@ -52,6 +54,7 @@ export function ResultPanel({
 }: ResultPanelProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsTitleId = useId();
+  const retryStatusId = useId();
   const rule = result.matchRule ?? matchRule;
   const doubleKo = isRoomResult && result.players.length > 1 && result.players.every((player) => (player.hp ?? 1) <= 0);
   const title = isRoomResult ? (doubleKo ? "DOUBLE KO" : "試合結果") : practiceMode === "daily" ? "デイリーチャレンジの記録" : "練習の記録";
@@ -78,11 +81,21 @@ export function ResultPanel({
         ) : null}
         {isRoomResult && onOpenSettings ? <Button variant="secondary" type="button" onClick={onOpenSettings}><Settings size={17} /> 次の試合設定</Button> : null}
         {onExit ? <Button variant="secondary" type="button" onClick={onExit}>{exitLabel}</Button> : null}
-        {canRetry ? (
-          <Button variant="primary" type="button" onClick={onRetry} disabled={retryPending} aria-busy={retryPending}>
-            <RotateCcw size={18} />
-            {retryPending && isRoomResult ? "READYを送信中…" : isRoomResult && rematchReady ? "READYを取り消す" : retryLabel}
-          </Button>
+        {canRetry || retryDisabledReason ? (
+          <>
+            <Button
+              variant="primary"
+              type="button"
+              onClick={onRetry}
+              disabled={retryPending || Boolean(retryDisabledReason)}
+              aria-busy={retryPending}
+              aria-describedby={retryDisabledReason ? retryStatusId : undefined}
+            >
+              <RotateCcw size={18} />
+              {retryPending && isRoomResult ? "READYを送信中…" : isRoomResult && rematchReady ? "READYを取り消す" : retryLabel}
+            </Button>
+            {retryDisabledReason ? <p className="infoText" id={retryStatusId} role="status">{retryDisabledReason}</p> : null}
+          </>
         ) : <p className="infoText" role="status">相手の再戦READYを待っています。</p>}
         {retryError ? <p className="errorText" role="alert">{retryError}</p> : null}
       </div>

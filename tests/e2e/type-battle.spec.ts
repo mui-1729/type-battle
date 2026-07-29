@@ -781,6 +781,97 @@ test("returns to the solo menu from a daily challenge result", async ({ page }) 
   await expect(page.getByRole("button", { name: "今日のチャレンジ" })).toBeVisible();
 });
 
+test("keeps daily retry available before the attempt limit", async ({ page }) => {
+  await page.goto("/");
+  await seedDailyChallengeAttempts(page, 3);
+  await page.reload();
+  await setNickname(page, "DailyRetry");
+  await selectDailyMode(page);
+  await expect(page.locator(".dailyChallengeHeader small")).toHaveText("2 / 5");
+  await page.getByRole("button", { name: "今日の挑戦を開始" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  await typeInputGuide(page, await readInputGuide(page));
+  const retry = page.locator(".resultPanel").getByRole("button", { name: "もう一度挑戦" });
+  await expect(retry).toBeEnabled();
+  await expect.poll(() => readStoredDailyAttempts(page)).toBe(4);
+  await retry.click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+});
+
+test("disables daily retry after the fifth consumed attempt and preserves it on reload", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await seedDailyChallengeAttempts(page, 4);
+  await page.reload();
+  await setNickname(page, "DailyLimit");
+  await selectDailyMode(page);
+  await expect(page.locator(".dailyChallengeHeader small")).toHaveText("1 / 5");
+  await page.getByRole("button", { name: "今日の挑戦を開始" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  await typeInputGuide(page, await readInputGuide(page));
+  const resultPanel = page.locator(".resultPanel");
+  await expect(resultPanel).toBeVisible({ timeout: 5_000 });
+  await expect(resultPanel.getByRole("button", { name: "もう一度挑戦" })).toBeDisabled();
+  await expect(resultPanel.getByRole("status")).toContainText("今日の挑戦上限（5回）に達しました");
+  await expect(resultPanel.getByRole("status")).toContainText("次のデイリーチャレンジは0:00から挑戦できます");
+  await page.screenshot({ path: "test-results/daily-limit-result-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(resultPanel.getByRole("button", { name: "もう一度挑戦" })).toBeVisible();
+  await expect(resultPanel.getByRole("status")).toBeVisible();
+  await page.screenshot({ path: "test-results/daily-limit-result-mobile.png", fullPage: true });
+  await page.setViewportSize({ width: 320, height: 568 });
+  const retryButton = resultPanel.getByRole("button", { name: "もう一度挑戦" });
+  const retryStatus = resultPanel.getByRole("status");
+  await retryButton.scrollIntoViewIfNeeded();
+  await expect(retryButton).toBeVisible();
+  await expect(retryButton).toBeDisabled();
+  await retryStatus.scrollIntoViewIfNeeded();
+  await expect(retryStatus).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/daily-limit-result-phone-320.png", fullPage: true });
+
+  await page.reload();
+  await selectDailyMode(page);
+  await expect(page.locator(".dailyChallengeHeader small")).toHaveText("0 / 5");
+  await expect(page.getByRole("button", { name: "今日の挑戦を開始" })).toBeDisabled();
+});
+
+async function seedDailyChallengeAttempts(page: Page, attempts: number): Promise<void> {
+  await page.evaluate((storedAttempts) => {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Tokyo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(new Date());
+    const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+    const challengeKey = `${value("year")}-${value("month")}-${value("day")}`;
+    localStorage.setItem(`type-battle:daily-challenge:${challengeKey}`, JSON.stringify({
+      metricVersion: 2,
+      challengeKey,
+      promptId: "standard-1",
+      bestWpm: 80,
+      bestAccuracy: 95,
+      bestMistakes: 1,
+      bestFinishTimeMs: 120000,
+      attempts: storedAttempts,
+      points: 1,
+      perfectAwarded: false,
+      completionAwarded: true,
+      lastCompletedAt: Date.now()
+    }));
+  }, attempts);
+}
+
+async function readStoredDailyAttempts(page: Page): Promise<number | undefined> {
+  return page.evaluate(() => {
+    const key = Object.keys(localStorage).find((item) => item.startsWith("type-battle:daily-challenge:"));
+    return key ? (JSON.parse(localStorage.getItem(key) ?? "{}") as { attempts?: number }).attempts : undefined;
+  });
+}
+
 test("disables stage motion for the player setting and OS preference", async ({ browser }) => {
   for (const source of ["setting", "os"] as const) {
     const context = await browser.newContext(source === "os" ? { reducedMotion: "reduce" } : {});
