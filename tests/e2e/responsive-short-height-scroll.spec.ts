@@ -53,7 +53,7 @@ for (const [index, viewport] of shortViewports.entries()) {
     await setNickname(page, `Short${viewport.width}`);
     await selectBattleMode(page);
 
-    const createButton = page.locator(".roomActions .primaryButton");
+    const createButton = page.getByRole("button", { name: "ルームを作成", exact: true });
     await expectSingleWorkspaceScroller(page);
     await expectReachable(page, createButton);
     if (index % 2 === 0) {
