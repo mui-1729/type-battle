@@ -1201,6 +1201,86 @@ describe("room authority", () => {
     expect(guestSocket.messages).toHaveLength(guestMessageCount);
   });
 
+  it("shares one message-rate budget across progress and finish commands", async () => {
+    const durableObjectState = new FakeDurableObjectState(new FakeStorage());
+    const roomAuthority = new RoomAuthorityDurableObject(
+      durableObjectState as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "TB34RL" });
+    roomAuthority.attachSocket(guestSocket as unknown as WebSocket, { roomCode: "TB34RL" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-typing-budget",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-typing-budget-host",
+        sessionId: "session-typing-budget-host"
+      }
+    }));
+    await flushAsyncWork();
+    guestSocket.receive(JSON.stringify({
+      id: "msg-join-typing-budget",
+      type: "client:room:join",
+      payload: {
+        roomCode: "TB34RL",
+        nickname: "Bob",
+        guestId: "guest-typing-budget-guest",
+        sessionId: "session-typing-budget-guest"
+      }
+    }));
+    await flushAsyncWork();
+    for (const [socket, id] of [[hostSocket, "host"], [guestSocket, "guest"]] as const) {
+      socket.receive(JSON.stringify({
+        id: `msg-ready-typing-budget-${id}`,
+        type: "client:player:ready",
+        payload: { roomCode: "TB34RL", ready: true }
+      }));
+    }
+    hostSocket.receive(JSON.stringify({
+      id: "msg-start-typing-budget",
+      type: "client:match:start",
+      payload: { roomCode: "TB34RL" }
+    }));
+    await vi.advanceTimersByTimeAsync(3_000);
+    await flushAsyncWork();
+
+    const countRoomStates = () => parseMessages(hostSocket)
+      .filter((message) => message.type === "server:room:state").length;
+    const roomStatesBeforeBurst = countRoomStates();
+    for (let sequence = 1; sequence <= 120; sequence += 1) {
+      hostSocket.receive(JSON.stringify({
+        id: `msg-typing-budget-${sequence}`,
+        type: sequence % 2 === 0 ? "client:typing:finish" : "client:typing:progress",
+        payload: { roomCode: "TB34RL", input: "", sequence }
+      }));
+    }
+    await Promise.all(durableObjectState.backgroundWork);
+    expect(countRoomStates()).toBe(roomStatesBeforeBurst + 120);
+
+    hostSocket.receive(JSON.stringify({
+      id: "msg-typing-budget-rejected-finish",
+      type: "client:typing:finish",
+      payload: { roomCode: "TB34RL", input: "", sequence: 121 }
+    }));
+    await Promise.all(durableObjectState.backgroundWork);
+    expect(countRoomStates()).toBe(roomStatesBeforeBurst + 120);
+
+    await vi.advanceTimersByTimeAsync(1_001);
+    const roomStatesAfterWindowTimers = countRoomStates();
+    hostSocket.receive(JSON.stringify({
+      id: "msg-typing-budget-resumed-finish",
+      type: "client:typing:finish",
+      // Reusing 121 proves the rate-rejected command did not consume sequence.
+      payload: { roomCode: "TB34RL", input: "", sequence: 121 }
+    }));
+    await Promise.all(durableObjectState.backgroundWork);
+    expect(countRoomStates()).toBe(roomStatesAfterWindowTimers + 1);
+  });
+
   it("rejects an impossible whole-prompt HP burst without progress, damage, or finalization", async () => {
     const storage = new FakeStorage();
     const roomAuthority = new RoomAuthorityDurableObject(

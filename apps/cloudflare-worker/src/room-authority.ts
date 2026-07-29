@@ -208,7 +208,7 @@ export class RoomAuthorityDurableObject {
   private readonly roomCreateGuestLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 10 });
   private readonly roomJoinIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 100 });
   private readonly roomJoinGuestLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
-  private readonly progressLimiter = new RateLimiter({ windowMs: 1000, max: 120 });
+  private readonly typingLimiter = new RateLimiter({ windowMs: 1000, max: 120 });
   private readonly hooks: RoomEngineHooks;
   private maintenanceFallbackTimer: ReturnType<typeof setTimeout> | undefined;
   private retentionAlarmAt: number | null | undefined;
@@ -819,7 +819,7 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    if (!this.progressLimiter.isAllowed(socketId)) {
+    if (!this.typingLimiter.isAllowed(socketId)) {
       return;
     }
 
@@ -843,6 +843,10 @@ export class RoomAuthorityDurableObject {
 
     if (!parsedPayload) {
       this.sendError(socketId, INVALID_MESSAGE_ERROR);
+      return;
+    }
+
+    if (!this.typingLimiter.isAllowed(socketId)) {
       return;
     }
 
