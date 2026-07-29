@@ -134,17 +134,17 @@ describe("mobile input buffer", () => {
     expect(synchronized.state.handledValue).toBe("");
   });
 
-  it("wraps the expected cursor for time attack", () => {
-    const result = updateMobileInputBuffer(createMobileInputBufferState(2), {
+  it("wraps the expected cursor for a looping match after multiple cycles", () => {
+    const result = updateMobileInputBuffer(createMobileInputBufferState(4), {
       ...baseContext,
       expectedText: "かな",
-      progressIndex: 2,
+      progressIndex: 4,
       loop: true,
       value: "か",
       composing: false
     });
 
     expect(result.emittedText).toBe("か");
-    expect(result.state.optimisticProgressIndex).toBe(3);
+    expect(result.state.optimisticProgressIndex).toBe(5);
   });
 });

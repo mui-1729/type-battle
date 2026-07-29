@@ -33,12 +33,12 @@ function createPlayer(overrides: Partial<PlayerState> = {}): PlayerState {
   };
 }
 
-function createRoom(player: PlayerState): RoomState {
+function createRoom(player: PlayerState, matchRule: RoomState["matchRule"] = "timeAttack"): RoomState {
   return {
     roomCode: "AB23CD",
     hostPlayerId: player.id,
     status: "playing",
-    matchRule: "timeAttack",
+    matchRule,
     botDifficulty: "normal",
     promptCategory: "short",
     prompt,
@@ -183,5 +183,33 @@ describe("getHomePageViewModel", () => {
 
     expect(view.isRoomPlaying).toBe(true);
     expect(view.acceptingTextInput).toBe(false);
+  });
+
+  it.each([
+    ["timeAttack", true, true],
+    ["hpBattle", false, true],
+    ["race", false, false]
+  ] as const)("derives looping and timer state for %s", (matchRule, timeAttack, looping) => {
+    const player = createPlayer();
+    const room = createRoom(player, matchRule);
+    const progressIndex = prompt.typing.hiragana.length + 1;
+    const view = getHomePageViewModel(createInput({
+      room,
+      playerId: player.id,
+      currentPlayer: player,
+      connected: true,
+      localProgress: {
+        ...createEmptyProgress(),
+        progressIndex,
+        correctCharacters: progressIndex,
+        totalTypedCharacters: progressIndex
+      }
+    }));
+
+    expect(view.isTimeAttackPlaying).toBe(timeAttack);
+    expect(view.isLoopingMatchPlaying).toBe(looping);
+    expect(view.activeGuideProgressIndex).toBe(
+      looping ? progressIndex % view.activeTypingText.length : progressIndex
+    );
   });
 });

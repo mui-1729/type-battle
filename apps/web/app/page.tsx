@@ -270,6 +270,7 @@ export default function HomePage() {
     isPracticePlaying,
     activeProgress,
     isTimeAttackPlaying,
+    isLoopingMatchPlaying,
     activeGuideProgressIndex,
     activeProgressPercent,
     activeWpm,
@@ -1213,7 +1214,7 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isTimeAttackPlaying,
+          loop: isLoopingMatchPlaying,
           inputMode: inputModeRef.current
         });
         inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedText) ? "kana" : "romaji";
@@ -1226,7 +1227,7 @@ export default function HomePage() {
         void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
         emitProgress(
           typedText,
-          !isTimeAttackPlaying &&
+          !isLoopingMatchPlaying &&
             (inputModeRef.current === "kana"
               ? next.progress.progressIndex
               : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
@@ -1244,7 +1245,7 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isTimeAttackPlaying,
+          loop: isLoopingMatchPlaying,
           inputMode: inputModeRef.current
         });
         inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedText) ? "kana" : "romaji";
@@ -1274,7 +1275,7 @@ export default function HomePage() {
     [
       activeTypingText,
       emitProgress,
-      isTimeAttackPlaying,
+      isLoopingMatchPlaying,
       finishPractice,
       practiceResult,
       practiceSession,
@@ -1322,7 +1323,7 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isTimeAttackPlaying,
+          loop: isLoopingMatchPlaying,
           inputMode: inputModeRef.current
         });
         inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedKey) ? "kana" : "romaji";
@@ -1336,7 +1337,7 @@ export default function HomePage() {
         void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
         emitProgress(
           typedKey,
-          !isTimeAttackPlaying &&
+          !isLoopingMatchPlaying &&
             (inputModeRef.current === "kana"
               ? next.progress.progressIndex
               : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
@@ -1354,7 +1355,7 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isTimeAttackPlaying,
+          loop: isLoopingMatchPlaying,
           inputMode: inputModeRef.current
         });
         inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedKey) ? "kana" : "romaji";
@@ -1392,7 +1393,7 @@ export default function HomePage() {
     emitProgress,
     finishPractice,
     consumeDailyAttempt,
-    isTimeAttackPlaying,
+    isLoopingMatchPlaying,
     practiceResult,
     practiceSession,
     recordMistakeSamples,
@@ -2137,7 +2138,7 @@ export default function HomePage() {
                   expectedText={activeTypingText}
                   progressIndex={activeGuideProgressIndex}
                   acceptingInput={acceptingTextInput}
-                  loop={isTimeAttackPlaying}
+                  loop={isLoopingMatchPlaying}
                   inputKey={typingInputKey}
                   onTextInput={handleTypedText}
                 />

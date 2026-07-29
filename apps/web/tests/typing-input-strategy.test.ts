@@ -69,21 +69,41 @@ describe("typing input strategy", () => {
     });
   });
 
-  it("loops romaji progress for time attack input", () => {
+  it("loops romaji progress across two prompt cycles", () => {
     const plan = buildRomajiTypingPlan("あ");
     const result = advanceTypingProgress({
       ...baseInput,
       previous: createEmptyProgress(),
-      typedText: "aa",
+      typedText: "aaa",
       deviceKind: "desktop",
       romajiPlan: plan,
       loop: true
     });
 
     expect(result.progress).toMatchObject({
-      progressIndex: 2,
-      correctCharacters: 2,
-      totalTypedCharacters: 2,
+      progressIndex: 3,
+      correctCharacters: 3,
+      totalTypedCharacters: 3,
+      mistakes: 0
+    });
+  });
+
+  it("loops kana progress across two prompt cycles", () => {
+    const result = advanceTypingProgress({
+      ...baseInput,
+      previous: createEmptyProgress(),
+      typedText: "かなか",
+      deviceKind: "mobile",
+      canonicalText: "かな",
+      displayText: "かな",
+      romajiPlan: null,
+      loop: true
+    });
+
+    expect(result.progress).toMatchObject({
+      progressIndex: 3,
+      correctCharacters: 3,
+      totalTypedCharacters: 3,
       mistakes: 0
     });
   });
