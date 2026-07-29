@@ -1,4 +1,5 @@
 export * from "./cloudflare-events.js";
+export * from "./cosmetics.js";
 export * from "./events.js";
 export * from "./game-state.js";
 export * from "./prompts.js";
