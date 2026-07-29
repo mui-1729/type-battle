@@ -1209,6 +1209,25 @@ select {
   .isPractice .headerBackSlot { align-self: center; }
   .isBattle .headerActions,
   .isPractice .headerActions { margin-left: auto; }
+  .isBattle.hasResult .topBar,
+  .isPractice.hasResult .topBar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 8px;
+  }
+  .isBattle.hasResult .headerBackSlot,
+  .isPractice.hasResult .headerBackSlot { min-width: 0; }
+  .isBattle.hasResult .headerBackButton,
+  .isPractice.hasResult .headerBackButton {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 10px;
+    font-size: 12px;
+    line-height: 1.2;
+    white-space: normal;
+  }
+  .isBattle.hasResult .statusPill,
+  .isPractice.hasResult .statusPill { padding-inline: 12px; }
   .isBattle .workspace,
   .isPractice .workspace { height: 100%; min-height: 0; }
   .isBattle .matchSurface,
