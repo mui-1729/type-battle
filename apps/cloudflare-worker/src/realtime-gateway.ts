@@ -91,7 +91,7 @@ const ROOM_LIFECYCLE_COMMANDS = new Set<CloudflareClientMessageType>([
   "client:room:leave",
   "client:player:ready",
   "client:player:reaction",
-  "client:player:accessory",
+  "client:player:equipment",
   "client:room:setPromptCategory",
   "client:room:setBotDifficulty",
   "client:room:setMatchRule",

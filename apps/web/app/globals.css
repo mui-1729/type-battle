@@ -1167,14 +1167,6 @@ textarea::placeholder {
   stroke-dasharray: 5 4;
 }
 
-.stickFigureAccessory {
-  fill: currentColor;
-  stroke: currentColor;
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
 .stickFigure[data-status="forfeited"] {
   opacity: 0.34;
 }
@@ -2690,6 +2682,437 @@ textarea::placeholder {
 
   .modeCardDescription {
     font-size: 13px;
+  }
+}
+
+.homeCustomizationBar {
+  display: grid;
+  grid-template-columns: 76px minmax(120px, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--surface-strong) 82%, transparent);
+}
+
+.homeCustomizationAvatar {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  overflow: visible;
+  border-radius: 18px;
+  background: var(--accent-soft);
+}
+
+.homeCustomizationAvatar .stickFigure {
+  width: 62px;
+  height: 78px;
+}
+
+.homeCustomizationCopy {
+  display: grid;
+  gap: 4px;
+}
+
+.homeCustomizationCopy > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .12em;
+}
+
+.homeCustomizationCopy strong,
+.coinBalance {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.coinBalance {
+  min-height: 38px;
+  padding: 7px 11px;
+  color: #8a5b00;
+  border: 1px solid color-mix(in srgb, #f4b400 45%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, #ffd54a 24%, var(--surface));
+}
+
+.coinBalance span {
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.cosmeticModal {
+  position: relative;
+  width: min(960px, 100%);
+  overflow: hidden;
+}
+
+.cosmeticModalHeader {
+  flex: 0 0 auto;
+}
+
+.cosmeticModalHeaderActions,
+.cosmeticViewTabs,
+.cosmeticSlotTabs,
+.cosmeticConfirmActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cosmeticViewTabs,
+.cosmeticSlotTabs {
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--surface-muted);
+}
+
+.cosmeticViewTabs button,
+.cosmeticSlotTabs button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  flex: 1;
+  padding: 8px 14px;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 11px;
+  background: transparent;
+  font-weight: 900;
+}
+
+.cosmeticViewTabs button.active,
+.cosmeticSlotTabs button.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.cosmeticModalBody {
+  display: grid;
+  grid-template-columns: minmax(210px, .7fr) minmax(0, 1.8fr);
+  gap: 18px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.cosmeticPreview,
+.cosmeticCatalog {
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface-strong);
+}
+
+.cosmeticPreview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 18px;
+  text-align: center;
+}
+
+.cosmeticPreviewFigure {
+  display: grid;
+  place-items: center;
+  width: 150px;
+  height: 170px;
+  margin-bottom: 4px;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 50% 32%, var(--accent-soft), transparent 55%),
+    var(--surface-muted);
+}
+
+.cosmeticPreviewFigure .stickFigure {
+  width: 126px;
+  height: 156px;
+  overflow: visible;
+}
+
+.cosmeticPreview h3,
+.cosmeticPreview p {
+  margin: 0;
+}
+
+.cosmeticRarity {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+}
+
+.rarity-normal.cosmeticRarity { color: var(--muted); }
+.rarity-rare.cosmeticRarity { color: #1677d2; }
+.rarity-epic.cosmeticRarity { color: #7c3aed; }
+.rarity-legendary.cosmeticRarity { color: #c17a00; }
+
+.cosmeticPrice,
+.ownedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+}
+
+.ownedBadge {
+  color: #087b4d;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.cosmeticCatalog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.cosmeticCatalogGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding-right: 3px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cosmeticCatalogCard {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px 8px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.cosmeticCatalogCard:hover,
+.cosmeticCatalogCard:focus-visible,
+.cosmeticCatalogCard.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.cosmeticCatalogCard.rarity-legendary {
+  background: linear-gradient(145deg, color-mix(in srgb, #ffd54a 15%, var(--surface)), var(--surface));
+}
+
+.cosmeticCatalogCard strong,
+.cosmeticCatalogCard small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cosmeticCatalogCard small {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.cosmeticCatalogMiniature {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 78px;
+}
+
+.cosmeticCatalogMiniature .stickFigure {
+  width: 66px;
+  height: 76px;
+  overflow: visible;
+}
+
+.cosmeticLock {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: var(--muted);
+}
+
+.cosmeticConfirm {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--backdrop) 76%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.cosmeticConfirm > div {
+  display: grid;
+  gap: 12px;
+  width: min(430px, 100%);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.cosmeticConfirm h3,
+.cosmeticConfirm p {
+  margin: 0;
+}
+
+.cosmeticConfirmActions {
+  justify-content: flex-end;
+}
+
+.quickEquipmentPicker {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quickEquipmentPicker label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.quickEquipmentPicker select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 8px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.resultFigure {
+  display: grid;
+  place-items: center;
+  min-height: 92px;
+}
+
+.resultFigure .stickFigure {
+  width: 74px;
+  height: 96px;
+  overflow: visible;
+}
+
+.styleCoinReward {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, #f4b400 42%, var(--line));
+  border-radius: 16px;
+  background: linear-gradient(135deg, color-mix(in srgb, #ffd54a 18%, var(--surface)), var(--surface));
+}
+
+.styleCoinReward > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.styleCoinReward > div strong {
+  margin-left: auto;
+  color: #9b6500;
+  font-size: 20px;
+}
+
+.styleCoinReward ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.styleCoinReward li {
+  display: inline-flex;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #ffd54a 18%, var(--surface-strong));
+  font-size: 12px;
+}
+
+.styleCoinReward p {
+  margin: 0;
+  color: var(--muted);
+  text-align: right;
+}
+
+@media (max-width: 760px) {
+  .homeCustomizationBar {
+    grid-template-columns: 62px minmax(0, 1fr);
+  }
+
+  .homeCustomizationBar > button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .cosmeticModal {
+    overflow-y: auto;
+  }
+
+  .cosmeticModalBody {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .cosmeticPreviewFigure {
+    width: 120px;
+    height: 126px;
+  }
+
+  .cosmeticPreviewFigure .stickFigure {
+    width: 96px;
+    height: 118px;
+  }
+
+  .cosmeticCatalog {
+    min-height: 560px;
+    overflow: visible;
+  }
+
+  .cosmeticCatalogGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+  }
+
+  .cosmeticPreview {
+    min-height: 360px;
+  }
+}
+
+@media (max-width: 420px) {
+  .cosmeticModalHeaderActions {
+    align-items: flex-end;
+    flex-direction: column-reverse;
+  }
+
+  .cosmeticCatalogGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .cosmeticCatalogMiniature {
+    width: 58px;
+    height: 66px;
+  }
+
+  .cosmeticConfirmActions {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 }
 

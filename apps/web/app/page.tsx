@@ -18,6 +18,7 @@ import {
   validateNickname
 } from "@type-battle/shared";
 import type {
+  EquipmentSelection,
   MatchRule,
   MatchResult,
   PlayerResult,
@@ -42,6 +43,7 @@ import { TypingPrompt } from "./_components/typing-prompt";
 import { TutorialOverlay } from "./_components/tutorial-overlay";
 import { PlayerIdentity } from "./_components/player-identity";
 import { PracticeStage } from "./_components/practice-stage";
+import { CosmeticCustomizationModal } from "./_components/cosmetic-customization-modal";
 import { SectionHeading, SurfaceCard } from "./_components/ui";
 import {
   createEmptyProgress,
@@ -121,6 +123,18 @@ import {
   updateMistakeTrendRecord,
   type MistakeTrendRecord
 } from "../lib/mistake-trends";
+import {
+  awardStyleCoins,
+  createMatchRewardKey,
+  createPracticeRewardKey,
+  DEFAULT_COSMETIC_PROGRESS,
+  equipCosmetic,
+  loadCosmeticProgress,
+  persistCosmeticProgress,
+  purchaseCosmetic,
+  type CosmeticProgress,
+  type StyleCoinRewardBreakdown,
+} from "../lib/cosmetic-progress";
 
 type ClientSocket = RealtimeSocket;
 
@@ -133,6 +147,7 @@ const DAILY_CHALLENGE_RESET_TIME_FORMATTER = new Intl.DateTimeFormat("ja-JP", {
 });
 type SoloSetupView = "menu" | "practice" | "daily" | "mistakes";
 type ExitRequest = "room" | "practice";
+type CustomizationView = "shop" | "equipment";
 
 const REALTIME_TRANSPORT: RealtimeTransport = "cloudflare";
 const CLOUDFLARE_REALTIME_URL = process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL?.trim() ?? "";
@@ -163,7 +178,10 @@ export default function HomePage() {
   const [homeMode, setHomeMode] = useState<HomeMode | null>(null);
   const [soloSetupView, setSoloSetupView] = useState<SoloSetupView>("menu");
   const [visualViewportHeight, setVisualViewportHeight] = useState<number | null>(null);
-  const [accessoryIndex, setAccessoryIndex] = useState(0);
+  const [cosmeticProgress, setCosmeticProgress] = useState<CosmeticProgress>(DEFAULT_COSMETIC_PROGRESS);
+  const [cosmeticProgressHydrated, setCosmeticProgressHydrated] = useState(false);
+  const [latestCoinReward, setLatestCoinReward] = useState<StyleCoinRewardBreakdown | null>(null);
+  const [customizationView, setCustomizationView] = useState<CustomizationView | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [room, setRoom] = useState<RoomState | null>(null);
   const [remoteReaction, setRemoteReaction] = useState<{ playerId: string; reaction: QuickReaction } | null>(null);
@@ -398,13 +416,8 @@ export default function HomePage() {
     resultRef.current = null;
     setResult(null);
     setLastProgressSentAt(null);
+    setLatestCoinReward(null);
   }, []);
-
-  useEffect(() => {
-    if (currentPlayer?.accessoryIndex !== undefined) {
-      setAccessoryIndex(currentPlayer.accessoryIndex);
-    }
-  }, [currentPlayer?.accessoryIndex]);
 
   const prepareTypingInput = useCallback(() => {
     typingInputRef.current?.focus({ preventScroll: true });
@@ -957,6 +970,8 @@ export default function HomePage() {
         correctCharacters: finalProgress.correctCharacters,
         totalTypedCharacters: finalProgress.totalTypedCharacters,
         mistakes: finalProgress.mistakes,
+        headAccessoryId: cosmeticProgress.headAccessoryId,
+        heldItemId: cosmeticProgress.heldItemId,
         maxStreak: finalProgress.maxStreak,
         currentStreak: finalProgress.currentStreak,
         wpm: calculateWpm(finalProgress.correctCharacters, finishTimeMs),
@@ -993,7 +1008,14 @@ export default function HomePage() {
 
       disconnectPracticeSocket();
     },
-    [consumeDailyAttempt, dailyChallengeInfo.challengeKey, disconnectPracticeSocket, practiceSession]
+    [
+      consumeDailyAttempt,
+      cosmeticProgress.headAccessoryId,
+      cosmeticProgress.heldItemId,
+      dailyChallengeInfo.challengeKey,
+      disconnectPracticeSocket,
+      practiceSession,
+    ]
   );
 
   useEffect(() => {
@@ -1014,6 +1036,8 @@ export default function HomePage() {
     setSettings(loadedSettings);
     setSettingsHydrated(true);
     setTutorialStep(loadedSettings.tutorialSeen ? null : 0);
+    setCosmeticProgress(loadCosmeticProgress(window.localStorage));
+    setCosmeticProgressHydrated(true);
 
     if (!realtimeConfigured) {
       setConnected(false);
@@ -1050,6 +1074,88 @@ export default function HomePage() {
     applyPlayerSettingsToDocument(document, settings);
     settingsRef.current = settings;
   }, [settings, settingsHydrated]);
+
+  useEffect(() => {
+    if (!cosmeticProgressHydrated) {
+      return;
+    }
+    persistCosmeticProgress(window.localStorage, cosmeticProgress);
+  }, [cosmeticProgress, cosmeticProgressHydrated]);
+
+  useEffect(() => {
+    if (
+      !cosmeticProgressHydrated
+      || !room
+      || !currentPlayer
+      || (room.status !== "waiting" && room.status !== "finished")
+      || (
+        currentPlayer.headAccessoryId === cosmeticProgress.headAccessoryId
+        && currentPlayer.heldItemId === cosmeticProgress.heldItemId
+      )
+    ) {
+      return;
+    }
+    socketRef.current?.emit("player:equipment", {
+      roomCode: room.roomCode,
+      headAccessoryId: cosmeticProgress.headAccessoryId,
+      heldItemId: cosmeticProgress.heldItemId,
+    });
+  }, [
+    cosmeticProgress.headAccessoryId,
+    cosmeticProgress.heldItemId,
+    cosmeticProgressHydrated,
+    currentPlayer,
+    room,
+  ]);
+
+  useEffect(() => {
+    if (!cosmeticProgressHydrated || !result || !room || !playerId) {
+      return;
+    }
+    const player = result.players.find((entry) => entry.id === playerId);
+    if (!player) {
+      return;
+    }
+    setCosmeticProgress((current) => {
+      const reward = awardStyleCoins(current, {
+        rewardKey: createMatchRewardKey(room.roomCode, room.round ?? 0, playerId),
+        source: "match",
+        completed: !player.forfeited && player.finishStatus !== "forfeited",
+        won: player.rank === 1,
+        typedCharacters: player.totalTypedCharacters,
+        accuracy: player.accuracy,
+        mistakes: player.mistakes,
+      });
+      if (reward.awarded) {
+        setLatestCoinReward(reward.breakdown);
+      }
+      return reward.progress;
+    });
+  }, [cosmeticProgressHydrated, playerId, result, room]);
+
+  useEffect(() => {
+    if (!cosmeticProgressHydrated || !practiceResult || !practiceSession) {
+      return;
+    }
+    const player = practiceResult.players[0];
+    if (!player) {
+      return;
+    }
+    setCosmeticProgress((current) => {
+      const reward = awardStyleCoins(current, {
+        rewardKey: createPracticeRewardKey(practiceSession.practiceId),
+        source: practiceSession.mode,
+        completed: true,
+        typedCharacters: player.totalTypedCharacters,
+        accuracy: player.accuracy,
+        mistakes: player.mistakes,
+      });
+      if (reward.awarded) {
+        setLatestCoinReward(reward.breakdown);
+      }
+      return reward.progress;
+    });
+  }, [cosmeticProgressHydrated, practiceResult, practiceSession]);
 
   useEffect(() => {
     if (!guestSession) {
@@ -1844,16 +1950,31 @@ export default function HomePage() {
 
     await navigator.clipboard.writeText(room.roomCode);
   };
-  const shiftAccessory = (direction: -1 | 1) => {
-    const nextAccessoryIndex = (accessoryIndex + direction + 4) % 4;
-    setAccessoryIndex(nextAccessoryIndex);
-    if (socketRef.current && room) {
-      socketRef.current.emit("player:accessory", {
-        roomCode: room.roomCode,
-        accessoryIndex: nextAccessoryIndex
+  const changeEquipment = useCallback((equipment: EquipmentSelection) => {
+    setCosmeticProgress((current) => {
+      const withHead = equipCosmetic(current, {
+        slot: "head",
+        id: equipment.headAccessoryId,
       });
-    }
-  };
+      return equipCosmetic(withHead, {
+        slot: "held",
+        id: equipment.heldItemId,
+      });
+    });
+  }, []);
+  const purchaseSelectedCosmetic = useCallback(
+    (selection: Parameters<typeof purchaseCosmetic>[1]) => {
+      const purchase = purchaseCosmetic(cosmeticProgress, selection);
+      if (purchase.ok) {
+        setCosmeticProgress(purchase.progress);
+        return "purchased" as const;
+      }
+      return purchase.reason === "insufficient-coins"
+        ? "insufficient-coins" as const
+        : "already-owned" as const;
+    },
+    [cosmeticProgress],
+  );
   const isRecoveringStoredRoom = storedRoomRecovery.status !== "idle";
   const showHomeModeMenu = !room && !practiceSession && !practiceResult && homeMode === null && !isRecoveringStoredRoom;
   const showModeSetup = !room && !practiceSession && !practiceResult && homeMode !== null;
@@ -1907,6 +2028,7 @@ export default function HomePage() {
       <GameHeader
         connected={connected}
         realtimeConfigured={realtimeConfigured}
+        equipment={cosmeticProgress}
         onOpenSettings={() => setSettingsOpen(true)}
         exitAction={room ? { label: room.status === "finished" ? "ルームを退出" : "対戦を退出", onClick: requestRoomExit } : practiceSession || practiceResult ? { label: practiceResult ? "ひとり用メニューへ" : "練習をやめる", onClick: requestPracticeExit } : showModeSetup && homeMode === "solo" && soloSetupView !== "menu" ? { label: "ひとり用メニューへ", onClick: () => setSoloSetupView("menu") } : showModeSetup ? { label: "モード選択へ", onClick: () => setHomeMode(null) } : undefined}
         status={room && room.status !== "waiting" ? (result ? "result" : room.status) : practiceSession || practiceResult ? (practiceResult ? "result" : "playing") : undefined}
@@ -1927,6 +2049,10 @@ export default function HomePage() {
         <HomeModeMenu
           onBattle={() => setHomeMode("battle")}
           onSolo={() => { setSoloSetupView("menu"); setHomeMode("solo"); }}
+          equipment={cosmeticProgress}
+          styleCoins={cosmeticProgress.styleCoins}
+          onOpenShop={() => setCustomizationView("shop")}
+          onOpenEquipment={() => setCustomizationView("equipment")}
         />
       ) : (
       <section className={showModeSetup ? "workspace modeWorkspace" : "workspace"}>
@@ -2027,7 +2153,7 @@ export default function HomePage() {
                   <strong>{visibleDailyChallengeRecord?.points ?? 0}/3</strong>
                 </div>
               </div>
-              <PracticeStage progressPercent={35} mode="daily" />
+              <PracticeStage progressPercent={35} mode="daily" equipment={cosmeticProgress} />
               <button
                 className="secondaryButton"
                 type="button"
@@ -2186,9 +2312,10 @@ export default function HomePage() {
                 <LobbyPrep
                   room={room}
                   localPlayerId={playerId}
-                  accessoryIndex={accessoryIndex}
-                  onPreviousAccessory={() => shiftAccessory(-1)}
-                  onNextAccessory={() => shiftAccessory(1)}
+                  equipment={cosmeticProgress}
+                  ownedHeadAccessoryIds={cosmeticProgress.ownedHeadAccessoryIds}
+                  ownedHeldItemIds={cosmeticProgress.ownedHeldItemIds}
+                  onEquipmentChange={changeEquipment}
                   onCopyRoomCode={copyRoomCode}
                   onToggleReady={setReady}
                   onMatchRuleChange={setMatchRule}
@@ -2211,12 +2338,16 @@ export default function HomePage() {
                   retryPending={rematchPending}
                   retryError={rematchError}
                   rematchReady={Boolean(currentPlayer?.ready)}
+                  coinReward={latestCoinReward}
+                  styleCoinBalance={cosmeticProgress.styleCoins}
+                  equipment={cosmeticProgress}
+                  livePlayers={room?.players}
+                  ownedHeadAccessoryIds={cosmeticProgress.ownedHeadAccessoryIds}
+                  ownedHeldItemIds={cosmeticProgress.ownedHeldItemIds}
+                  onEquipmentChange={changeEquipment}
                   onPracticeNext={!room && activePracticeMode === "practice" ? startPractice : undefined}
                   onPracticeMenu={!room ? returnToPracticeMenu : undefined}
                   {...(room ? {
-                    accessoryIndex,
-                    onPreviousAccessory: () => shiftAccessory(-1),
-                    onNextAccessory: () => shiftAccessory(1),
                     onOpenSettings: () => setMatchSettingsOpen(true),
                     onReaction: sendReaction,
                     reactionFeedback,
@@ -2237,7 +2368,11 @@ export default function HomePage() {
                       matchRemainingMs={matchTimerMs}
                     />
                   ) : practiceSession ? (
-                    <PracticeStage progressPercent={activeProgressPercent} mode={activePracticeMode} />
+                    <PracticeStage
+                      progressPercent={activeProgressPercent}
+                      mode={activePracticeMode}
+                      equipment={cosmeticProgress}
+                    />
                   ) : null}
 
               {activePromptText ? (
@@ -2339,7 +2474,7 @@ export default function HomePage() {
       )}
 
       {settingsOpen ? (
-        <PlayerSettingsModal
+      <PlayerSettingsModal
           settings={settings}
           setSettings={setSettings}
           setNickname={setNickname}
@@ -2348,6 +2483,15 @@ export default function HomePage() {
             setSettingsOpen(false);
             setTutorialStep(0);
           }}
+      />
+      ) : null}
+      {customizationView ? (
+        <CosmeticCustomizationModal
+          initialView={customizationView}
+          progress={cosmeticProgress}
+          onPurchase={purchaseSelectedCosmetic}
+          onEquip={changeEquipment}
+          onClose={() => setCustomizationView(null)}
         />
       ) : null}
       {tutorialStep !== null ? (

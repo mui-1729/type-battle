@@ -2,6 +2,7 @@ import type {
   AckResponse,
   BotDifficulty,
   DeviceKind,
+  EquipmentSelection,
   MatchRule,
   MatchResult,
   Prompt,
@@ -69,7 +70,7 @@ export type ClientToServerEvents = {
     payload: RoomCodePayload & { reaction: QuickReaction },
     ack: (response: AckResponse<null>) => void
   ) => void;
-  "player:accessory": (payload: RoomCodePayload & { accessoryIndex: number }) => void;
+  "player:equipment": (payload: RoomCodePayload & EquipmentSelection) => void;
   "room:setPromptCategory": (
     payload: RoomCodePayload & { category: PromptCategory },
     ack: (response: AckResponse<RoomState>) => void

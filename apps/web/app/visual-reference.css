@@ -307,19 +307,8 @@ select {
 
 .gameLogoWordmark::before,
 .gameLogoWordmark::after {
-  position: absolute;
-  right: 5%;
-  left: -6%;
-  z-index: -1;
-  height: 9%;
-  content: "";
-  background: currentColor;
-  opacity: .75;
-  transform: skewX(-24deg);
+  content: none;
 }
-
-.gameLogoWordmark::before { top: 27%; }
-.gameLogoWordmark::after { top: 65%; left: -11%; right: 18%; height: 5%; opacity: .45; }
 
 .gameLogoWordmark > span {
   color: var(--game-logo-ink);
@@ -338,7 +327,7 @@ select {
 .gameLogo .stickFigure {
   width: clamp(56px, 6.2vw, 108px);
   height: clamp(64px, 6.6vw, 116px);
-  margin: 0 0 -5px -4px;
+  margin: 0 0 -5px clamp(10px, 1.2vw, 18px);
   color: var(--game-logo-ink);
   filter: none;
 }

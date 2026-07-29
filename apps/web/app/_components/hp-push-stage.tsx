@@ -31,7 +31,7 @@ function HpBattlePlayerCard({ player, view, advantage, eliminated }: HpBattlePla
   const hpRatio = toHpRatio(player.hp, player.maxHp) ?? 0;
   const actionLabel = getHpActionLabel(player, view, advantage, eliminated);
   return (
-    <article className={`hpBattlePlayer hpBattlePlayer${player.side === "left" ? "Left" : "Right"}`} data-side={player.side} data-player-id={player.id} data-status={player.status} data-hp={player.hp ?? 0} data-max-hp={player.maxHp ?? 0} data-advantage={player.side === advantage ? "leading" : advantage === "even" ? "even" : "trailing"} data-impact={getDamageLevel(player, eliminated)} data-attack-style={getAttackStyle(player.accessoryIndex)}>
+    <article className={`hpBattlePlayer hpBattlePlayer${player.side === "left" ? "Left" : "Right"}`} data-side={player.side} data-player-id={player.id} data-status={player.status} data-hp={player.hp ?? 0} data-max-hp={player.maxHp ?? 0} data-advantage={player.side === advantage ? "leading" : advantage === "even" ? "even" : "trailing"} data-impact={getDamageLevel(player, eliminated)} data-attack-style="punch">
       <header className="hpBattlePlayerHeader">
         <div className="hpBattleIdentity"><span className="hpBattleSlot">{player.side === "left" ? "1P" : "2P"}</span><strong title={player.nickname}>{player.nickname}</strong>{player.isLocal ? <span className="raceYouBadge">YOU</span> : null}</div>
         <span className="hpBattleAction">{actionLabel}</span>
@@ -43,7 +43,7 @@ function HpBattlePlayerCard({ player, view, advantage, eliminated }: HpBattlePla
       <div className="hpBattleMeta"><span>ミス {player.mistakes}</span><span className="hpBattleGuards" aria-label={`ミスガード ${player.mistakeGuards}個`}>ガード {renderGuards(player.mistakeGuards)}</span></div>
       <div className="hpBattleFigure" data-pose={getHpPose(player, view, eliminated)}>
         <span className="hpBattleAttackBurst" data-attack={player.currentStreak > 0 ? "active" : "idle"} key={`${player.id}-${player.progressRatio}-${player.mistakes}`} aria-hidden="true"><span /><span /><span /></span>
-        <StickFigure side={player.side} pose={getHpPose(player, view, eliminated)} status={player.status} accessoryIndex={player.accessoryIndex} />
+        <StickFigure side={player.side} pose={getHpPose(player, view, eliminated)} status={player.status} headAccessoryId={player.headAccessoryId} heldItemId={player.heldItemId} />
       </div>
     </article>
   );
@@ -57,10 +57,6 @@ function getDamageLevel(player: BattleStagePlayer, eliminated: boolean): "none" 
   if (eliminated) return "large";
   if (player.status === "forfeited" || player.status === "reconnecting") return "none";
   return player.currentStreak === 0 && player.mistakes > 0 ? "small" : "none";
-}
-
-function getAttackStyle(accessoryIndex = 0): "punch" | "cap" | "spirit" | "beam" {
-  return ["punch", "cap", "spirit", "beam"][accessoryIndex % 4] as "punch" | "cap" | "spirit" | "beam";
 }
 
 function getHpPose(player: BattleStagePlayer, view: BattleStageViewModel, eliminated: boolean): StickFigurePose {

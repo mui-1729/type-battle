@@ -40,6 +40,7 @@ export type StyleCoinRewardInput = {
   source: "practice" | "daily" | "match";
   completed: boolean;
   won?: boolean;
+  typedCharacters: number;
   accuracy: number;
   mistakes: number;
 };
@@ -194,8 +195,10 @@ export function calculateStyleCoinReward(
   const safeMistakes = Number.isFinite(input.mistakes)
     ? Math.max(0, Math.floor(input.mistakes))
     : 0;
-  const highAccuracy = safeAccuracy >= 95 ? 5 : 0;
-  const perfect = safeAccuracy === 100 && safeMistakes === 0 ? 5 : 0;
+  const hasTypingResult = Number.isFinite(input.typedCharacters)
+    && input.typedCharacters > 0;
+  const highAccuracy = hasTypingResult && safeAccuracy >= 95 ? 5 : 0;
+  const perfect = hasTypingResult && safeAccuracy === 100 && safeMistakes === 0 ? 5 : 0;
 
   return {
     completion,

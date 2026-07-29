@@ -14,11 +14,14 @@ import {
   pickPrompt,
   rankPlayers,
   resolveTimeAttackPrompts,
+  DEFAULT_EQUIPMENT,
 } from "@type-battle/shared";
 import { isValidRoomCode, normalizeNickname, validateNickname } from "@type-battle/shared";
 import type {
   BotDifficulty,
   DeviceKind,
+  HeadAccessoryId,
+  HeldItemId,
   MatchResult,
   MatchRule,
   MatchStatus,
@@ -39,7 +42,7 @@ import { RateLimiter } from "./rate-limiter.js";
 import {
   isCloudflareClientMessageType,
   isWebSocketUpgrade,
-  parseAccessoryPayload,
+  parseEquipmentPayload,
   parseBotDifficultyPayload,
   parseClientMessage,
   parseCreateRoomPayload,
@@ -208,7 +211,7 @@ const CONTROL_COMMAND_RATE_LIMIT_ERROR = "操作が多すぎます。少し待�
 const CONTROL_COMMAND_TYPES = new Set<CloudflareClientMessageType>([
   "client:player:ready",
   "client:player:reaction",
-  "client:player:accessory",
+  "client:player:equipment",
   "client:room:setPromptCategory",
   "client:room:setBotDifficulty",
   "client:room:setMatchRule",
@@ -487,8 +490,8 @@ export class RoomAuthorityDurableObject {
       case "client:player:reaction":
         await this.handlePlayerReaction(socketId, message.id, message.payload);
         return;
-      case "client:player:accessory":
-        await this.handlePlayerAccessory(socketId, message.payload);
+      case "client:player:equipment":
+        await this.handlePlayerEquipment(socketId, message.payload);
         return;
       case "client:room:setPromptCategory":
         await this.handleSetPromptCategory(socketId, message.id, message.payload);
@@ -750,8 +753,8 @@ export class RoomAuthorityDurableObject {
     this.sendAck(socketId, messageId, "client:player:reaction", { ok: true, data: null });
   }
 
-  private async handlePlayerAccessory(socketId: string, payload: unknown): Promise<void> {
-    const parsedPayload = parseAccessoryPayload(payload);
+  private async handlePlayerEquipment(socketId: string, payload: unknown): Promise<void> {
+    const parsedPayload = parseEquipmentPayload(payload);
     const context = parsedPayload ? this.getContext(socketId, parsedPayload.roomCode) : null;
 
     if (!parsedPayload || !context || (context.room.status !== "waiting" && context.room.status !== "finished")) {
@@ -759,11 +762,15 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    if ((context.player.accessoryIndex ?? 0) === parsedPayload.accessoryIndex) {
+    if (
+      context.player.headAccessoryId === parsedPayload.headAccessoryId
+      && context.player.heldItemId === parsedPayload.heldItemId
+    ) {
       return;
     }
 
-    context.player.accessoryIndex = parsedPayload.accessoryIndex;
+    context.player.headAccessoryId = parsedPayload.headAccessoryId;
+    context.player.heldItemId = parsedPayload.heldItemId;
     context.room.lastActivityAt = Date.now();
     this.broadcastRoomState(context.room);
     this.runInBackground(this.persistRoom(context.room.roomCode), "persist_room_failed");
@@ -2544,6 +2551,7 @@ function createPlayer(
     lastInputSequence: 0,
     typingRateTokens: TYPING_INITIAL_BURST_CANONICAL,
     typingRateLastRefillAt: Date.now(),
+    ...DEFAULT_EQUIPMENT,
     wpm: 0,
     accuracy: 100
   };
@@ -2555,6 +2563,7 @@ function addBotPlayer(room: InternalRoom): void {
   }
 
   const nickname = formatBotNickname(room.botDifficulty);
+  const equipment = getBotEquipment(room.botDifficulty);
 
   room.players.set(BOT_PLAYER_ID, {
     id: BOT_PLAYER_ID,
@@ -2577,6 +2586,7 @@ function addBotPlayer(room: InternalRoom): void {
     lastInputSequence: 0,
     typingRateTokens: TYPING_INITIAL_BURST_CANONICAL,
     typingRateLastRefillAt: Date.now(),
+    ...equipment,
     wpm: 0,
     accuracy: 100
   });
@@ -2585,6 +2595,18 @@ function addBotPlayer(room: InternalRoom): void {
 function formatBotNickname(difficulty: BotDifficulty): string {
   const difficultyLabel = difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
   return `${BOT_NICKNAME} (${difficultyLabel})`;
+}
+
+function getBotEquipment(
+  difficulty: BotDifficulty
+): { headAccessoryId: HeadAccessoryId; heldItemId: HeldItemId } {
+  if (difficulty === "easy") {
+    return { headAccessoryId: "headband", heldItemId: "wood-sword" };
+  }
+  if (difficulty === "hard") {
+    return { headAccessoryId: "crown", heldItemId: "katana" };
+  }
+  return { headAccessoryId: "headphones", heldItemId: "iron-sword" };
 }
 
 function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
@@ -3173,8 +3195,12 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     publicPlayer.mistakeGuards = player.mistakeGuards;
   }
 
-  if (player.accessoryIndex !== undefined) {
-    publicPlayer.accessoryIndex = player.accessoryIndex;
+  if (player.headAccessoryId !== undefined) {
+    publicPlayer.headAccessoryId = player.headAccessoryId;
+  }
+
+  if (player.heldItemId !== undefined) {
+    publicPlayer.heldItemId = player.heldItemId;
   }
 
   if (player.maxHp !== undefined) {
@@ -3279,6 +3305,7 @@ function createRoomStateFromSnapshot(
       room.players.map((player) => [
         player.id,
         {
+          ...DEFAULT_EQUIPMENT,
           ...player,
           socketId: player.id,
           sessionId: playerSessions[player.id] ?? player.id,

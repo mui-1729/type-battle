@@ -5,6 +5,7 @@ coverage/
 playwright-report/
 test-results/
 .turbo/
+.wrangler/
 .claude/worktrees/
 .env
 .env.local

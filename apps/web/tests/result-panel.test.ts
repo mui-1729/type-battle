@@ -88,6 +88,34 @@ describe("ResultPanel", () => {
     expect(markup).toContain("<button");
   });
 
+  it("uses the latest synced opponent equipment on the result screen", () => {
+    const remotePlayer = {
+      ...result.players[0]!,
+      id: "player-2",
+      nickname: "Bob",
+      isHost: false,
+      rank: 2,
+      headAccessoryId: "headband" as const,
+      heldItemId: "wood-sword" as const,
+    };
+    const markup = renderToStaticMarkup(
+      React.createElement(ResultPanel, {
+        result: { ...result, players: [result.players[0]!, remotePlayer] },
+        isRoomResult: true,
+        localPlayerId: "player-1",
+        onRetry: vi.fn(),
+        livePlayers: [{
+          ...remotePlayer,
+          headAccessoryId: "crown",
+          heldItemId: "katana",
+        }],
+      })
+    );
+
+    expect(markup).toContain('data-head-accessory="crown"');
+    expect(markup).toContain('data-held-item="katana"');
+  });
+
   it("disables an exhausted daily retry and explains when it resets", () => {
     const markup = renderToStaticMarkup(
       React.createElement(ResultPanel, {

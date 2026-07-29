@@ -56,7 +56,7 @@ export const RaceStage = memo(function RaceStage({ view, timeAttackExpired }: Ra
                 style={{ left: `${Math.min(Math.max(ratio * 100, 4), 94)}%` }}
               >
                <span className="raceSpeedLines" aria-hidden="true" />
-                <StickFigure side={player.side} pose={getRacePose(player, view, timeAttackExpired)} status={player.status} accessoryIndex={player.accessoryIndex} />
+                <StickFigure side={player.side} pose={getRacePose(player, view, timeAttackExpired)} status={player.status} headAccessoryId={player.headAccessoryId} heldItemId={player.heldItemId} />
               </div>
             </div>
           </div>

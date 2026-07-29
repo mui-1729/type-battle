@@ -1,4 +1,6 @@
 import { getPromptsByCategory, pickPrompt } from "./prompts.js";
+import { DEFAULT_EQUIPMENT } from "./cosmetics.js";
+import type { HeadAccessoryId, HeldItemId } from "./cosmetics.js";
 import { createTimeAttackPromptSequence } from "./time-attack.js";
 import { rankPlayers } from "./scoring.js";
 import { createRoomCode, normalizeNickname } from "./validation.js";
@@ -1014,8 +1016,12 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     publicPlayer.mistakeGuards = player.mistakeGuards;
   }
 
-  if (player.accessoryIndex !== undefined) {
-    publicPlayer.accessoryIndex = player.accessoryIndex;
+  if (player.headAccessoryId !== undefined) {
+    publicPlayer.headAccessoryId = player.headAccessoryId;
+  }
+
+  if (player.heldItemId !== undefined) {
+    publicPlayer.heldItemId = player.heldItemId;
   }
 
   if (player.maxHp !== undefined) {
@@ -1044,6 +1050,7 @@ function addBotPlayer(room: InternalRoom): void {
 
   const difficultyLabel = room.botDifficulty.charAt(0).toUpperCase() + room.botDifficulty.slice(1);
   const nickname = `${BOT_NICKNAME} (${difficultyLabel})`;
+  const equipment = getBotEquipment(room.botDifficulty);
 
   room.players.set(BOT_PLAYER_ID, {
     id: BOT_PLAYER_ID,
@@ -1064,6 +1071,7 @@ function addBotPlayer(room: InternalRoom): void {
     typingProgressIndex: 0,
     pendingInput: "",
     lastInputSequence: 0,
+    ...equipment,
     wpm: 0,
     accuracy: 100
   });
@@ -1096,13 +1104,27 @@ function createPlayer(
     typingProgressIndex: 0,
     pendingInput: "",
     lastInputSequence: 0,
+    ...DEFAULT_EQUIPMENT,
     wpm: 0,
     accuracy: 100
   };
 }
 
+function getBotEquipment(
+  difficulty: BotDifficulty
+): { headAccessoryId: HeadAccessoryId; heldItemId: HeldItemId } {
+  if (difficulty === "easy") {
+    return { headAccessoryId: "headband", heldItemId: "wood-sword" };
+  }
+  if (difficulty === "hard") {
+    return { headAccessoryId: "crown", heldItemId: "katana" };
+  }
+  return { headAccessoryId: "headphones", heldItemId: "iron-sword" };
+}
+
 function toInternalPlayer(player: PlayerState, hostPlayerId: string, sessionId: string): InternalPlayer {
   return {
+    ...DEFAULT_EQUIPMENT,
     ...player,
     socketId: player.id,
     sessionId,

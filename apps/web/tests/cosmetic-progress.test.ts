@@ -124,6 +124,7 @@ describe("style coin rewards", () => {
       rewardKey: "practice:1",
       source: "practice",
       completed: true,
+      typedCharacters: 80,
       accuracy: 94,
       mistakes: 1,
     })).toEqual({
@@ -137,6 +138,7 @@ describe("style coin rewards", () => {
       rewardKey: "daily:1",
       source: "daily",
       completed: true,
+      typedCharacters: 80,
       accuracy: 95,
       mistakes: 1,
     }).total).toBe(30);
@@ -145,6 +147,7 @@ describe("style coin rewards", () => {
       source: "match",
       completed: true,
       won: true,
+      typedCharacters: 80,
       accuracy: 100,
       mistakes: 0,
     })).toEqual({
@@ -162,6 +165,7 @@ describe("style coin rewards", () => {
       source: "match",
       completed: false,
       won: true,
+      typedCharacters: 80,
       accuracy: 100,
       mistakes: 0,
     });
@@ -177,6 +181,7 @@ describe("style coin rewards", () => {
       source: "match" as const,
       completed: true,
       won: false,
+      typedCharacters: 80,
       accuracy: 100,
       mistakes: 0,
     };
@@ -187,6 +192,24 @@ describe("style coin rewards", () => {
     expect(first.progress.styleCoins).toBe(30);
     expect(duplicate.awarded).toBe(false);
     expect(duplicate.progress.styleCoins).toBe(30);
+  });
+
+  it("does not grant accuracy bonuses without any typed characters", () => {
+    expect(calculateStyleCoinReward({
+      rewardKey: "match:idle",
+      source: "match",
+      completed: true,
+      won: false,
+      typedCharacters: 0,
+      accuracy: 100,
+      mistakes: 0,
+    })).toEqual({
+      completion: 20,
+      victory: 0,
+      highAccuracy: 0,
+      perfect: 0,
+      total: 20,
+    });
   });
 
   it("creates stable reward keys", () => {

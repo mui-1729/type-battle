@@ -1,6 +1,8 @@
 import type {
   MatchResult,
   MatchRule,
+  HeadAccessoryId,
+  HeldItemId,
   PlayerState,
   RoomState
 } from "@type-battle/shared";
@@ -29,7 +31,8 @@ export type BattleStagePlayer = {
   mistakes: number;
   mistakeGuards: number;
   currentStreak: number;
-  accessoryIndex?: number;
+  headAccessoryId?: HeadAccessoryId;
+  heldItemId?: HeldItemId;
   hp?: number;
   maxHp?: number;
   finishStatus?: PlayerState["finishStatus"];
@@ -216,7 +219,8 @@ export function createBattleStageViewModel(
       mistakes: player.mistakes,
       mistakeGuards: player.mistakeGuards ?? 0,
       currentStreak: player.currentStreak,
-      ...(player.accessoryIndex !== undefined ? { accessoryIndex: player.accessoryIndex } : {}),
+      ...(player.headAccessoryId !== undefined ? { headAccessoryId: player.headAccessoryId } : {}),
+      ...(player.heldItemId !== undefined ? { heldItemId: player.heldItemId } : {}),
       ...(player.hp !== undefined ? { hp: player.hp } : {}),
       ...(player.maxHp !== undefined ? { maxHp: player.maxHp } : {}),
       ...(player.finishStatus !== undefined ? { finishStatus: player.finishStatus } : {}),
