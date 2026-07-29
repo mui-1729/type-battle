@@ -8,6 +8,8 @@ import { readCloudflareClientIp } from "../src/client-ip.js";
 
 class FakeStorage {
   readonly values = new Map<string, unknown>();
+  readonly putCalls: string[] = [];
+  readonly deleteCalls: string[] = [];
   readonly failGetKeys = new Set<string>();
   readonly failPutPrefixes = new Set<string>();
   readonly failListPrefixes = new Set<string>();
@@ -42,6 +44,7 @@ class FakeStorage {
   }
 
   async put<T = unknown>(key: string, value: T): Promise<void> {
+    this.putCalls.push(key);
     if (key === "room" && this.roomPutGate) {
       await this.roomPutGate;
     }
@@ -53,6 +56,7 @@ class FakeStorage {
   }
 
   async delete(key: string): Promise<boolean> {
+    this.deleteCalls.push(key);
     return this.values.delete(key);
   }
 
@@ -920,6 +924,106 @@ describe("room authority", () => {
 
     expect(parseMessages(unjoinedSocket)).toEqual([]);
     expect(parseMessages(joinedSocket).some((message) => message.type === "server:room:state")).toBe(true);
+  });
+
+  it("ignores repeated leave commands from an unjoined socket without extending its timeout", async () => {
+    const storage = new FakeStorage();
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+    const socket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "UL34MN" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-before-unjoined-leave",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-before-unjoined-leave",
+        sessionId: "session-before-unjoined-leave"
+      }
+    }));
+    await flushAsyncWork();
+    roomAuthority.attachSocket(socket as unknown as WebSocket, { roomCode: "UL34MN" });
+    storage.putCalls.length = 0;
+    storage.deleteCalls.length = 0;
+    const storedBeforeAttack = structuredClone(storage.values.get("room"));
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      socket.receive(JSON.stringify({
+        id: `msg-unjoined-leave-${attempt}`,
+        type: "client:room:leave",
+        payload: { roomCode: "UL34MN" }
+      }));
+      await flushAsyncWork();
+      if (attempt < 5) {
+        await vi.advanceTimersByTimeAsync(5_000);
+      }
+    }
+
+    expect(storage.putCalls).toEqual([]);
+    expect(storage.deleteCalls).toEqual([]);
+    expect(storage.values.get("room")).toEqual(storedBeforeAttack);
+    expect(socket.readyState).toBe(1);
+
+    // Thirty seconds from attachment, not from the most recent no-op leave.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(socket.readyState).toBe(3);
+    expect(storage.putCalls).toEqual([]);
+    expect(storage.deleteCalls).toEqual([]);
+  });
+
+  it("persists one state update for a joined player leave", async () => {
+    const storage = new FakeStorage();
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "JL34MK" });
+    roomAuthority.attachSocket(guestSocket as unknown as WebSocket, { roomCode: "JL34MK" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-joined-leave",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-joined-leave-host",
+        sessionId: "session-joined-leave-host"
+      }
+    }));
+    await flushAsyncWork();
+    guestSocket.receive(JSON.stringify({
+      id: "msg-join-joined-leave",
+      type: "client:room:join",
+      payload: {
+        roomCode: "JL34MK",
+        nickname: "Bob",
+        guestId: "guest-joined-leave-guest",
+        sessionId: "session-joined-leave-guest"
+      }
+    }));
+    await flushAsyncWork();
+    storage.putCalls.length = 0;
+    storage.deleteCalls.length = 0;
+
+    guestSocket.receive(JSON.stringify({
+      id: "msg-leave-joined-leave",
+      type: "client:room:leave",
+      payload: { roomCode: "JL34MK" }
+    }));
+    await flushAsyncWork();
+
+    expect(storage.putCalls).toEqual(["room"]);
+    expect(storage.deleteCalls).toEqual([]);
+    expect(storage.values.get("room")).toMatchObject({
+      room: {
+        players: [expect.objectContaining({ id: "guest-joined-leave-host" })]
+      }
+    });
   });
 
   it("broadcasts quick reactions to the room and enforces the cooldown", async () => {
