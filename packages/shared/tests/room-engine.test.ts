@@ -20,6 +20,7 @@ import {
   updateProgress
 } from "../src/room-engine.js";
 import { PROMPTS } from "../src/prompts.js";
+import { buildRomajiTypingPlan } from "../src/romaji-typing.js";
 import type { Prompt } from "../src/game-state.js";
 
 afterEach(() => {
@@ -110,6 +111,51 @@ describe("room engine config", () => {
     });
     room = getRoom(created.room.roomCode);
     expect(room?.players.find((player) => player.id === "guest_alice_hp_damage")).toMatchObject({ hp: aliceHpBeforeMistake - 1, mistakes: 1 });
+  });
+
+  it("uses canonical kana damage for romaji input so device input methods are fair", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_hp_fair",
+      socketId: "socket_alice_hp_fair"
+    });
+    const joined = joinRoom({
+      roomCode: created.room.roomCode,
+      nickname: "Bob",
+      guestId: "guest_bob_hp_fair",
+      socketId: "socket_bob_hp_fair"
+    });
+    expect("error" in joined).toBe(false);
+
+    setMatchRule("socket_alice_hp_fair", created.room.roomCode, "hpBattle");
+    setReady("socket_alice_hp_fair", created.room.roomCode, true);
+    setReady("socket_bob_hp_fair", created.room.roomCode, true);
+    const started = startMatch("socket_alice_hp_fair", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    if ("error" in started || !started.room.prompt) return;
+
+    markPlaying(created.room.roomCode);
+    const plan = buildRomajiTypingPlan(started.room.prompt.typing.hiragana);
+    const divergentUnitIndex = plan.units.findIndex(
+      (unit) => unit.guide.length !== Array.from(unit.hiragana).length
+    );
+    expect(divergentUnitIndex).toBeGreaterThanOrEqual(0);
+    const completedUnits = plan.units.slice(0, divergentUnitIndex + 1);
+    const romajiInput = completedUnits.map((unit) => unit.guide).join("");
+    const canonicalDamage = completedUnits.reduce(
+      (total, unit) => total + Array.from(unit.hiragana).length,
+      0
+    );
+    expect(romajiInput.length).toBeGreaterThan(canonicalDamage);
+
+    updateProgress("socket_alice_hp_fair", {
+      roomCode: created.room.roomCode,
+      input: romajiInput,
+      sequence: 1
+    });
+
+    expect(getRoom(created.room.roomCode)?.players.find((player) => player.id === "guest_bob_hp_fair")?.hp)
+      .toBe(100 - canonicalDamage);
   });
 
   it("enters sudden death when HP is tied at the 90-second deadline", () => {
