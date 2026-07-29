@@ -1,5 +1,5 @@
-import { getPromptsByCategory, pickPrompt, PROMPTS } from "./prompts.js";
-import { getTimeAttackPromptSequence } from "./time-attack.js";
+import { getPromptsByCategory, pickPrompt } from "./prompts.js";
+import { createTimeAttackPromptSequence } from "./time-attack.js";
 import { rankPlayers } from "./scoring.js";
 import { createRoomCode, normalizeNickname } from "./validation.js";
 import {
@@ -1149,11 +1149,11 @@ function setTimeAttackPromptSequence(room: InternalRoom, seed: number): void {
     delete room.timeAttackPromptIds;
     return;
   }
-  const remaining = PROMPTS.filter((prompt) => prompt.enabled !== false && prompt.id !== room.prompt!.id);
-  room.timeAttackPromptIds = [
-    room.prompt.id,
-    ...getTimeAttackPromptSequence(remaining, seed).map((prompt) => prompt.id)
-  ];
+  room.timeAttackPromptIds = createTimeAttackPromptSequence(
+    room.prompt,
+    room.promptCategory,
+    seed
+  ).map((prompt) => prompt.id);
 }
 
 function selectPromptFromPool(

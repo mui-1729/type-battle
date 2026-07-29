@@ -93,9 +93,13 @@ export function getHomePageViewModel({
     inputModeInitialized === false || activeProgress.totalTypedCharacters === 0
       ? deviceInputMode
       : inputMode ?? (activeInputDeviceKind === "mobile" ? "kana" : "romaji");
-  const timeAttackPrompts = room?.matchRule === "timeAttack" && room.prompt
+  const timeAttackPrompts =
+    room?.matchRule === "timeAttack" &&
+    room.prompt &&
+    room.timeAttackPromptIds?.length
     ? resolveTimeAttackPrompts(room.timeAttackPromptIds, room.prompt)
     : [];
+  const usesTimeAttackPromptSequence = timeAttackPrompts.length > 0;
   const timeAttackPosition = timeAttackPrompts.length
     ? (effectiveInputMode === "kana"
         ? getTimeAttackPromptPosition(timeAttackPrompts, activeProgress.progressIndex)
@@ -107,7 +111,7 @@ export function getHomePageViewModel({
     ? timeAttackPrompts.slice(0, timeAttackPosition.promptIndex).reduce(
         (total, prompt) => total + (effectiveInputMode === "kana"
           ? Array.from(prompt.typing.hiragana).length
-          : prompt.typing.romaji.length),
+          : buildRomajiTypingPlan(prompt.typing.hiragana).guide.length),
         0
       )
     : 0;
@@ -133,9 +137,10 @@ export function getHomePageViewModel({
   const isLoopingMatchPlaying = Boolean(
     isRoomPlaying && (room?.matchRule === "timeAttack" || room?.matchRule === "hpBattle")
   );
-  const activeGuideProgressIndex =
-    isLoopingMatchPlaying && activeTypingText.length > 0
-      ? activeProgress.progressIndex - activeProgressBase
+  const activeGuideProgressIndex = usesTimeAttackPromptSequence
+    ? activeProgress.progressIndex - activeProgressBase
+    : isLoopingMatchPlaying && activeTypingText.length > 0
+      ? activeProgress.progressIndex % activeTypingText.length
       : activeProgress.progressIndex;
   const activeCanonicalProgressIndex =
     effectiveInputMode === "romaji" && activeRomajiTypingPlan
@@ -205,6 +210,7 @@ export function getHomePageViewModel({
     isPracticePlaying,
     activeProgress,
     isTimeAttackPlaying,
+    usesTimeAttackPromptSequence,
     isLoopingMatchPlaying,
     activeGuideProgressIndex,
     activeProgressPercent,

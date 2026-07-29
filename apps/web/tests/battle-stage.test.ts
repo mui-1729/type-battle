@@ -227,6 +227,50 @@ describe("race and time attack presentation", () => {
     expect(markup).not.toContain('data-outcome="winner"');
   });
 
+  it("keeps cumulative time-attack runners comparable after the first prompt", () => {
+    const room = createRoom({
+      matchRule: "timeAttack",
+      players: [
+        { ...leftPlayer, progressIndex: 24 },
+        { ...rightPlayer, progressIndex: 12 }
+      ]
+    });
+    const liveView = createBattleStageViewModel(room, null, leftPlayer.id);
+    const result: MatchResult = {
+      roomCode: room.roomCode,
+      prompt,
+      matchRule: "timeAttack",
+      players: [
+        {
+          ...leftPlayer,
+          progressIndex: 24,
+          finishStatus: "finished",
+          rank: 1,
+          maxStreak: 24,
+          finishGap: 0
+        },
+        {
+          ...rightPlayer,
+          progressIndex: 12,
+          finishStatus: "finished",
+          rank: 2,
+          maxStreak: 12,
+          finishGap: 0
+        }
+      ]
+    };
+    const resultView = createBattleStageViewModel(
+      { ...room, status: "finished" },
+      result,
+      leftPlayer.id
+    );
+
+    expect(liveView.leftPlayer?.progressRatio).toBeCloseTo(24 / 34);
+    expect(liveView.rightPlayer?.progressRatio).toBeCloseTo(12 / 34);
+    expect(resultView.leftPlayer?.progressRatio).toBe(1);
+    expect(resultView.rightPlayer?.progressRatio).toBe(0.5);
+  });
+
   it("does not render losing outcomes during the finished-state result gap", () => {
     const room = createRoom({ status: "finished" });
     const view = createBattleStageViewModel(room, null, leftPlayer.id);

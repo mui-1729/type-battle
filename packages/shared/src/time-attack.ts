@@ -1,5 +1,6 @@
-import type { Prompt } from "./game-state.js";
-import { PROMPTS } from "./prompts.js";
+import type { Prompt, PromptCategory } from "./game-state.js";
+import { getPromptsByCategory, PROMPTS } from "./prompts.js";
+import { buildRomajiTypingPlan } from "./romaji-typing.js";
 
 export type TimeAttackPromptPosition = {
   prompt: Prompt;
@@ -9,13 +10,13 @@ export type TimeAttackPromptPosition = {
 };
 
 export function getTimeAttackPromptPositionByGuide(
-  prompts: Prompt[],
+  prompts: readonly Prompt[],
   cumulativeGuideIndex: number
 ): TimeAttackPromptPosition | null {
   let cursor = Math.max(0, Math.floor(cumulativeGuideIndex));
   for (let index = 0; index < prompts.length; index += 1) {
     const prompt = prompts[index]!;
-    const guideLength = prompt.typing.romaji.length;
+    const guideLength = buildRomajiTypingPlan(prompt.typing.hiragana).guide.length;
     if (cursor < guideLength) {
       return {
         prompt,
@@ -35,7 +36,7 @@ export function getTimeAttackPromptPositionByGuide(
 }
 
 export function getTimeAttackPromptPosition(
-  prompts: Prompt[],
+  prompts: readonly Prompt[],
   cumulativeProgressIndex: number
 ): TimeAttackPromptPosition | null {
   if (prompts.length === 0) {
@@ -81,20 +82,61 @@ export function getTimeAttackPromptPosition(
   };
 }
 
-export function getTimeAttackPromptSequence(prompts: Prompt[], seed: number): Prompt[] {
-  if (prompts.length <= 1) {
-    return [...prompts];
+export function getTimeAttackPromptSequence(prompts: readonly Prompt[], seed: number): Prompt[] {
+  const uniquePrompts = [...new Map(prompts.map((prompt) => [prompt.id, prompt])).values()];
+  if (uniquePrompts.length <= 1) {
+    return uniquePrompts;
   }
 
-  const offset = Math.abs(Math.floor(seed)) % prompts.length;
-  return [...prompts.slice(offset), ...prompts.slice(0, offset)];
+  const safeSeed = Number.isFinite(seed) ? Math.abs(Math.floor(seed)) : 0;
+  const offset = safeSeed % uniquePrompts.length;
+  return [...uniquePrompts.slice(offset), ...uniquePrompts.slice(0, offset)];
 }
 
-export function resolveTimeAttackPrompts(promptIds: string[] | undefined, fallback: Prompt): Prompt[] {
+export function createTimeAttackPromptSequence(
+  firstPrompt: Prompt,
+  category: PromptCategory,
+  seed: number
+): Prompt[] {
+  const enabledPrompts = PROMPTS.filter((prompt) => prompt.enabled !== false);
+  const categoryPrompts = getPromptsByCategory(category, enabledPrompts)
+    .filter((prompt) => prompt.id !== firstPrompt.id);
+  const categoryIds = new Set(categoryPrompts.map((prompt) => prompt.id));
+  const remainingPrompts = enabledPrompts.filter(
+    (prompt) => prompt.id !== firstPrompt.id && !categoryIds.has(prompt.id)
+  );
+
+  return [
+    firstPrompt,
+    ...getTimeAttackPromptSequence(categoryPrompts, seed),
+    ...getTimeAttackPromptSequence(remainingPrompts, seed + 1)
+  ];
+}
+
+export function resolveTimeAttackPrompts(
+  promptIds: readonly string[] | undefined,
+  fallback: Prompt
+): Prompt[] {
   if (!promptIds?.length) {
     return [fallback];
   }
   const byId = new Map(PROMPTS.map((prompt) => [prompt.id, prompt]));
-  const resolved = promptIds.map((id) => byId.get(id)).filter((prompt): prompt is Prompt => Boolean(prompt));
+  const seen = new Set<string>();
+  const resolved = promptIds
+    .map((id) => byId.get(id))
+    .filter((prompt): prompt is Prompt => {
+      if (!prompt || prompt.enabled === false || seen.has(prompt.id)) {
+        return false;
+      }
+      seen.add(prompt.id);
+      return true;
+    });
   return resolved.length > 0 ? resolved : [fallback];
+}
+
+export function getTimeAttackPromptTotalLength(prompts: readonly Prompt[]): number {
+  return prompts.reduce(
+    (total, prompt) => total + Array.from(prompt.typing.hiragana).length,
+    0
+  );
 }

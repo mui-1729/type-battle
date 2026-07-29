@@ -185,8 +185,15 @@ export function createBattleStageViewModel(
   }
   const prompt = room.prompt ?? effectiveResult?.prompt;
   const promptLength = prompt ? Array.from(prompt.typing.hiragana).length : 0;
+  const mode = effectiveResult?.matchRule ?? room.matchRule;
   const { leftPlayerId, rightPlayerId } = assignBattleSides([...displayPlayers.values()], localPlayerId);
   const winnerId = effectiveResult?.players.find((player) => player.rank === 1)?.id ?? null;
+  const furthestTimeAttackProgress = mode === "timeAttack"
+    ? Math.max(0, ...[...displayPlayers.values()].map((player) => player.progressIndex))
+    : 0;
+  const timeAttackProgressScale = effectiveResult
+    ? furthestTimeAttackProgress
+    : furthestTimeAttackProgress + promptLength;
 
   const players = [...displayPlayers.values()].map((roomPlayer): BattleStagePlayer => {
     const resultPlayer = resultPlayers.get(roomPlayer.id);
@@ -201,9 +208,11 @@ export function createBattleStageViewModel(
       isBot: player.isBot,
       connected: player.connected,
       status: getBattlePlayerStatus(player, Boolean(effectiveResult), room.status),
-      progressRatio: resultPlayer?.finishStatus === "finished"
-        ? 1
-        : toProgressRatio(player.progressIndex, promptLength),
+      progressRatio: mode === "timeAttack"
+        ? toProgressRatio(player.progressIndex, timeAttackProgressScale)
+        : resultPlayer?.finishStatus === "finished"
+          ? 1
+          : toProgressRatio(player.progressIndex, promptLength),
       mistakes: player.mistakes,
       mistakeGuards: player.mistakeGuards ?? 0,
       currentStreak: player.currentStreak,
@@ -220,7 +229,7 @@ export function createBattleStageViewModel(
 
   return {
     roomCode: room.roomCode,
-    mode: effectiveResult?.matchRule ?? room.matchRule,
+    mode,
     phase: effectiveResult || room.status === "finished" ? "result" : room.status,
     players,
     leftPlayer,

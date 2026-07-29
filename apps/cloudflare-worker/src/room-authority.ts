@@ -5,13 +5,13 @@ import {
   buildRomajiTypingPlan,
   calculateAccuracy,
   calculateWpm,
+  createTimeAttackPromptSequence,
   createEmptyProgress,
   getPromptsByCategory,
   getTimeAttackPromptPosition,
-  getTimeAttackPromptSequence,
+  getTimeAttackPromptTotalLength,
   getRomajiTypingUnitIndex,
   pickPrompt,
-  PROMPTS,
   rankPlayers,
   resolveTimeAttackPrompts,
 } from "@type-battle/shared";
@@ -2899,11 +2899,11 @@ function setTimeAttackPromptSequence(room: InternalRoom, seed: number): void {
     delete room.timeAttackPromptIds;
     return;
   }
-  const remaining = PROMPTS.filter((prompt) => prompt.enabled !== false && prompt.id !== room.prompt!.id);
-  room.timeAttackPromptIds = [
-    room.prompt.id,
-    ...getTimeAttackPromptSequence(remaining, seed).map((prompt) => prompt.id)
-  ];
+  room.timeAttackPromptIds = createTimeAttackPromptSequence(
+    room.prompt,
+    room.promptCategory,
+    seed
+  ).map((prompt) => prompt.id);
 }
 function areHumansFinished(room: InternalRoom): boolean {
   if (room.matchRule === "timeAttack") {
@@ -2962,21 +2962,29 @@ function applyBotProgress(
   const promptLength = getTypingLength(room, bot);
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
+  const sequencedTimeAttack = room.matchRule === "timeAttack" && Boolean(room.timeAttackPromptIds?.length);
   const loopingMatch = room.matchRule === "timeAttack" || room.matchRule === "hpBattle";
-  const progressDelta = loopingMatch
-    ? charsToAdd
-    : Math.min(charsToAdd, Math.max(promptLength - bot.progressIndex, 0));
+  const progressLimit = sequencedTimeAttack
+    ? getTimeAttackPromptTotalLength(resolveTimeAttackPrompts(room.timeAttackPromptIds, room.prompt!))
+    : promptLength;
+  const remainingProgress = Math.max(progressLimit - bot.progressIndex, 0);
+  const progressDelta = sequencedTimeAttack || !loopingMatch
+    ? Math.min(charsToAdd, remainingProgress)
+    : charsToAdd;
+  const effectiveTypedDelta = sequencedTimeAttack
+    ? Math.min(totalTypedDelta, remainingProgress)
+    : totalTypedDelta;
 
-  bot.totalTypedCharacters += totalTypedDelta;
+  bot.totalTypedCharacters += effectiveTypedDelta;
 
-  if (isMistake) {
+  if (isMistake && effectiveTypedDelta > 0) {
     if ((bot.mistakeGuards ?? 0) > 0) {
       bot.mistakeGuards = Math.max((bot.mistakeGuards ?? 0) - 1, 0);
     } else {
-      bot.mistakes += totalTypedDelta;
+      bot.mistakes += effectiveTypedDelta;
       bot.currentStreak = 0;
       if (room.matchRule === "hpBattle") {
-        applyHpDamage(bot, totalTypedDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
+        applyHpDamage(bot, effectiveTypedDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
       }
     }
   } else if (progressDelta > 0) {
