@@ -1,15 +1,18 @@
 import Link from "next/link";
 import { ArrowLeft, BookOpen, Settings } from "lucide-react";
+import type { RoomState } from "@type-battle/shared";
 import { GameLogo } from "./game-logo";
+import { StatusPill } from "./status-pill";
 
 type GameHeaderProps = {
   connected: boolean;
   realtimeConfigured: boolean;
   onOpenSettings: () => void;
   exitAction?: { label: string; onClick: () => void } | undefined;
+  status?: RoomState["status"] | "result" | undefined;
 };
 
-export function GameHeader({ connected, realtimeConfigured, onOpenSettings, exitAction }: GameHeaderProps) {
+export function GameHeader({ connected, realtimeConfigured, onOpenSettings, exitAction, status }: GameHeaderProps) {
   return (
     <section className="topBar" aria-label="ゲーム状態">
       {exitAction ? (
@@ -20,6 +23,7 @@ export function GameHeader({ connected, realtimeConfigured, onOpenSettings, exit
           </button>
         </div>
       ) : null}
+      {status ? <StatusPill status={status} /> : null}
       <div className="brandBlock">
         <GameLogo compact />
       </div>

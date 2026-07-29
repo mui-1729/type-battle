@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+  expectElementsNotToOverlap,
   expectFixedViewport,
   installWebSocketProbe,
   readWebSocketProbe,
@@ -13,11 +14,12 @@ test("completes practice with mobile Japanese textarea input", async ({ page }) 
   await page.goto("/");
   await page.waitForTimeout(500);
   expect(await readWebSocketProbe(page)).toMatchObject({ socketCount: 0, openSocketCount: 0 });
-  await selectPracticeMode(page);
   await setNickname(page, "Mobile");
+  await selectPracticeMode(page);
   await expect(page.locator(".connection")).not.toHaveClass(/isOnline/);
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expectElementsNotToOverlap(page, ".headerBackButton", ".statusPill");
   await expect(page.locator(".connection")).not.toHaveClass(/isOnline/);
   await expect.poll(async () => (await readWebSocketProbe(page)).openSocketCount).toBe(0);
   expect((await readWebSocketProbe(page)).socketCount).toBe(1);
@@ -85,8 +87,8 @@ test("keeps the typing prompt reachable when the software keyboard reduces the v
   ]) {
     await page.setViewportSize(viewport);
     await page.goto("/");
-    await selectPracticeMode(page);
     await setNickname(page, "KeyboardPlayer");
+    await selectPracticeMode(page);
     await page.getByRole("button", { name: "練習を開始" }).click();
     await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 

@@ -100,7 +100,7 @@ export async function expectFixedViewport(page: Page): Promise<void> {
       .filter(isOutsideViewport)
       .map((element) => element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 40) ?? element.tagName);
     const outsideContentRegions = Array.from(document.querySelectorAll<HTMLElement>(
-      ".feedbackCard, .howToPlayCard, .soloModePicker, .dailyChallengePanel, .difficultySelector, .mistakeTrendPanel, .battleStage, .practiceStage, .promptBox, .resultPanel"
+      ".feedbackCard, .howToPlayCard, .soloModePicker, .dailyChallengePanel, .difficultySelector, .mistakeTrendPanel, .statusPill, .battleStage, .practiceStage, .promptBox, .resultPanel"
     ))
       .filter(isVisible)
       .filter(isOutsideViewport)
@@ -126,6 +126,25 @@ export async function expectFixedViewport(page: Page): Promise<void> {
   expect(metrics.outsideContentRegions).toEqual([]);
 }
 
+export async function expectElementsNotToOverlap(page: Page, firstSelector: string, secondSelector: string): Promise<void> {
+  const geometry = await page.evaluate(({ firstSelector: first, secondSelector: second }) => {
+    const firstElement = document.querySelector<HTMLElement>(first);
+    const secondElement = document.querySelector<HTMLElement>(second);
+    if (!firstElement || !secondElement) {
+      return { missing: [firstElement ? null : first, secondElement ? null : second].filter(Boolean), overlapArea: -1 };
+    }
+
+    const firstRect = firstElement.getBoundingClientRect();
+    const secondRect = secondElement.getBoundingClientRect();
+    const overlapWidth = Math.max(0, Math.min(firstRect.right, secondRect.right) - Math.max(firstRect.left, secondRect.left));
+    const overlapHeight = Math.max(0, Math.min(firstRect.bottom, secondRect.bottom) - Math.max(firstRect.top, secondRect.top));
+    return { missing: [], overlapArea: overlapWidth * overlapHeight };
+  }, { firstSelector, secondSelector });
+
+  expect(geometry.missing).toEqual([]);
+  expect(geometry.overlapArea).toBe(0);
+}
+
 export async function readInputGuide(page: Page): Promise<string> {
   return (await page.getByLabel("入力ガイド").innerText()).replace(/\s+/g, "");
 }
@@ -134,11 +153,21 @@ export async function typeInputGuide(page: Page, guide: string): Promise<void> {
   await page.getByLabel("入力欄").pressSequentially(guide, { delay: 40 });
 }
 
+export async function dismissTutorial(page: Page): Promise<void> {
+  await page.locator('.appShell[data-settings-hydrated="true"]').waitFor({ state: "attached" });
+  const closeButton = page.getByRole("button", { name: "遊び方を閉じる" });
+  if (await closeButton.isVisible()) {
+    await closeButton.click();
+  }
+}
+
 export async function selectBattleMode(page: Page): Promise<void> {
+  await dismissTutorial(page);
   await page.getByRole("button", { name: "対戦する" }).click();
 }
 
 export async function selectSoloMode(page: Page): Promise<void> {
+  await dismissTutorial(page);
   await page.getByRole("button", { name: "ひとりで遊ぶ" }).click();
 }
 
@@ -153,6 +182,7 @@ export async function selectDailyMode(page: Page): Promise<void> {
 }
 
 export async function setNickname(page: Page, nickname: string): Promise<void> {
+  await dismissTutorial(page);
   await page.getByTitle("設定を開く").click();
   await page.locator(".modalContent input").first().fill(nickname);
   await page.getByRole("button", { name: "閉じる", exact: true }).click();

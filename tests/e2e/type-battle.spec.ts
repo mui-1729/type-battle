@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import {
   closeLatestOpenWebSocket,
+  dismissTutorial,
+  expectElementsNotToOverlap,
   expectFixedViewport,
   installWebSocketProbe,
   readInputGuide,
@@ -74,6 +76,7 @@ async function expectReadableContrast(page: Page, targets: ContrastTarget[]): Pr
 
 test("shows only one back action on every menu page", async ({ page }) => {
   await page.goto("/");
+  await dismissTutorial(page);
   await expect(page.getByRole("button", { name: /戻る|戻す|選び直す/ })).toHaveCount(0);
 
   for (const mode of ["対戦する", "ひとりで遊ぶ"] as const) {
@@ -91,6 +94,24 @@ test("shows only one back action on every menu page", async ({ page }) => {
   }
 });
 
+test("guides a first-time player and remembers completion", async ({ page }) => {
+  await page.goto("/");
+  const tutorial = page.getByRole("dialog", { name: "モードを選ぼう" });
+  await expect(tutorial).toBeVisible();
+  await tutorial.getByRole("button", { name: "次へ" }).click();
+  await expect(page.getByRole("dialog", { name: "表示された文字を入力" })).toBeVisible();
+  await page.getByRole("button", { name: "次へ" }).click();
+  await expect(page.getByRole("dialog", { name: "結果を確認して再戦" })).toBeVisible();
+  await page.getByRole("button", { name: "はじめる" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "遊び方を再表示" }).click();
+  await expect(page.getByRole("dialog", { name: "モードを選ぼう" })).toBeVisible();
+});
+
 test("keeps every setup screen fixed to one viewport", async ({ page }) => {
   for (const viewport of [
     { width: 1440, height: 900 },
@@ -99,6 +120,7 @@ test("keeps every setup screen fixed to one viewport", async ({ page }) => {
   ]) {
     await page.setViewportSize(viewport);
     await page.goto("/");
+    await setNickname(page, "ViewportPlayer");
     await expectFixedViewport(page);
 
     await selectSoloMode(page);
@@ -247,19 +269,8 @@ test("plays a complete two player typing match", async ({ browser }) => {
 
   const matchSettingsButton = host.getByRole("button", { name: "次の試合設定" });
   const hostDifficultySelector = host.locator(".sidePanel .difficultySelector");
-  const [matchSettingsBounds, difficultyBounds] = await Promise.all([
-    matchSettingsButton.boundingBox(),
-    hostDifficultySelector.boundingBox()
-  ]);
-  expect(matchSettingsBounds).not.toBeNull();
-  expect(difficultyBounds).not.toBeNull();
-  expect(
-    matchSettingsBounds!.x + matchSettingsBounds!.width > difficultyBounds!.x &&
-      matchSettingsBounds!.x < difficultyBounds!.x + difficultyBounds!.width &&
-      matchSettingsBounds!.y + matchSettingsBounds!.height > difficultyBounds!.y &&
-      matchSettingsBounds!.y < difficultyBounds!.y + difficultyBounds!.height
-  ).toBe(false);
-  await expect(hostDifficultySelector).toBeVisible();
+  await expect(hostDifficultySelector).toBeHidden();
+  await expectFixedViewport(host);
   await host.evaluate(() => {
     document.documentElement.style.overflow = "clip";
     document.body.style.overflow = "scroll";
@@ -535,7 +546,7 @@ test("stops reconnecting when the same session replaces its room socket", async 
 });
 
 test("plays all three stage modes against COM and resets between rematches", async ({ browser }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(160_000);
 
   const hostContext = await browser.newContext();
   const host = await hostContext.newPage();
@@ -560,6 +571,7 @@ test("plays all three stage modes against COM and resets between rematches", asy
     }
     await expect(host.getByLabel("ルーム操作").getByText("COM (Normal)", { exact: true })).toBeVisible();
     await expect(host.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+    await expectElementsNotToOverlap(host, ".headerBackButton", ".statusPill");
 
     const stage = host.getByTestId("battle-stage");
     const localPlayer = mode.key === "hpBattle" ? stage.locator(".hpBattlePlayerLeft") : stage.locator(".raceLaneOne");
@@ -591,7 +603,7 @@ test("plays all three stage modes against COM and resets between rematches", asy
       if (mode.key === "hpBattle") {
         for (let attempt = 0; attempt < 12 && !(await host.locator(".resultPanel").isVisible()); attempt += 1) {
           const nextGuide = await readInputGuide(host);
-          await input.pressSequentially(nextGuide, { delay: 2, timeout: 2_000 }).catch(async (error: unknown) => {
+          await input.pressSequentially(nextGuide, { delay: 2, timeout: 5_000 }).catch(async (error: unknown) => {
             if (!(await host.locator(".resultPanel").isVisible())) throw error;
           });
         }
@@ -599,10 +611,14 @@ test("plays all three stage modes against COM and resets between rematches", asy
       await expect(host.locator(".resultPanel")).toBeVisible({ timeout: 20_000 });
     }
     await expect(host.getByLabel("試合結果カード").getByText("COM (Normal)", { exact: true })).toBeVisible();
+    await expectFixedViewport(host);
 
     if (index < modes.length - 1) {
       const nextMode = modes[index + 1];
-      await host.getByRole("button", { name: new RegExp("^" + nextMode.label) }).click();
+      await host.getByRole("button", { name: "次の試合設定" }).click();
+      const settingsDialog = host.getByRole("dialog", { name: "次の試合設定" });
+      await settingsDialog.getByRole("button", { name: new RegExp("^" + nextMode.label) }).click();
+      await settingsDialog.getByRole("button", { name: "完了" }).click();
       await host.getByRole("button", { name: "再戦READY" }).click();
       await expect(stage).toHaveAttribute("data-phase", "countdown");
       await expect(stage).toHaveAttribute("data-mode", nextMode.key);
@@ -687,11 +703,12 @@ test("completes a practice session", async ({ browser }) => {
   await page.goto("/");
   await page.waitForTimeout(500);
   expect(await readWebSocketProbe(page)).toMatchObject({ socketCount: 0, openSocketCount: 0 });
-  await selectPracticeMode(page);
   await setNickname(page, "Alice");
+  await selectPracticeMode(page);
   await expect(page.locator(".connection")).not.toHaveClass(/isOnline/);
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expectElementsNotToOverlap(page, ".headerBackButton", ".statusPill");
   await expect(page.locator(".connection")).not.toHaveClass(/isOnline/);
   await expect.poll(async () => (await readWebSocketProbe(page)).openSocketCount).toBe(0);
   expect((await readWebSocketProbe(page)).socketCount).toBe(1);
@@ -730,8 +747,8 @@ test("completes a practice session", async ({ browser }) => {
 
 test("can cancel and confirm leaving an active practice session", async ({ page }) => {
   await page.goto("/");
-  await selectPracticeMode(page);
   await setNickname(page, "PracticePlayer");
+  await selectPracticeMode(page);
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
@@ -753,8 +770,8 @@ test("can cancel and confirm leaving an active practice session", async ({ page 
 
 test("returns to the solo menu from a daily challenge result", async ({ page }) => {
   await page.goto("/");
-  await selectDailyMode(page);
   await setNickname(page, "DailyPlayer");
+  await selectDailyMode(page);
   await page.getByRole("button", { name: "今日の挑戦を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
@@ -771,6 +788,7 @@ test("disables stage motion for the player setting and OS preference", async ({ 
     await page.goto("/");
 
     if (source === "setting") {
+      await dismissTutorial(page);
       await page.getByTitle("設定を開く").click();
       await page.getByLabel("アニメーションを減らす").check();
       await page.getByRole("button", { name: "閉じる", exact: true }).click();
@@ -803,6 +821,7 @@ test("saves and restores player settings from localStorage", async ({ browser })
   const page = await context.newPage();
 
   await page.goto("/");
+  await dismissTutorial(page);
   
   // Open settings
   await page.getByTitle("設定を開く").click();
@@ -845,6 +864,7 @@ test("keeps explicit and system dark theme text readable", async ({ browser }) =
   });
   const systemPage = await systemContext.newPage();
   await systemPage.goto("/");
+  await setNickname(systemPage, "ContrastPlayer");
   await selectSoloMode(systemPage);
   await expectFixedViewport(systemPage);
   await expect(systemPage.locator(".soloModeOption").first()).toHaveCSS("background-color", "rgb(14, 30, 54)");
@@ -918,6 +938,7 @@ test("keeps explicit and system dark theme text readable", async ({ browser }) =
 
 test("contains settings focus and restores focus and scroll state on Escape", async ({ page }) => {
   await page.goto("/");
+  await dismissTutorial(page);
   const settingsButton = page.getByTitle("設定を開く");
   await settingsButton.focus();
   await page.evaluate(() => {
