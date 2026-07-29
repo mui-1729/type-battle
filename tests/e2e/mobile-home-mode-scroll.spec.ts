@@ -11,17 +11,40 @@ for (const viewport of [
     await dismissTutorial(page);
 
     const menu = page.locator(".homeModeMenu");
+    const battleButton = page.locator(".modeCardBattle .modeCardButton");
     const soloButton = page.locator(".modeCardSolo .modeCardButton");
 
     await expect(menu).toHaveCSS("overflow-y", "auto");
-    expect(await soloButton.evaluate((button) => button.getBoundingClientRect().bottom)).toBeGreaterThan(viewport.height);
+    const initialGeometry = await page.evaluate(() => {
+      const menuElement = document.querySelector<HTMLElement>(".homeModeMenu");
+      const battleElement = document.querySelector<HTMLElement>(".modeCardBattle .modeCardButton");
+      const soloElement = document.querySelector<HTMLElement>(".modeCardSolo .modeCardButton");
+      if (!menuElement || !battleElement || !soloElement) {
+        throw new Error("Expected home mode controls to be rendered.");
+      }
+      const battleRect = battleElement.getBoundingClientRect();
+      const soloRect = soloElement.getBoundingClientRect();
+      return {
+        battle: { top: battleRect.top, bottom: battleRect.bottom },
+        menuScrollTop: menuElement.scrollTop,
+        solo: { top: soloRect.top, bottom: soloRect.bottom },
+        viewportHeight: window.innerHeight
+      };
+    });
+    expect(initialGeometry.battle.top).toBeGreaterThanOrEqual(0);
+    expect(initialGeometry.battle.bottom).toBeLessThanOrEqual(initialGeometry.viewportHeight);
+    await expect(battleButton).toBeEnabled();
+    const soloWasClipped = initialGeometry.solo.top < 0 ||
+      initialGeometry.solo.bottom > initialGeometry.viewportHeight;
 
     await soloButton.scrollIntoViewIfNeeded();
     const geometry = await soloButton.evaluate((button) => {
       const rect = button.getBoundingClientRect();
+      const menuElement = document.querySelector<HTMLElement>(".homeModeMenu");
       return {
         bottom: rect.bottom,
         top: rect.top,
+        menuScrollTop: menuElement?.scrollTop ?? 0,
         viewportHeight: window.innerHeight,
         documentWidth: document.documentElement.scrollWidth,
         viewportWidth: window.innerWidth
@@ -30,6 +53,9 @@ for (const viewport of [
     expect(geometry.top).toBeGreaterThanOrEqual(0);
     expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight);
     expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+    if (soloWasClipped) {
+      expect(geometry.menuScrollTop).toBeGreaterThan(initialGeometry.menuScrollTop);
+    }
 
     if (viewport.width === 320) {
       await soloButton.click();
