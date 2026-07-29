@@ -280,6 +280,13 @@ function getCountdownRoom(socket: FakeSocket): RoomState {
   return (message?.payload as { room?: RoomState } | undefined)?.room as RoomState;
 }
 
+function getLatestRoomState(socket: FakeSocket): RoomState {
+  const message = [...parseMessages(socket)]
+    .reverse()
+    .find((entry) => entry.type === "server:room:state");
+  return message?.payload as RoomState;
+}
+
 async function flushAsyncWork(): Promise<void> {
   for (let index = 0; index < 50; index += 1) {
     await Promise.resolve();
@@ -1245,7 +1252,7 @@ describe("room authority", () => {
     // keystrokes as extra damage at the prompt boundary.
     sendTypingInput(desktopSocket, "HP34DM", plan.guide);
     await flushAsyncWork();
-    expect((storage.values.get("room") as { room: RoomState }).room.players)
+    expect(getLatestRoomState(desktopSocket).players)
       .toEqual(expect.arrayContaining([
         expect.objectContaining({ id: "guest-hp-desktop", hp: 100 }),
         expect.objectContaining({ id: "guest-hp-mobile", hp: 100 - canonicalLength })
@@ -1253,7 +1260,7 @@ describe("room authority", () => {
 
     sendTypingInput(mobileSocket, "HP34DM", prompt.typing.hiragana);
     await flushAsyncWork();
-    expect((storage.values.get("room") as { room: RoomState }).room.players)
+    expect(getLatestRoomState(mobileSocket).players)
       .toEqual(expect.arrayContaining([
         expect.objectContaining({ id: "guest-hp-desktop", hp: 100 - canonicalLength }),
         expect.objectContaining({ id: "guest-hp-mobile", hp: 100 - canonicalLength })
