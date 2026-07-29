@@ -21,6 +21,7 @@ import {
 } from "../src/room-engine.js";
 import { PROMPTS } from "../src/prompts.js";
 import { buildRomajiTypingPlan } from "../src/romaji-typing.js";
+import { resolveTimeAttackPrompts } from "../src/time-attack.js";
 import type { Prompt } from "../src/game-state.js";
 
 afterEach(() => {
@@ -430,6 +431,73 @@ describe("room engine config", () => {
     }
 
     expect(started.room.matchEndsAt).toBe(started.room.serverStartAt! + 5_000);
+    expect(started.room.timeAttackPromptIds?.[0]).toBe(started.room.prompt?.id);
+    expect(new Set(started.room.timeAttackPromptIds).size)
+      .toBe(started.room.timeAttackPromptIds?.length);
+
+    const sequence = resolveTimeAttackPrompts(
+      started.room.timeAttackPromptIds,
+      started.room.prompt!
+    );
+    markPlaying(created.room.roomCode);
+    const twoPromptInput = Array.from(
+      sequence.slice(0, 2).map((prompt) => prompt.typing.hiragana).join("")
+    );
+    for (let offset = 0; offset < twoPromptInput.length; offset += 8) {
+      updateProgress("socket_alice_time_attack_config", {
+        roomCode: created.room.roomCode,
+        input: twoPromptInput.slice(offset, offset + 8).join(""),
+        sequence: offset / 8 + 1
+      });
+    }
+
+    expect(getRoom(created.room.roomCode)?.players.find(
+      (player) => player.id === "guest_alice_time_attack_config"
+    )?.progressIndex).toBe(
+      sequence.slice(0, 2).reduce(
+        (total, prompt) => total + Array.from(prompt.typing.hiragana).length,
+        0
+      )
+    );
+  });
+
+  it("advances COM progress past the first time-attack prompt", () => {
+    const created = createRoom({
+      nickname: "Alice",
+      guestId: "guest_alice_time_attack_bot",
+      socketId: "socket_alice_time_attack_bot"
+    });
+
+    setMatchRule("socket_alice_time_attack_bot", created.room.roomCode, "timeAttack");
+    setBotDifficulty("socket_alice_time_attack_bot", created.room.roomCode, "hard");
+    setReady("socket_alice_time_attack_bot", created.room.roomCode, true);
+    const started = startMatch("socket_alice_time_attack_bot", created.room.roomCode);
+    expect("error" in started).toBe(false);
+    if ("error" in started) {
+      return;
+    }
+
+    const sequence = resolveTimeAttackPrompts(
+      started.room.timeAttackPromptIds,
+      started.room.prompt!
+    );
+    const firstPromptLength = Array.from(sequence[0]!.typing.hiragana).length;
+    markPlaying(created.room.roomCode);
+
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.99);
+    for (let index = 0; index < Math.ceil(firstPromptLength / 4) + 1; index += 1) {
+      advanceBot(created.room.roomCode);
+    }
+    random.mockRestore();
+
+    const bot = getRoom(created.room.roomCode)?.players.find((player) => player.isBot);
+    expect(bot?.progressIndex).toBeGreaterThan(firstPromptLength);
+    expect(bot?.progressIndex).toBeLessThanOrEqual(
+      sequence.reduce(
+        (total, prompt) => total + Array.from(prompt.typing.hiragana).length,
+        0
+      )
+    );
   });
 
   it("keeps the match rule on the immutable match result", () => {

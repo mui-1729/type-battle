@@ -3,7 +3,10 @@ import {
   calculateProgress,
   calculateWpm,
   getDailyChallengeInfo,
-  pickDailyChallengePrompt
+  pickDailyChallengePrompt,
+  getTimeAttackPromptPosition,
+  getTimeAttackPromptPositionByGuide,
+  resolveTimeAttackPrompts
 } from "@type-battle/shared";
 import type {
   DeviceKind,
@@ -82,8 +85,7 @@ export function getHomePageViewModel({
 }: HomePageViewModelInput) {
   const activePracticePlayer = practiceResult?.players[0] ?? null;
   const activeResult = result ?? practiceResult;
-  const activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
-  const activePromptText = activePrompt?.text ?? "";
+  let activePrompt = room?.prompt ?? practiceSession?.prompt ?? activeResult?.prompt ?? null;
   const activeInputDeviceKind = room ? currentPlayer?.deviceKind ?? "desktop" : practiceSession?.deviceKind ?? "desktop";
   const activeProgress = room ? localProgress : practiceProgress;
   const deviceInputMode = activeInputDeviceKind === "mobile" ? "kana" : "romaji";
@@ -91,6 +93,29 @@ export function getHomePageViewModel({
     inputModeInitialized === false || activeProgress.totalTypedCharacters === 0
       ? deviceInputMode
       : inputMode ?? (activeInputDeviceKind === "mobile" ? "kana" : "romaji");
+  const timeAttackPrompts =
+    room?.matchRule === "timeAttack" &&
+    room.prompt &&
+    room.timeAttackPromptIds?.length
+    ? resolveTimeAttackPrompts(room.timeAttackPromptIds, room.prompt)
+    : [];
+  const usesTimeAttackPromptSequence = timeAttackPrompts.length > 0;
+  const timeAttackPosition = timeAttackPrompts.length
+    ? (effectiveInputMode === "kana"
+        ? getTimeAttackPromptPosition(timeAttackPrompts, activeProgress.progressIndex)
+        : getTimeAttackPromptPositionByGuide(timeAttackPrompts, activeProgress.progressIndex))
+    : null;
+  if (timeAttackPosition) activePrompt = timeAttackPosition.prompt;
+  const activePromptText = activePrompt?.text ?? "";
+  const activeProgressBase = timeAttackPosition
+    ? timeAttackPrompts.slice(0, timeAttackPosition.promptIndex).reduce(
+        (total, prompt) => total + (effectiveInputMode === "kana"
+          ? Array.from(prompt.typing.hiragana).length
+          : buildRomajiTypingPlan(prompt.typing.hiragana).guide.length),
+        0
+      )
+    : 0;
+  const completedTimeAttackPrompts = timeAttackPosition?.completedPrompts ?? 0;
   const dailyChallengeInfo = getDailyChallengeInfo(dailyChallengeNow);
   const dailyChallengePrompt = pickDailyChallengePrompt(dailyChallengeNow);
   const visibleDailyChallengeRecord = getVisibleDailyChallengeRecord(
@@ -112,13 +137,19 @@ export function getHomePageViewModel({
   const isLoopingMatchPlaying = Boolean(
     isRoomPlaying && (room?.matchRule === "timeAttack" || room?.matchRule === "hpBattle")
   );
-  const activeGuideProgressIndex =
-    isLoopingMatchPlaying && activeTypingText.length > 0
+  const activeGuideProgressIndex = usesTimeAttackPromptSequence
+    ? activeProgress.progressIndex - activeProgressBase
+    : isLoopingMatchPlaying && activeTypingText.length > 0
       ? activeProgress.progressIndex % activeTypingText.length
       : activeProgress.progressIndex;
   const activeCanonicalProgressIndex =
     effectiveInputMode === "romaji" && activeRomajiTypingPlan
-      ? getCanonicalProgressIndex(activeRomajiTypingPlan, activeProgress.progressIndex)
+      ? (timeAttackPosition
+          ? timeAttackPrompts.slice(0, timeAttackPosition.promptIndex).reduce(
+              (total, prompt) => total + Array.from(prompt.typing.hiragana).length,
+              0
+            ) + getCanonicalProgressIndex(activeRomajiTypingPlan, activeGuideProgressIndex)
+          : getCanonicalProgressIndex(activeRomajiTypingPlan, activeProgress.progressIndex))
       : activeProgress.progressIndex;
   const activeProgressPercent = calculateProgress(activeGuideProgressIndex, activeTypingText.length);
   const activeElapsedMs =
@@ -179,6 +210,7 @@ export function getHomePageViewModel({
     isPracticePlaying,
     activeProgress,
     isTimeAttackPlaying,
+    usesTimeAttackPromptSequence,
     isLoopingMatchPlaying,
     activeGuideProgressIndex,
     activeProgressPercent,
@@ -188,6 +220,8 @@ export function getHomePageViewModel({
     activeResultPlayer,
     isTimeAttackExpired,
     activeTimeAttackRemainingSeconds,
+    activeProgressBase,
+    completedTimeAttackPrompts,
     acceptingTextInput,
     progressSyncState,
     displayRoom,

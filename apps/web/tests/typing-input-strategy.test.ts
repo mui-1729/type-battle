@@ -108,6 +108,31 @@ describe("typing input strategy", () => {
     });
   });
 
+  it("advances from a cumulative base without wrapping to the previous prompt", () => {
+    const result = advanceTypingProgress({
+      ...baseInput,
+      previous: {
+        ...createEmptyProgress(),
+        progressIndex: 3,
+        correctCharacters: 3,
+        totalTypedCharacters: 3
+      },
+      typedText: "u",
+      deviceKind: "desktop",
+      canonicalText: "う",
+      displayText: "u",
+      romajiPlan: buildRomajiTypingPlan("う"),
+      progressBase: 3
+    });
+
+    expect(result.progress).toMatchObject({
+      progressIndex: 4,
+      correctCharacters: 4,
+      totalTypedCharacters: 4,
+      mistakes: 0
+    });
+  });
+
   it("records a mistake in the fallback canonical strategy", () => {
     const result = advanceTypingProgress({
       ...baseInput,

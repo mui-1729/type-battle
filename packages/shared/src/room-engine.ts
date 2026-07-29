@@ -1,4 +1,5 @@
 import { getPromptsByCategory, pickPrompt } from "./prompts.js";
+import { createTimeAttackPromptSequence } from "./time-attack.js";
 import { rankPlayers } from "./scoring.js";
 import { createRoomCode, normalizeNickname } from "./validation.js";
 import {
@@ -132,6 +133,7 @@ export type InternalRoom = {
   botDifficulty: BotDifficulty;
   promptCategory: PromptCategory;
   prompt?: Prompt;
+  timeAttackPromptIds?: string[];
   promptHistory: string[];
   serverStartAt?: number;
   matchEndsAt?: number;
@@ -191,6 +193,7 @@ export function restoreRoomState(room: RoomState, playerSessions: Record<string,
     lastActivityAt: Date.now(),
     round: 1,
     ...(room.prompt ? { prompt: room.prompt } : {}),
+    ...(room.timeAttackPromptIds ? { timeAttackPromptIds: room.timeAttackPromptIds } : {}),
     ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
     ...(room.matchEndsAt !== undefined ? { matchEndsAt: room.matchEndsAt } : {}),
     ...(room.suddenDeath ? { suddenDeath: true } : {}),
@@ -520,6 +523,7 @@ export function setReady(socketId: string, roomCode: string, ready: boolean): Ro
       room.status = "countdown";
       room.round = nextRound;
       room.prompt = prompt;
+      setTimeAttackPromptSequence(room, Date.now() + nextRound);
       if (!room.promptHistory.includes(prompt.id)) {
         room.promptHistory.push(prompt.id);
       }
@@ -582,6 +586,7 @@ export function startMatch(socketId: string, roomCode: string): { room: RoomStat
 
   room.status = "countdown";
   room.prompt = prompt;
+  setTimeAttackPromptSequence(room, Date.now());
   if (!room.promptHistory.includes(prompt.id)) {
     room.promptHistory.push(prompt.id);
   }
@@ -839,6 +844,7 @@ export function rematch(socketId: string, roomCode: string): { room: RoomState }
   room.status = "countdown";
   room.round = nextRound;
   room.prompt = prompt;
+  setTimeAttackPromptSequence(room, Date.now() + nextRound);
   if (!room.promptHistory.includes(prompt.id)) {
     room.promptHistory.push(prompt.id);
   }
@@ -953,6 +959,9 @@ function toPublicRoom(room: InternalRoom): RoomState {
 
   if (room.prompt) {
     publicRoom.prompt = room.prompt;
+  }
+  if (room.timeAttackPromptIds) {
+    publicRoom.timeAttackPromptIds = [...room.timeAttackPromptIds];
   }
 
   if (room.serverStartAt) {
@@ -1133,6 +1142,18 @@ function selectPromptForRoom(room: InternalRoom, seed: number): Prompt {
   }
 
   throw new Error("有効な課題文がありません。");
+}
+
+function setTimeAttackPromptSequence(room: InternalRoom, seed: number): void {
+  if (room.matchRule !== "timeAttack" || !room.prompt) {
+    delete room.timeAttackPromptIds;
+    return;
+  }
+  room.timeAttackPromptIds = createTimeAttackPromptSequence(
+    room.prompt,
+    room.promptCategory,
+    seed
+  ).map((prompt) => prompt.id);
 }
 
 function selectPromptFromPool(

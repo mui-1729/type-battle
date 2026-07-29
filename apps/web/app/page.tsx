@@ -298,6 +298,9 @@ export default function HomePage() {
     activeResultPlayer,
     isTimeAttackExpired,
     activeTimeAttackRemainingSeconds,
+    usesTimeAttackPromptSequence,
+    activeProgressBase,
+    completedTimeAttackPrompts,
     acceptingTextInput,
     progressSyncState,
     displayRoom,
@@ -1290,7 +1293,8 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying,
+          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
+          progressBase: activeProgressBase,
           inputMode: inputModeRef.current
         });
         inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedText) ? "kana" : "romaji";
@@ -1321,7 +1325,8 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying,
+          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
+          progressBase: activeProgressBase,
           inputMode: inputModeRef.current
         });
         inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedText) ? "kana" : "romaji";
@@ -1358,8 +1363,10 @@ export default function HomePage() {
       consumeDailyAttempt,
       recordMistakeSamples,
       activeInputDeviceKind,
+      activeProgressBase,
       activePrompt,
       activeRomajiTypingPlan,
+      usesTimeAttackPromptSequence,
       room
     ]
   );
@@ -1399,7 +1406,8 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying,
+          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
+          progressBase: activeProgressBase,
           inputMode: inputModeRef.current
         });
         inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedKey) ? "kana" : "romaji";
@@ -1431,7 +1439,8 @@ export default function HomePage() {
           canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
           displayText: activeTypingText,
           romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying,
+          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
+          progressBase: activeProgressBase,
           inputMode: inputModeRef.current
         });
         inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedKey) ? "kana" : "romaji";
@@ -1464,6 +1473,7 @@ export default function HomePage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     activeInputDeviceKind,
+    activeProgressBase,
     activeTypingText,
     acceptingTextInput,
     emitProgress,
@@ -1476,6 +1486,7 @@ export default function HomePage() {
     activePrompt,
     activeRomajiTypingPlan,
     exitRequest,
+    usesTimeAttackPromptSequence,
     room
   ]);
 
@@ -2252,7 +2263,7 @@ export default function HomePage() {
                   expectedText={activeTypingText}
                   progressIndex={activeGuideProgressIndex}
                   acceptingInput={acceptingTextInput}
-                  loop={isLoopingMatchPlaying}
+                  loop={isLoopingMatchPlaying && !usesTimeAttackPromptSequence}
                   inputKey={typingInputKey}
                   onTextInput={handleTypedText}
                 />
@@ -2302,6 +2313,8 @@ export default function HomePage() {
                 />
                 {isRoomPlaying ? <Stat label="ガード" value={currentPlayer?.mistakeGuards ?? 0} /> : null}
                 {isTimeAttackPlaying ? <Stat label="残り" value={`${activeTimeAttackRemainingSeconds}s`} /> : null}
+                {isTimeAttackPlaying ? <Stat label="完了" value={`${completedTimeAttackPrompts}文`} /> : null}
+                {isTimeAttackPlaying ? <Stat label="入力" value={`${activeProgress.correctCharacters}字`} /> : null}
                 {((currentPlayer?.maxHp ?? activeResultPlayer?.maxHp) !== undefined) ? (
                   <Stat
                     label="HP"

@@ -63,6 +63,7 @@ export type RoomState = {
   botDifficulty: BotDifficulty;
   promptCategory: PromptCategory;
   prompt?: Prompt;
+  timeAttackPromptIds?: string[];
   serverStartAt?: number;
   matchEndsAt?: number;
   players: PlayerState[];

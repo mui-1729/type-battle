@@ -5,11 +5,15 @@ import {
   buildRomajiTypingPlan,
   calculateAccuracy,
   calculateWpm,
+  createTimeAttackPromptSequence,
   createEmptyProgress,
   getPromptsByCategory,
+  getTimeAttackPromptPosition,
+  getTimeAttackPromptTotalLength,
   getRomajiTypingUnitIndex,
   pickPrompt,
   rankPlayers,
+  resolveTimeAttackPrompts,
 } from "@type-battle/shared";
 import { isValidRoomCode, normalizeNickname, validateNickname } from "@type-battle/shared";
 import type {
@@ -134,6 +138,7 @@ type InternalRoom = {
   botDifficulty: BotDifficulty;
   promptCategory: PromptCategory;
   prompt?: Prompt;
+  timeAttackPromptIds?: string[];
   promptHistory: string[];
   serverStartAt?: number;
   matchEndsAt?: number;
@@ -1933,6 +1938,7 @@ export class RoomAuthorityDurableObject {
         this.room.status = "countdown";
         this.room.round = nextRound;
         this.room.prompt = prompt;
+        setTimeAttackPromptSequence(this.room, Date.now() + nextRound);
         if (!this.room.promptHistory.includes(prompt.id)) {
           this.room.promptHistory.push(prompt.id);
         }
@@ -2068,6 +2074,7 @@ export class RoomAuthorityDurableObject {
 
     context.room.status = "countdown";
     context.room.prompt = prompt;
+    setTimeAttackPromptSequence(context.room, Date.now());
     if (!context.room.promptHistory.includes(prompt.id)) {
       context.room.promptHistory.push(prompt.id);
     }
@@ -2207,6 +2214,7 @@ export class RoomAuthorityDurableObject {
     context.room.round = nextRound;
     context.room.status = "countdown";
     context.room.prompt = prompt;
+    setTimeAttackPromptSequence(context.room, Date.now() + nextRound);
     if (!context.room.promptHistory.includes(prompt.id)) {
       context.room.promptHistory.push(prompt.id);
     }
@@ -2730,7 +2738,9 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
   const kanaInput = containsKana(payload.input);
   let attackDamageDelta = 0;
 
-  if (kanaInput) {
+  if (room.matchRule === "timeAttack" && room.timeAttackPromptIds?.length) {
+    attackDamageDelta = applyTimeAttackTyping(player, room, payload.input, kanaInput);
+  } else if (kanaInput) {
     for (const typedChar of Array.from(payload.input)) {
       const expectedIndex = loopingMatch ? modulo(player.progressIndex, promptLength) : player.progressIndex;
       const before = createProgressState(player);
@@ -2831,6 +2841,70 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
 
   return true;
 }
+
+function applyTimeAttackTyping(player: InternalPlayer, room: InternalRoom, input: string, kanaInput: boolean): number {
+  const prompts = resolveTimeAttackPrompts(room.timeAttackPromptIds, room.prompt!);
+  let canonicalDelta = 0;
+  for (const typedChar of Array.from(input)) {
+    const position = getTimeAttackPromptPosition(prompts, player.progressIndex);
+    if (!position) break;
+    if (kanaInput) {
+      const before = createProgressState(player, position.progressIndex);
+      const after = advanceProgress(before, position.prompt.typing.hiragana[position.progressIndex], typedChar);
+      applyGuardedProgress(player, before, after);
+      const delta = Math.max(after.progressIndex - before.progressIndex, 0);
+      player.progressIndex += delta;
+      canonicalDelta += delta;
+      player.typingProgressIndex = getTimeAttackGuideProgress(prompts, player.progressIndex);
+    } else {
+      const plan = buildRomajiTypingPlan(position.prompt.typing.hiragana);
+      const guideBase = getTimeAttackGuideBase(prompts, position.promptIndex);
+      const localGuideIndex = Math.max(0, player.typingProgressIndex - guideBase);
+      const before = createProgressState(player, localGuideIndex);
+      const unitIndex = getRomajiTypingUnitIndex(plan, localGuideIndex);
+      const after = advanceRomajiProgress(before, plan, typedChar);
+      const unit = after.progressIndex > before.progressIndex ? plan.units[unitIndex] : undefined;
+      applyGuardedProgress(player, before, after);
+      player.typingProgressIndex += Math.max(after.progressIndex - before.progressIndex, 0);
+      if (unit) {
+        const delta = Array.from(unit.hiragana).length;
+        player.progressIndex += delta;
+        canonicalDelta += delta;
+      }
+    }
+  }
+  return canonicalDelta;
+}
+
+function getTimeAttackGuideBase(prompts: Prompt[], promptIndex: number): number {
+  return prompts.slice(0, promptIndex).reduce(
+    (total, prompt) => total + buildRomajiTypingPlan(prompt.typing.hiragana).guide.length,
+    0
+  );
+}
+
+function getTimeAttackGuideProgress(prompts: Prompt[], canonicalProgress: number): number {
+  const position = getTimeAttackPromptPosition(prompts, canonicalProgress);
+  if (!position) return 0;
+  return getTimeAttackGuideBase(prompts, position.promptIndex)
+    + getRomajiProgressIndexForCanonicalProgress(
+      buildRomajiTypingPlan(position.prompt.typing.hiragana),
+      position.progressIndex,
+      false
+    );
+}
+
+function setTimeAttackPromptSequence(room: InternalRoom, seed: number): void {
+  if (room.matchRule !== "timeAttack" || !room.prompt) {
+    delete room.timeAttackPromptIds;
+    return;
+  }
+  room.timeAttackPromptIds = createTimeAttackPromptSequence(
+    room.prompt,
+    room.promptCategory,
+    seed
+  ).map((prompt) => prompt.id);
+}
 function areHumansFinished(room: InternalRoom): boolean {
   if (room.matchRule === "timeAttack") {
     return false;
@@ -2888,21 +2962,29 @@ function applyBotProgress(
   const promptLength = getTypingLength(room, bot);
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
+  const sequencedTimeAttack = room.matchRule === "timeAttack" && Boolean(room.timeAttackPromptIds?.length);
   const loopingMatch = room.matchRule === "timeAttack" || room.matchRule === "hpBattle";
-  const progressDelta = loopingMatch
-    ? charsToAdd
-    : Math.min(charsToAdd, Math.max(promptLength - bot.progressIndex, 0));
+  const progressLimit = sequencedTimeAttack
+    ? getTimeAttackPromptTotalLength(resolveTimeAttackPrompts(room.timeAttackPromptIds, room.prompt!))
+    : promptLength;
+  const remainingProgress = Math.max(progressLimit - bot.progressIndex, 0);
+  const progressDelta = sequencedTimeAttack || !loopingMatch
+    ? Math.min(charsToAdd, remainingProgress)
+    : charsToAdd;
+  const effectiveTypedDelta = sequencedTimeAttack
+    ? Math.min(totalTypedDelta, remainingProgress)
+    : totalTypedDelta;
 
-  bot.totalTypedCharacters += totalTypedDelta;
+  bot.totalTypedCharacters += effectiveTypedDelta;
 
-  if (isMistake) {
+  if (isMistake && effectiveTypedDelta > 0) {
     if ((bot.mistakeGuards ?? 0) > 0) {
       bot.mistakeGuards = Math.max((bot.mistakeGuards ?? 0) - 1, 0);
     } else {
-      bot.mistakes += totalTypedDelta;
+      bot.mistakes += effectiveTypedDelta;
       bot.currentStreak = 0;
       if (room.matchRule === "hpBattle") {
-        applyHpDamage(bot, totalTypedDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
+        applyHpDamage(bot, effectiveTypedDelta * HP_BATTLE_MISTAKE_DAMAGE, room, now);
       }
     }
   } else if (progressDelta > 0) {
@@ -3033,6 +3115,9 @@ function toPublicRoom(room: InternalRoom): RoomState {
 
   if (room.prompt) {
     publicRoom.prompt = room.prompt;
+  }
+  if (room.timeAttackPromptIds) {
+    publicRoom.timeAttackPromptIds = [...room.timeAttackPromptIds];
   }
 
   if (room.serverStartAt) {
@@ -3224,6 +3309,7 @@ function createRoomStateFromSnapshot(
     lastActivityAt: internal?.lastActivityAt ?? Date.now(),
     round: internal?.round ?? 1,
     ...(room.prompt ? { prompt: room.prompt } : {}),
+    ...(room.timeAttackPromptIds ? { timeAttackPromptIds: room.timeAttackPromptIds } : {}),
     ...(room.serverStartAt !== undefined ? { serverStartAt: room.serverStartAt } : {}),
     ...(room.matchEndsAt !== undefined ? { matchEndsAt: room.matchEndsAt } : {}),
     ...(room.suddenDeath ? { suddenDeath: true } : {}),

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildRomajiTypingPlan, PROMPTS } from "@type-battle/shared";
 import type { PlayerState, RoomState } from "@type-battle/shared";
 import { getHomePageViewModel, type HomePageViewModelInput } from "../app/_lib/home-page-view-model";
 import { createEmptyProgress } from "../app/_lib/typing-progress";
@@ -211,5 +212,38 @@ describe("getHomePageViewModel", () => {
     expect(view.activeGuideProgressIndex).toBe(
       looping ? progressIndex % view.activeTypingText.length : progressIndex
     );
+  });
+
+  it("shows the next unique prompt while retaining cumulative time-attack input", () => {
+    const firstPrompt = PROMPTS[0]!;
+    const secondPrompt = PROMPTS[1]!;
+    const firstGuideLength = buildRomajiTypingPlan(firstPrompt.typing.hiragana).guide.length;
+    const player = createPlayer({ deviceKind: "desktop" });
+    const room = {
+      ...createRoom(player),
+      prompt: firstPrompt,
+      timeAttackPromptIds: [firstPrompt.id, secondPrompt.id]
+    };
+    const view = getHomePageViewModel(createInput({
+      room,
+      playerId: player.id,
+      currentPlayer: player,
+      connected: true,
+      inputMode: "romaji",
+      inputModeInitialized: true,
+      localProgress: {
+        ...createEmptyProgress(),
+        progressIndex: firstGuideLength + 1,
+        correctCharacters: firstGuideLength + 1,
+        totalTypedCharacters: firstGuideLength + 1
+      }
+    }));
+
+    expect(view.usesTimeAttackPromptSequence).toBe(true);
+    expect(view.activePrompt?.id).toBe(secondPrompt.id);
+    expect(view.completedTimeAttackPrompts).toBe(1);
+    expect(view.activeProgressBase).toBe(firstGuideLength);
+    expect(view.activeGuideProgressIndex).toBe(1);
+    expect(view.typingInputKey).toContain(secondPrompt.id);
   });
 });

@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildRomajiTypingPlan, type RoomState } from "@type-battle/shared";
+import {
+  buildRomajiTypingPlan,
+  resolveTimeAttackPrompts,
+  type RoomState
+} from "@type-battle/shared";
 import { resetRoomEngineState } from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
 import worker, { RoomAuthorityDurableObject, RoomDurableObject } from "../src/worker.js";
@@ -1614,6 +1618,151 @@ describe("room authority", () => {
     }));
     await Promise.all(durableObjectState.backgroundWork);
     expect(countRoomStates()).toBe(roomStatesAfterWindowTimers + 1);
+  });
+
+  it("advances cumulative progress into a different time-attack prompt", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "TA34MP" });
+    roomAuthority.attachSocket(guestSocket as unknown as WebSocket, { roomCode: "TA34MP" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-time-attack-prompts",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-time-attack-host",
+        sessionId: "session-time-attack-host",
+        deviceKind: "desktop"
+      }
+    }));
+    await flushAsyncWork();
+    guestSocket.receive(JSON.stringify({
+      id: "msg-join-time-attack-prompts",
+      type: "client:room:join",
+      payload: {
+        roomCode: "TA34MP",
+        nickname: "Bob",
+        guestId: "guest-time-attack-guest",
+        sessionId: "session-time-attack-guest",
+        deviceKind: "desktop"
+      }
+    }));
+    await flushAsyncWork();
+    hostSocket.receive(JSON.stringify({
+      id: "msg-rule-time-attack-prompts",
+      type: "client:room:setMatchRule",
+      payload: { roomCode: "TA34MP", rule: "timeAttack" }
+    }));
+    for (const [socket, id] of [[hostSocket, "host"], [guestSocket, "guest"]] as const) {
+      socket.receive(JSON.stringify({
+        id: `msg-ready-time-attack-prompts-${id}`,
+        type: "client:player:ready",
+        payload: { roomCode: "TA34MP", ready: true }
+      }));
+    }
+    hostSocket.receive(JSON.stringify({
+      id: "msg-start-time-attack-prompts",
+      type: "client:match:start",
+      payload: { roomCode: "TA34MP" }
+    }));
+    await vi.advanceTimersByTimeAsync(3_000);
+    await flushAsyncWork();
+
+    const countdownRoom = getCountdownRoom(hostSocket);
+    const sequence = resolveTimeAttackPrompts(
+      countdownRoom.timeAttackPromptIds,
+      countdownRoom.prompt!
+    );
+    expect(countdownRoom.timeAttackPromptIds?.[0]).toBe(countdownRoom.prompt?.id);
+    expect(new Set(countdownRoom.timeAttackPromptIds).size)
+      .toBe(countdownRoom.timeAttackPromptIds?.length);
+    expect(sequence.length).toBeGreaterThan(2);
+    expect(sequence[1]?.id).not.toBe(sequence[0]?.id);
+
+    const firstCanonicalLength = Array.from(sequence[0]!.typing.hiragana).length;
+    const twoPromptGuide = sequence
+      .slice(0, 2)
+      .map((prompt) => buildRomajiTypingPlan(prompt.typing.hiragana).guide)
+      .join("");
+    await sendPacedTypingInput(hostSocket, "TA34MP", twoPromptGuide);
+    await flushAsyncWork();
+
+    const room = getLatestRoomState(hostSocket);
+    expect(room.status).toBe("playing");
+    expect(room.prompt?.id).toBe(sequence[0]?.id);
+    expect(room.players).toContainEqual(expect.objectContaining({
+      id: "guest-time-attack-host",
+      progressIndex: firstCanonicalLength + Array.from(sequence[1]!.typing.hiragana).length
+    }));
+  });
+
+  it("advances COM progress past the first time-attack prompt", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "TB34KT" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-time-attack-bot",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-time-attack-bot-host",
+        sessionId: "session-time-attack-bot-host",
+        deviceKind: "desktop"
+      }
+    }));
+    await flushAsyncWork();
+    hostSocket.receive(JSON.stringify({
+      id: "msg-rule-time-attack-bot",
+      type: "client:room:setMatchRule",
+      payload: { roomCode: "TB34KT", rule: "timeAttack" }
+    }));
+    hostSocket.receive(JSON.stringify({
+      id: "msg-difficulty-time-attack-bot",
+      type: "client:room:setBotDifficulty",
+      payload: { roomCode: "TB34KT", difficulty: "hard" }
+    }));
+    hostSocket.receive(JSON.stringify({
+      id: "msg-ready-time-attack-bot",
+      type: "client:player:ready",
+      payload: { roomCode: "TB34KT", ready: true }
+    }));
+    hostSocket.receive(JSON.stringify({
+      id: "msg-start-time-attack-bot",
+      type: "client:match:start",
+      payload: { roomCode: "TB34KT" }
+    }));
+    await vi.advanceTimersByTimeAsync(3_000);
+    await flushAsyncWork();
+
+    const countdownRoom = getCountdownRoom(hostSocket);
+    const sequence = resolveTimeAttackPrompts(
+      countdownRoom.timeAttackPromptIds,
+      countdownRoom.prompt!
+    );
+    const firstPromptLength = Array.from(sequence[0]!.typing.hiragana).length;
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.99);
+    await vi.advanceTimersByTimeAsync((Math.ceil(firstPromptLength / 4) + 1) * 500);
+    await flushAsyncWork();
+    random.mockRestore();
+
+    const room = getLatestRoomState(hostSocket);
+    const bot = room.players.find((player) => player.isBot);
+    expect(bot?.progressIndex).toBeGreaterThan(firstPromptLength);
+    expect(bot?.progressIndex).toBeLessThanOrEqual(
+      sequence.reduce(
+        (total, prompt) => total + Array.from(prompt.typing.hiragana).length,
+        0
+      )
+    );
   });
 
   it("rejects an impossible whole-prompt HP burst without progress, damage, or finalization", async () => {
