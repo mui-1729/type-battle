@@ -73,6 +73,11 @@ type SocketState = {
   roomCode?: string;
 };
 
+type ControlRateBucket = {
+  tokens: number;
+  lastRefillAt: number;
+};
+
 type AttachSocketOptions = {
   clientIp?: string;
   roomCode?: string;
@@ -189,6 +194,22 @@ const BOT_NICKNAME = "COM";
 // human rate. Progress is canonical kana, so romaji does not consume more budget.
 const TYPING_INITIAL_BURST_CANONICAL = 12;
 const TYPING_MAX_CANONICAL_PER_SECOND = 20;
+// Shared by all non-typing gameplay controls on one WebSocket. The budget is
+// intentionally connection-scoped and ephemeral: reconnecting or a DO restart
+// starts a fresh bucket, while room state remains authoritative and persisted.
+const CONTROL_COMMAND_BURST = 8;
+const CONTROL_COMMANDS_PER_SECOND = 4;
+const CONTROL_COMMAND_RATE_LIMIT_ERROR = "操作が多すぎます。少し待ってから再試行してください。";
+const CONTROL_COMMAND_TYPES = new Set<CloudflareClientMessageType>([
+  "client:player:ready",
+  "client:player:reaction",
+  "client:player:accessory",
+  "client:room:setPromptCategory",
+  "client:room:setBotDifficulty",
+  "client:room:setMatchRule",
+  "client:match:start",
+  "client:match:rematch"
+]);
 
 const DIFFICULTY_SETTINGS: Record<BotDifficulty, { charsPerTick: number; mistakeChance: number }> = {
   easy: { charsPerTick: 1, mistakeChance: 0.05 },
@@ -201,6 +222,7 @@ export class RoomAuthorityDurableObject {
   private readonly socketStates = new Map<string, SocketState>();
   private socketEventChain: Promise<void> = Promise.resolve();
   private readonly reactionTimestamps = new Map<string, number>();
+  private readonly controlRateBuckets = new Map<string, ControlRateBucket>();
   private readonly unjoinedSocketTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly playerSessions = new Map<string, string>();
   private readonly timers: GatewayTimers = {};
@@ -436,6 +458,14 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
+    if (CONTROL_COMMAND_TYPES.has(message.type) && !this.consumeControlCommand(socketId)) {
+      this.sendAck(socketId, message.id, message.type, {
+        ok: false,
+        error: CONTROL_COMMAND_RATE_LIMIT_ERROR
+      });
+      return;
+    }
+
     switch (message.type) {
       case "client:room:create":
         await this.handleCreateRoom(socketId, message.id, message.payload);
@@ -656,9 +686,14 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    const room = this.setReady(socketId, parsedPayload.roomCode, parsedPayload.ready);
+    const result = this.setReady(socketId, parsedPayload.roomCode, parsedPayload.ready);
 
-    if (!room) {
+    if (!result) {
+      return;
+    }
+
+    const { room, changed } = result;
+    if (!changed) {
       return;
     }
 
@@ -719,6 +754,10 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
+    if ((context.player.accessoryIndex ?? 0) === parsedPayload.accessoryIndex) {
+      return;
+    }
+
     context.player.accessoryIndex = parsedPayload.accessoryIndex;
     context.room.lastActivityAt = Date.now();
     this.broadcastRoomState(context.room);
@@ -745,6 +784,9 @@ export class RoomAuthorityDurableObject {
     }
 
     this.sendAck(socketId, messageId, "client:room:setPromptCategory", { ok: true, data: result.room });
+    if (!result.changed) {
+      return;
+    }
     this.broadcastRoomState(result.room);
     this.runInBackground(this.persistRoom(result.room.roomCode), "persist_room_failed");
   }
@@ -769,6 +811,9 @@ export class RoomAuthorityDurableObject {
     }
 
     this.sendAck(socketId, messageId, "client:room:setBotDifficulty", { ok: true, data: result.room });
+    if (!result.changed) {
+      return;
+    }
     this.broadcastRoomState(result.room);
     this.runInBackground(this.persistRoom(result.room.roomCode), "persist_room_failed");
   }
@@ -793,6 +838,9 @@ export class RoomAuthorityDurableObject {
     }
 
     this.sendAck(socketId, messageId, "client:room:setMatchRule", { ok: true, data: result.room });
+    if (!result.changed) {
+      return;
+    }
     this.broadcastRoomState(result.room);
     this.runInBackground(this.persistRoom(result.room.roomCode), "persist_room_failed");
   }
@@ -998,6 +1046,30 @@ export class RoomAuthorityDurableObject {
     this.clearUnjoinedSocketTimeout(socketId);
     this.sockets.delete(socketId);
     this.socketStates.delete(socketId);
+    this.controlRateBuckets.delete(socketId);
+  }
+
+  private consumeControlCommand(socketId: string): boolean {
+    const now = Date.now();
+    const bucket = this.controlRateBuckets.get(socketId) ?? {
+      tokens: CONTROL_COMMAND_BURST,
+      lastRefillAt: now
+    };
+    const elapsedMs = Math.max(0, now - bucket.lastRefillAt);
+    bucket.tokens = Math.min(
+      CONTROL_COMMAND_BURST,
+      bucket.tokens + (elapsedMs / 1000) * CONTROL_COMMANDS_PER_SECOND
+    );
+    bucket.lastRefillAt = now;
+
+    if (bucket.tokens < 1) {
+      this.controlRateBuckets.set(socketId, bucket);
+      return false;
+    }
+
+    bucket.tokens -= 1;
+    this.controlRateBuckets.set(socketId, bucket);
+    return true;
   }
 
   private closeSocket(socketId: string, code = 1000, reason = "closed"): void {
@@ -1823,7 +1895,7 @@ export class RoomAuthorityDurableObject {
     return { room: toPublicRoom(this.room), playerId: player.id };
   }
 
-  private setReady(socketId: string, roomCode: string, ready: boolean): RoomState | null {
+  private setReady(socketId: string, roomCode: string, ready: boolean): { room: RoomState; changed: boolean } | null {
     if (!this.room || normalizeRoomCode(roomCode) !== normalizeRoomCode(this.room.roomCode)) {
       return null;
     }
@@ -1838,6 +1910,10 @@ export class RoomAuthorityDurableObject {
       return null;
     }
 
+    if (player.ready === ready) {
+      return { room: toPublicRoom(this.room), changed: false };
+    }
+
     player.ready = ready;
 
     if (this.room.status === "finished") {
@@ -1848,7 +1924,7 @@ export class RoomAuthorityDurableObject {
         try {
           prompt = selectPromptForRoom(this.room, Date.now() + nextRound);
         } catch {
-          return toPublicRoom(this.room);
+          return { room: toPublicRoom(this.room), changed: true };
         }
 
         if (this.room.players.size < MAX_PLAYERS) {
@@ -1876,10 +1952,10 @@ export class RoomAuthorityDurableObject {
     }
 
     this.room.lastActivityAt = Date.now();
-    return toPublicRoom(this.room);
+    return { room: toPublicRoom(this.room), changed: true };
   }
 
-  private setPromptCategory(socketId: string, roomCode: string, category: PromptCategory): { room: RoomState } | { error: string } {
+  private setPromptCategory(socketId: string, roomCode: string, category: PromptCategory): { room: RoomState; changed: boolean } | { error: string } {
     const context = this.getContext(socketId, roomCode);
     if (!context) {
       return { error: "ルームに参加していません。" };
@@ -1893,13 +1969,17 @@ export class RoomAuthorityDurableObject {
       return { error: "試合中は課題カテゴリを変更できません。" };
     }
 
+    if (context.room.promptCategory === category) {
+      return { room: toPublicRoom(context.room), changed: false };
+    }
+
     context.room.promptCategory = category;
     clearRoomReadyStates(context.room);
     context.room.lastActivityAt = Date.now();
-    return { room: toPublicRoom(context.room) };
+    return { room: toPublicRoom(context.room), changed: true };
   }
 
-  private setBotDifficulty(socketId: string, roomCode: string, difficulty: BotDifficulty): { room: RoomState } | { error: string } {
+  private setBotDifficulty(socketId: string, roomCode: string, difficulty: BotDifficulty): { room: RoomState; changed: boolean } | { error: string } {
     const context = this.getContext(socketId, roomCode);
     if (!context) {
       return { error: "ルームに参加していません。" };
@@ -1913,6 +1993,10 @@ export class RoomAuthorityDurableObject {
       return { error: "試合中は COM 難易度を変更できません。" };
     }
 
+    if (context.room.botDifficulty === difficulty) {
+      return { room: toPublicRoom(context.room), changed: false };
+    }
+
     context.room.botDifficulty = difficulty;
     const bot = context.room.players.get(BOT_PLAYER_ID);
     if (bot) {
@@ -1920,10 +2004,10 @@ export class RoomAuthorityDurableObject {
     }
     clearRoomReadyStates(context.room);
     context.room.lastActivityAt = Date.now();
-    return { room: toPublicRoom(context.room) };
+    return { room: toPublicRoom(context.room), changed: true };
   }
 
-  private setMatchRule(socketId: string, roomCode: string, rule: MatchRule): { room: RoomState } | { error: string } {
+  private setMatchRule(socketId: string, roomCode: string, rule: MatchRule): { room: RoomState; changed: boolean } | { error: string } {
     const context = this.getContext(socketId, roomCode);
     if (!context) {
       return { error: "ルームに参加していません。" };
@@ -1937,11 +2021,15 @@ export class RoomAuthorityDurableObject {
       return { error: "試合中はルールを変更できません。" };
     }
 
+    if (context.room.matchRule === rule) {
+      return { room: toPublicRoom(context.room), changed: false };
+    }
+
     context.room.matchRule = rule;
     syncMatchRuleState(context.room);
     clearRoomReadyStates(context.room);
     context.room.lastActivityAt = Date.now();
-    return { room: toPublicRoom(context.room) };
+    return { room: toPublicRoom(context.room), changed: true };
   }
 
   private startMatch(socketId: string, roomCode: string): { room: RoomState } | { error: string } {
