@@ -12,23 +12,33 @@ export interface Env {
   DEPLOY_COMMIT_SHA?: string;
 }
 
+const OPERATIONAL_NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+  "Pragma": "no-cache",
+  "Expires": "0"
+} as const;
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
-      return Response.json({
-        ok: true,
-        service: "type-battle-cloudflare-worker",
-        check: "liveness",
-        commitSha: env.DEPLOY_COMMIT_SHA ?? "development",
-        timestamp: new Date().toISOString()
-      });
+      return Response.json(
+        {
+          ok: true,
+          service: "type-battle-cloudflare-worker",
+          check: "liveness",
+          commitSha: env.DEPLOY_COMMIT_SHA ?? "development",
+          timestamp: new Date().toISOString()
+        },
+        { headers: OPERATIONAL_NO_STORE_HEADERS }
+      );
     }
 
     if (url.pathname === "/ready" || url.pathname === "/metrics") {
       const gateway = env.GATEWAY.getByName("gateway");
-      return gateway.fetch(new Request(`https://type-battle.internal${url.pathname}`));
+      const response = await gateway.fetch(new Request(`https://type-battle.internal${url.pathname}`));
+      return withOperationalNoStore(response);
     }
 
     if (url.pathname === GATEWAY_ROOM_RATE_LIMIT_PATH) {
@@ -63,4 +73,17 @@ function isAuthorizedRoomStateAccess(request: Request, env: Env): boolean {
   }
 
   return request.headers.get("Authorization") === `Bearer ${env.ROOM_STATE_WRITE_TOKEN}`;
+}
+
+function withOperationalNoStore(response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(OPERATIONAL_NO_STORE_HEADERS)) {
+    headers.set(name, value);
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
 }
