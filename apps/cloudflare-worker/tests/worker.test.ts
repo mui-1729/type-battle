@@ -1177,6 +1177,89 @@ describe("room authority", () => {
     expect(guestSocket.messages).toHaveLength(guestMessageCount);
   });
 
+  it("deals equal HP damage for equivalent desktop romaji and mobile kana input", async () => {
+    const storage = new FakeStorage();
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    const desktopSocket = new FakeSocket();
+    const mobileSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(desktopSocket as unknown as WebSocket, { roomCode: "HP34DM" });
+    roomAuthority.attachSocket(mobileSocket as unknown as WebSocket, { roomCode: "HP34DM" });
+    desktopSocket.receive(JSON.stringify({
+      id: "msg-create-hp-input-parity",
+      type: "client:room:create",
+      payload: {
+        nickname: "Desktop",
+        guestId: "guest-hp-desktop",
+        sessionId: "session-hp-desktop",
+        deviceKind: "desktop"
+      }
+    }));
+    await flushAsyncWork();
+    mobileSocket.receive(JSON.stringify({
+      id: "msg-join-hp-input-parity",
+      type: "client:room:join",
+      payload: {
+        roomCode: "HP34DM",
+        nickname: "Mobile",
+        guestId: "guest-hp-mobile",
+        sessionId: "session-hp-mobile",
+        deviceKind: "mobile"
+      }
+    }));
+    await flushAsyncWork();
+
+    desktopSocket.receive(JSON.stringify({
+      id: "msg-rule-hp-input-parity",
+      type: "client:room:setMatchRule",
+      payload: { roomCode: "HP34DM", rule: "hpBattle" }
+    }));
+    for (const [socket, id] of [[desktopSocket, "desktop"], [mobileSocket, "mobile"]] as const) {
+      socket.receive(JSON.stringify({
+        id: `msg-ready-hp-input-parity-${id}`,
+        type: "client:player:ready",
+        payload: { roomCode: "HP34DM", ready: true }
+      }));
+    }
+    desktopSocket.receive(JSON.stringify({
+      id: "msg-start-hp-input-parity",
+      type: "client:match:start",
+      payload: { roomCode: "HP34DM" }
+    }));
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(3_000);
+    await flushAsyncWork();
+
+    const prompt = getCountdownRoom(desktopSocket).prompt!;
+    const plan = buildRomajiTypingPlan(prompt.typing.hiragana);
+    const canonicalLength = Array.from(prompt.typing.hiragana).length;
+    expect(plan.units.some(
+      (unit) => unit.guide.length !== Array.from(unit.hiragana).length
+    )).toBe(true);
+    expect(plan.guide.length).toBeGreaterThan(canonicalLength);
+
+    // A full cycle also verifies HP battles loop without charging romaji guide
+    // keystrokes as extra damage at the prompt boundary.
+    sendTypingInput(desktopSocket, "HP34DM", plan.guide);
+    await flushAsyncWork();
+    expect((storage.values.get("room") as { room: RoomState }).room.players)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "guest-hp-desktop", hp: 100 }),
+        expect.objectContaining({ id: "guest-hp-mobile", hp: 100 - canonicalLength })
+      ]));
+
+    sendTypingInput(mobileSocket, "HP34DM", prompt.typing.hiragana);
+    await flushAsyncWork();
+    expect((storage.values.get("room") as { room: RoomState }).room.players)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "guest-hp-desktop", hp: 100 - canonicalLength }),
+        expect.objectContaining({ id: "guest-hp-mobile", hp: 100 - canonicalLength })
+      ]));
+  });
+
   it("broadcasts and persists post-finish departures without repeating the match result", async () => {
     const storage = new FakeStorage();
     const roomAuthority = new RoomAuthorityDurableObject(
