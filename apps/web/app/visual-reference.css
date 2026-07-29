@@ -1282,3 +1282,35 @@ select {
   .raceRunner,
   .practiceRunner { transition: none; }
 }
+
+@media (max-height: 700px) {
+  .appShell:not(.isHome) {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .appShell:not(.isHome) .workspace {
+    height: 100%;
+    min-height: 0;
+    margin-top: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .appShell:not(.isHome) .sidePanel,
+  .appShell:not(.isHome) .matchSurface {
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .isLobby .lobbyPrep,
+  .isLobby .lobbyPrepHeader,
+  .isLobby .lobbyRoomCode {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
