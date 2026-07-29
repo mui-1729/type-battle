@@ -639,6 +639,30 @@ test("plays all three stage modes against COM and resets between rematches", asy
   await hostContext.close();
 });
 
+test("continues desktop HP battle input into a second prompt cycle", async ({ page }) => {
+  await page.goto("/");
+  await selectBattleMode(page);
+  await setNickname(page, "LoopPlayer");
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+  await page.getByRole("button", { name: /^HPバトル/ }).click();
+  await page.getByRole("button", { name: "READYにする" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const stage = page.getByTestId("battle-stage");
+  const input = page.getByLabel("入力欄");
+  const opponentHp = stage.locator(".hpBattlePlayerRight [role=progressbar]");
+  const guide = await readInputGuide(page);
+  await input.pressSequentially(guide, { delay: 2 });
+
+  const hpAfterFirstCycle = Number(await opponentHp.getAttribute("aria-valuenow"));
+  await expect(page.locator(".resultPanel")).not.toBeVisible();
+  await page.waitForTimeout(1_100);
+  await input.pressSequentially(guide, { delay: 2 });
+  await expect.poll(async () => Number(await opponentHp.getAttribute("aria-valuenow")))
+    .toBeLessThan(hpAfterFirstCycle);
+  await expect(page.locator(".resultPanel")).not.toBeVisible();
+});
+
 test("forfeits the match after long disconnect", async ({ browser }) => {
   test.setTimeout(60_000);
 

@@ -109,8 +109,11 @@ export function getHomePageViewModel({
   const isRoomPlaying = room?.status === "playing";
   const isPracticePlaying = Boolean(practiceSession && !practiceResult && !room);
   const isTimeAttackPlaying = Boolean(isRoomPlaying && room?.matchRule === "timeAttack");
+  const isLoopingMatchPlaying = Boolean(
+    isRoomPlaying && (room?.matchRule === "timeAttack" || room?.matchRule === "hpBattle")
+  );
   const activeGuideProgressIndex =
-    isTimeAttackPlaying && activeTypingText.length > 0
+    isLoopingMatchPlaying && activeTypingText.length > 0
       ? activeProgress.progressIndex % activeTypingText.length
       : activeProgress.progressIndex;
   const activeCanonicalProgressIndex =
@@ -176,6 +179,7 @@ export function getHomePageViewModel({
     isPracticePlaying,
     activeProgress,
     isTimeAttackPlaying,
+    isLoopingMatchPlaying,
     activeGuideProgressIndex,
     activeProgressPercent,
     activeElapsedMs,

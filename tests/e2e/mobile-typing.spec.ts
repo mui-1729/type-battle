@@ -120,6 +120,7 @@ test("keeps the typing prompt reachable when the software keyboard reduces the v
 });
 
 test("keeps the COM battle stage inside a 390px mobile viewport", async ({ page }) => {
+  test.setTimeout(45_000);
   await page.goto("/");
   await selectBattleMode(page);
   const nickname = "MobilePlayerLong18";
@@ -149,14 +150,31 @@ test("keeps the COM battle stage inside a 390px mobile viewport", async ({ page 
   expect((stageBox?.x ?? 0) + (stageBox?.width ?? 0)).toBeLessThanOrEqual(390);
 
   const guide = (await page.getByLabel("入力ガイド").innerText()).replace(/\s+/g, "");
-  const firstCharacter = guide.slice(0, 1);
-  await textarea.evaluate((element, value) => {
-    const input = element as HTMLTextAreaElement;
-    input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
-    input.value = value;
-    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, isComposing: true }));
-    input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: value }));
-  }, firstCharacter);
+  const typeKana = async (value: string) => {
+    await textarea.evaluate((element, text) => {
+      const input = element as HTMLTextAreaElement;
+      input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+      input.value = text;
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, isComposing: true }));
+      input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: text }));
+    }, value);
+  };
+  for (const character of guide) {
+    await typeKana(character);
+    await page.waitForTimeout(300);
+  }
+
+  const opponentHp = stage.locator(".hpBattlePlayerRight [role=progressbar]");
+  const hpAfterFirstCycle = Number(await opponentHp.getAttribute("aria-valuenow"));
+  await expect(page.locator(".resultPanel")).not.toBeVisible();
+  await page.waitForTimeout(2_000);
+  for (const character of guide.slice(0, 3)) {
+    await typeKana(character);
+    await page.waitForTimeout(300);
+  }
+  await expect.poll(async () => Number(await opponentHp.getAttribute("aria-valuenow")))
+    .toBeLessThan(hpAfterFirstCycle);
+  await expect(page.locator(".resultPanel")).not.toBeVisible();
 
   await expect.poll(async () => {
     const cargoPosition = Number(await stage.locator(".hpPushStageScene").getAttribute("data-cargo-position"));
