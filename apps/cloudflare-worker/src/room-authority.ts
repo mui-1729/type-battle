@@ -490,7 +490,16 @@ export class RoomAuthorityDurableObject {
   }
 
   private async disconnectSocket(socketId: string): Promise<void> {
-    const roomCode = this.socketStates.get(socketId)?.roomCode ?? this.roomCode;
+    const socketState = this.socketStates.get(socketId);
+    const joinedPlayer = socketState?.playerId
+      ? this.room?.players.get(socketState.playerId)
+      : undefined;
+    if (!socketState || !joinedPlayer) {
+      this.detachSocket(socketId);
+      return;
+    }
+
+    const roomCode = socketState.roomCode ?? this.roomCode;
     const room = this.leaveBySocket(socketId);
     this.detachSocket(socketId);
 
@@ -617,7 +626,12 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    const roomCode = this.socketStates.get(socketId)?.roomCode ?? parsedPayload.roomCode;
+    const context = this.getContext(socketId, parsedPayload.roomCode);
+    if (!context) {
+      return;
+    }
+
+    const roomCode = context.room.roomCode;
     const room = this.explicitLeaveBySocket(socketId);
     this.detachSocketFromRoom(socketId);
 
