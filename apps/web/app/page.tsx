@@ -113,6 +113,12 @@ import {
 type ClientSocket = RealtimeSocket;
 
 type HomeMode = "battle" | "solo";
+
+const DAILY_CHALLENGE_RESET_TIME_FORMATTER = new Intl.DateTimeFormat("ja-JP", {
+  timeZone: "Asia/Tokyo",
+  hour: "numeric",
+  minute: "2-digit"
+});
 type SoloSetupView = "menu" | "practice" | "daily" | "mistakes";
 type ExitRequest = "room" | "practice";
 
@@ -1709,11 +1715,7 @@ export default function HomePage() {
   const dailyRetryDisabledReason =
     activePracticeMode === "daily" &&
     (visibleDailyChallengeRecord?.attempts ?? 0) >= DAILY_CHALLENGE_MAX_ATTEMPTS
-      ? `今日の挑戦上限（${DAILY_CHALLENGE_MAX_ATTEMPTS}回）に達しました。次のデイリーチャレンジは${new Intl.DateTimeFormat("ja-JP", {
-          timeZone: "Asia/Tokyo",
-          hour: "numeric",
-          minute: "2-digit"
-        }).format(dailyChallengeInfo.nextChallengeAt)}から挑戦できます。`
+      ? `今日の挑戦上限（${DAILY_CHALLENGE_MAX_ATTEMPTS}回）に達しました。次のデイリーチャレンジは${DAILY_CHALLENGE_RESET_TIME_FORMATTER.format(dailyChallengeInfo.nextChallengeAt)}から挑戦できます。`
       : "";
 
   const copyRoomCode = async () => {

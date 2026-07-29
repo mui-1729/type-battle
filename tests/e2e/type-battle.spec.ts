@@ -821,6 +821,16 @@ test("disables daily retry after the fifth consumed attempt and preserves it on 
   await expect(resultPanel.getByRole("button", { name: "もう一度挑戦" })).toBeVisible();
   await expect(resultPanel.getByRole("status")).toBeVisible();
   await page.screenshot({ path: "test-results/daily-limit-result-mobile.png", fullPage: true });
+  await page.setViewportSize({ width: 320, height: 568 });
+  const retryButton = resultPanel.getByRole("button", { name: "もう一度挑戦" });
+  const retryStatus = resultPanel.getByRole("status");
+  await retryButton.scrollIntoViewIfNeeded();
+  await expect(retryButton).toBeVisible();
+  await expect(retryButton).toBeDisabled();
+  await retryStatus.scrollIntoViewIfNeeded();
+  await expect(retryStatus).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.screenshot({ path: "test-results/daily-limit-result-phone-320.png", fullPage: true });
 
   await page.reload();
   await selectDailyMode(page);
