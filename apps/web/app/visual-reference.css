@@ -1307,3 +1307,217 @@ select {
     max-width: 100%;
   }
 }
+
+/* Keep the customization and result actions inside the fixed game viewport. */
+.isHome .homeModeMenu {
+  gap: clamp(12px, 2vh, 20px);
+}
+
+.isHome .modeCard,
+.isHome .modeCard:hover,
+.isHome .modeCard:focus-within {
+  transform: none;
+  transition: box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.isHome .homeCustomizationBar {
+  grid-template-columns: 54px minmax(90px, 1fr) auto auto;
+  gap: 10px;
+  width: min(960px, 100%);
+  padding: 8px 12px;
+}
+
+.isHome .homeCustomizationAvatar {
+  width: 50px;
+  height: 50px;
+  border-radius: 14px;
+}
+
+.isHome .homeCustomizationAvatar .stickFigure {
+  width: 46px;
+  height: 58px;
+}
+
+.hasResult .resultPanel {
+  gap: 8px;
+  margin-top: 0;
+  padding: 11px;
+}
+
+.hasResult .resultPanelHeader h2 {
+  margin-top: 2px;
+  font-size: 18px;
+}
+
+.hasResult .resultRuleLabel {
+  margin-top: 2px;
+}
+
+.hasResult .resultActions .uiButton {
+  min-height: 38px;
+  padding-block: 7px;
+}
+
+.hasResult .resultCards {
+  gap: 8px;
+}
+
+.hasResult .resultCard {
+  gap: 5px;
+  padding: 9px;
+}
+
+.hasResult .resultFigure {
+  min-height: 48px;
+}
+
+.hasResult .resultFigure .stickFigure {
+  width: 46px;
+  height: 58px;
+}
+
+.hasResult .resultPrimaryStats {
+  gap: 4px;
+}
+
+.hasResult .resultStat {
+  padding: 5px 4px;
+}
+
+.hasResult .quickEquipmentPicker {
+  gap: 4px;
+  padding-top: 5px;
+}
+
+.hasResult .quickEquipmentPicker select {
+  min-height: 30px;
+  padding: 3px 6px;
+}
+
+.hasResult .styleCoinReward {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 10px;
+  padding: 7px 10px;
+}
+
+.hasResult .styleCoinReward > div {
+  gap: 5px;
+}
+
+.hasResult .styleCoinReward > div strong {
+  margin-left: 4px;
+  font-size: 16px;
+}
+
+.hasResult .styleCoinReward ul {
+  gap: 4px;
+}
+
+.hasResult .styleCoinReward li {
+  padding: 3px 6px;
+}
+
+.hasResult .styleCoinReward p {
+  margin-left: auto;
+}
+
+.hasResult .resultDetailsButton {
+  min-height: 34px;
+  padding-block: 5px;
+}
+
+.hasResult .resultReactions {
+  gap: 4px;
+}
+
+.hasResult .resultReactions > div {
+  gap: 4px;
+}
+
+.hasResult .resultReactions button {
+  padding: 4px 7px;
+}
+
+.hasResult .resultReactionStatus,
+.hasResult .resultRemoteReaction {
+  line-height: 1.25;
+}
+
+@media (max-width: 760px) {
+  .isHome .homeModeMenu {
+    gap: 12px;
+  }
+
+  .isHome .homeModeMenu > .gameLogo {
+    width: min(280px, 88vw);
+  }
+
+  .isHome .gameLogoWordmark > span {
+    font-size: clamp(48px, 15vw, 62px);
+  }
+
+  .isHome .gameLogo .stickFigure {
+    width: 42px;
+    height: 50px;
+  }
+
+  .isHome .homeCustomizationBar {
+    grid-template-columns: minmax(58px, 1fr) auto auto;
+    gap: 6px;
+    padding: 7px 8px;
+  }
+
+  .isHome .homeCustomizationAvatar {
+    display: none;
+  }
+
+  .isHome .homeCustomizationBar > button {
+    grid-column: auto;
+    width: auto;
+    min-height: 38px;
+    padding: 7px 9px;
+  }
+
+  .hasResult .resultCards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hasResult .resultFigure {
+    min-height: 38px;
+  }
+
+  .hasResult .resultFigure .stickFigure {
+    width: 38px;
+    height: 48px;
+  }
+}
+
+@media (max-width: 420px) {
+  .isHome .homeCustomizationCopy > span {
+    display: none;
+  }
+
+  .isHome .homeCustomizationCopy strong {
+    font-size: 13px;
+  }
+
+  .isHome .homeCustomizationBar > button {
+    padding-inline: 7px;
+    font-size: 12px;
+  }
+
+  .hasResult .resultCard {
+    padding: 7px;
+  }
+
+  .hasResult .resultFigure {
+    min-height: 32px;
+  }
+
+  .hasResult .resultFigure .stickFigure {
+    width: 34px;
+    height: 42px;
+  }
+}
