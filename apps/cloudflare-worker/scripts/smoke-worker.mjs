@@ -7,7 +7,15 @@ if (!workerUrl) {
   process.exit(1);
 }
 
-const healthResponse = await fetch(`${workerUrl}/health`);
+const healthUrl = new URL("/health", `${workerUrl}/`);
+healthUrl.searchParams.set("probe", crypto.randomUUID());
+const healthResponse = await fetch(healthUrl, {
+  cache: "no-store",
+  headers: {
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache"
+  }
+});
 if (!healthResponse.ok) {
   console.error(`Health check failed: ${healthResponse.status}`);
   process.exit(1);

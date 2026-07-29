@@ -104,11 +104,13 @@ class FakeDurableObjectState {
 class FakeDurableObjectStub {
   fetchCalls = 0;
   lastRequest: Request | null = null;
+  responseBody = "ok";
+  responseInit: ResponseInit = { status: 200 };
 
   async fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     this.fetchCalls += 1;
     this.lastRequest = input instanceof Request ? input : new Request(input, init);
-    return new Response("ok", { status: 200 });
+    return new Response(this.responseBody, this.responseInit);
   }
 }
 
@@ -2213,6 +2215,51 @@ describe("room authority", () => {
 });
 
 describe("worker handler", () => {
+  it("prevents caching operational endpoints without changing their response semantics", async () => {
+    const healthEnv = createEnv();
+    const health = await worker.fetch(
+      new Request("https://example.com/health"),
+      { ...healthEnv, DEPLOY_COMMIT_SHA: "commit-123" } as unknown as Env
+    );
+
+    expect(health.status).toBe(200);
+    expect(health.headers.get("content-type")).toContain("application/json");
+    expect(health.headers.get("cache-control")).toBe("no-store, no-cache, must-revalidate, max-age=0");
+    expect(health.headers.get("pragma")).toBe("no-cache");
+    expect(health.headers.get("expires")).toBe("0");
+    expect(await health.json()).toMatchObject({
+      ok: true,
+      check: "liveness",
+      commitSha: "commit-123"
+    });
+
+    const readyEnv = createEnv();
+    readyEnv.GATEWAY.stub.responseBody = JSON.stringify({ ok: false, error: "not ready" });
+    readyEnv.GATEWAY.stub.responseInit = {
+      status: 503,
+      headers: { "content-type": "application/json; charset=UTF-8" }
+    };
+    const ready = await worker.fetch(new Request("https://example.com/ready"), readyEnv as unknown as Env);
+    expect(ready.status).toBe(503);
+    expect(ready.headers.get("content-type")).toBe("application/json; charset=UTF-8");
+    expect(ready.headers.get("cache-control")).toContain("no-store");
+    expect(await ready.json()).toEqual({ ok: false, error: "not ready" });
+
+    const metricsEnv = createEnv();
+    metricsEnv.GATEWAY.stub.responseBody = "worker_requests_total 1\n";
+    metricsEnv.GATEWAY.stub.responseInit = {
+      headers: { "content-type": "text/plain; version=0.0.4" }
+    };
+    const metrics = await worker.fetch(
+      new Request("https://example.com/metrics"),
+      metricsEnv as unknown as Env
+    );
+    expect(metrics.status).toBe(200);
+    expect(metrics.headers.get("content-type")).toBe("text/plain; version=0.0.4");
+    expect(metrics.headers.get("cache-control")).toContain("no-store");
+    expect(await metrics.text()).toBe("worker_requests_total 1\n");
+  });
+
   it("rejects unauthorized state writes and forwards gateway requests", async () => {
     const env = createEnv();
 
