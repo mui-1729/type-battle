@@ -2642,7 +2642,7 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
         player.progressIndex = loopingMatch
           ? modulo(player.progressIndex + canonicalDelta, promptLength)
           : clamp(player.progressIndex + canonicalDelta, 0, promptLength);
-        attackDamageDelta += completedUnit.guide.length;
+        attackDamageDelta += canonicalDelta;
       }
     }
   }
