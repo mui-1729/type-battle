@@ -487,6 +487,43 @@ describe("cloudflare gateway", () => {
     expect(rejectedSocket.readyState).toBe(3);
   });
 
+  it("prevents one client IP from exhausting gateway socket capacity", async () => {
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const attackerSockets = Array.from({ length: 32 }, () => new FakeSocket());
+
+    await gateway.ready;
+    attackerSockets.forEach((socket) => gateway.attachSocket(socket as unknown as WebSocket, {
+      clientIp: "203.0.113.50"
+    }));
+
+    const rejectedAttackerSocket = new FakeSocket();
+    gateway.attachSocket(rejectedAttackerSocket as unknown as WebSocket, {
+      clientIp: "203.0.113.50"
+    });
+    const otherClientSocket = new FakeSocket();
+    gateway.attachSocket(otherClientSocket as unknown as WebSocket, {
+      clientIp: "198.51.100.20"
+    });
+
+    expect(rejectedAttackerSocket.accepted).toBe(true);
+    expect(rejectedAttackerSocket.readyState).toBe(3);
+    expect(otherClientSocket.readyState).toBe(1);
+  });
+
+  it("does not group sockets without a client IP into one per-IP budget", async () => {
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const sockets = Array.from({ length: 33 }, () => new FakeSocket());
+
+    await gateway.ready;
+    sockets.forEach((socket) => gateway.attachSocket(socket as unknown as WebSocket));
+
+    expect(sockets.every((socket) => socket.readyState === 1)).toBe(true);
+  });
+
   it("reports readiness from durable object storage", async () => {
     const gateway = new RoomDurableObject(
       new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
@@ -516,6 +553,48 @@ describe("cloudflare gateway", () => {
 });
 
 describe("room authority", () => {
+  it("prevents one client IP from exhausting a room's socket capacity", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const attackerSockets = Array.from({ length: 4 }, () => new FakeSocket());
+
+    await roomAuthority.ready;
+    attackerSockets.forEach((socket) => roomAuthority.attachSocket(socket as unknown as WebSocket, {
+      clientIp: "203.0.113.60",
+      roomCode: "IP23LM"
+    }));
+
+    const rejectedAttackerSocket = new FakeSocket();
+    roomAuthority.attachSocket(rejectedAttackerSocket as unknown as WebSocket, {
+      clientIp: "203.0.113.60",
+      roomCode: "IP23LM"
+    });
+    const otherClientSocket = new FakeSocket();
+    roomAuthority.attachSocket(otherClientSocket as unknown as WebSocket, {
+      clientIp: "198.51.100.30",
+      roomCode: "IP23LM"
+    });
+
+    expect(rejectedAttackerSocket.accepted).toBe(true);
+    expect(rejectedAttackerSocket.readyState).toBe(3);
+    expect(otherClientSocket.readyState).toBe(1);
+  });
+
+  it("does not group room sockets without a client IP into one per-IP budget", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const sockets = Array.from({ length: 5 }, () => new FakeSocket());
+
+    await roomAuthority.ready;
+    sockets.forEach((socket) => roomAuthority.attachSocket(socket as unknown as WebSocket, {
+      roomCode: "IP34NO"
+    }));
+
+    expect(sockets.every((socket) => socket.readyState === 1)).toBe(true);
+  });
+
   it("serializes room commands across delayed rate limiting", async () => {
     const storage = new FakeStorage();
     const gateway = new FakeGatewayRateLimitNamespace(10);
