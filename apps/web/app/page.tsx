@@ -66,6 +66,7 @@ import { createTypingMessageBatch } from "./_lib/typing-message-batch";
 import { shouldHandleDesktopTypingKey } from "./_lib/desktop-typing-input";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
 import { resolveRoomSnapshot } from "./_lib/room-state-order";
+import { copyText } from "./_lib/clipboard";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
 import { getPracticeSocketToRelease } from "./_lib/practice-socket-lifecycle";
 import {
@@ -172,6 +173,7 @@ export default function HomePage() {
   const [settingsHydrated, setSettingsHydrated] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [joinPending, setJoinPending] = useState(false);
+  const [createPending, setCreatePending] = useState(false);
   const [tutorialStep, setTutorialStep] = useState<number | null>(null);
   const [matchSettingsOpen, setMatchSettingsOpen] = useState(false);
   const [exitRequest, setExitRequest] = useState<ExitRequest | null>(null);
@@ -199,6 +201,10 @@ export default function HomePage() {
   const [dailyAttemptConsumed, setDailyAttemptConsumed] = useState(false);
   const [mistakeTrendRecord, setMistakeTrendRecord] = useState<MistakeTrendRecord | null>(null);
   const [error, setError] = useState("");
+  const [copyFeedback, setCopyFeedback] = useState<{
+    kind: "idle" | "success" | "error";
+    message: string;
+  }>({ kind: "idle", message: "" });
   const [rematchPending, setRematchPending] = useState(false);
   const [rematchError, setRematchError] = useState("");
   const [storedRoomRecovery, setStoredRoomRecovery] = useState<StoredRoomRecoveryState>({
@@ -217,6 +223,7 @@ export default function HomePage() {
   const [localRealtimeUrl, setLocalRealtimeUrl] = useState("");
   const localProgressRef = useRef<ProgressState>(createEmptyProgress());
   const roomFinishPendingRef = useRef(false);
+  const createPendingRef = useRef(false);
   const practiceProgressRef = useRef<ProgressState>(createEmptyProgress());
   const inputModeRef = useRef<"kana" | "romaji">("romaji");
   const dailyAttemptConsumedRef = useRef(false);
@@ -433,6 +440,16 @@ export default function HomePage() {
     });
   }, []);
 
+  const failPendingRoomCreate = useCallback((message: string) => {
+    if (!createPendingRef.current) {
+      return;
+    }
+
+    createPendingRef.current = false;
+    setCreatePending(false);
+    setError(message);
+  }, []);
+
   useLayoutEffect(() => {
     roomRef.current = room;
     resultRef.current = result;
@@ -495,6 +512,9 @@ export default function HomePage() {
     const isCurrentSocket = () => socketRef.current === socket;
     const applyRoomSnapshot = (nextRoom: RoomState, beforeApply?: () => void) => {
       if (!isCurrentSocket()) {
+        return false;
+      }
+      if (kind === "room" && createPendingRef.current && !roomRef.current) {
         return false;
       }
 
@@ -569,6 +589,13 @@ export default function HomePage() {
       }
 
       setConnected(false);
+      if (kind === "room" && createPendingRef.current && !roomRef.current) {
+        failPendingRoomCreate(
+          reason
+            ? `ルーム作成中に接続が切れました（${reason}）。接続を確認して、もう一度お試しください。`
+            : "ルーム作成中に接続が切れました。接続を確認して、もう一度お試しください。"
+        );
+      }
       reactionRequestPendingRef.current = false;
       setReactionFeedback((current) =>
         current.phase === "sending"
@@ -631,6 +658,10 @@ export default function HomePage() {
       if (!isCurrentSocket()) {
         return;
       }
+      if (kind === "room" && createPendingRef.current && !roomRef.current) {
+        failPendingRoomCreate("ルーム作成中に接続エラーが発生しました。接続を確認して、もう一度お試しください。");
+        return;
+      }
       setError(message);
       setRematchError(message);
       setRematchPending(false);
@@ -652,7 +683,7 @@ export default function HomePage() {
         }
       );
     });
-  }, [resetTyping]);
+  }, [failPendingRoomCreate, resetTyping]);
 
   const connectSocket = useCallback(
     (url: string, kind: "practice" | "room") => {
@@ -1601,14 +1632,20 @@ export default function HomePage() {
     const roomCode = createRoomCode();
     const validationError = validateNickname(currentNickname);
 
+    if (createPendingRef.current) {
+      return;
+    }
+
     if (!realtimeConfigured || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
       return;
     }
 
+    createPendingRef.current = true;
+    setCreatePending(true);
+    setError("");
     void primeSoundPlayback();
     const socket = connectRoomSocket(roomCode);
-    setHomeMode(null);
     socket.emit(
       "room:create",
       {
@@ -1624,12 +1661,19 @@ export default function HomePage() {
         }
 
         if (!response.ok) {
-          setError(response.error);
+          failPendingRoomCreate(
+            response.error === "Realtime request timed out."
+              ? "ルーム作成の応答がありませんでした。接続を確認して、もう一度お試しください。"
+              : response.error
+          );
           disconnectCurrentSocket();
           return;
         }
 
+        createPendingRef.current = false;
+        setCreatePending(false);
         setError("");
+        setCopyFeedback({ kind: "idle", message: "" });
         setPlayerId(response.data.playerId);
         storedRoomCodeRef.current = response.data.roomCode;
         setRoom(response.data.room);
@@ -1948,7 +1992,16 @@ export default function HomePage() {
       return;
     }
 
-    await navigator.clipboard.writeText(room.roomCode);
+    setCopyFeedback({ kind: "idle", message: "" });
+    try {
+      await copyText(room.roomCode);
+      setCopyFeedback({ kind: "success", message: "ルームコードをコピーしました。" });
+    } catch {
+      setCopyFeedback({
+        kind: "error",
+        message: "ルームコードをコピーできませんでした。コードを選択してコピーしてください。",
+      });
+    }
   };
   const changeEquipment = useCallback((equipment: EquipmentSelection) => {
     setCosmeticProgress((current) => {
@@ -2089,9 +2142,15 @@ export default function HomePage() {
 
           {!room && homeMode === "battle" ? (
             <div className="roomActions">
-              <button className="primaryButton" type="button" onClick={createRoom} disabled={!realtimeConfigured}>
+              <button
+                className="primaryButton"
+                type="button"
+                onClick={createRoom}
+                disabled={!realtimeConfigured || createPending}
+                aria-busy={createPending}
+              >
                 <Swords size={18} />
-                ルームを作成
+                {createPending ? "作成中…" : "ルームを作成"}
               </button>
               <div className="joinRow">
                 <input
@@ -2100,6 +2159,10 @@ export default function HomePage() {
                   value={joinCode}
                   maxLength={8}
                   onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
+                  onPaste={(event) => {
+                    event.preventDefault();
+                    setJoinCode(event.clipboardData.getData("text").trim().toUpperCase().slice(0, 8));
+                  }}
                   suppressHydrationWarning
                 />
                 <button
@@ -2124,6 +2187,15 @@ export default function HomePage() {
               <button className="iconButton" type="button" onClick={copyRoomCode} title="ルームコードをコピー">
                 <Clipboard size={18} />
               </button>
+              {room.status !== "waiting" && copyFeedback.message ? (
+                <p
+                  className={copyFeedback.kind === "error" ? "errorText" : "infoText"}
+                  role={copyFeedback.kind === "error" ? "alert" : "status"}
+                  aria-live="polite"
+                >
+                  {copyFeedback.message}
+                </p>
+              ) : null}
             </div>
           ) : null}
 
@@ -2317,6 +2389,7 @@ export default function HomePage() {
                   ownedHeldItemIds={cosmeticProgress.ownedHeldItemIds}
                   onEquipmentChange={changeEquipment}
                   onCopyRoomCode={copyRoomCode}
+                  copyFeedback={copyFeedback}
                   onToggleReady={setReady}
                   onMatchRuleChange={setMatchRule}
                   onPromptCategoryChange={setPromptCategory}

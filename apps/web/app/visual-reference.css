@@ -832,6 +832,10 @@ select {
 .accessoryPicker { position: absolute; inset: 45% 25px auto; grid-template-columns: 58px 1fr 58px; pointer-events: none; }
 .accessoryPicker button { width: 58px; min-height: 58px; pointer-events: auto; color: var(--game-blue); border: 0; border-radius: 50%; background: var(--game-card); box-shadow: 0 6px 14px rgba(0,48,115,.2); }
 .accessoryPicker span { visibility: hidden; }
+.lobbyPlayerCard.hasEquipmentPicker { grid-template-rows: 82px minmax(0, 1fr) auto; min-height: 470px; }
+.lobbyPlayerCard .accessoryPicker.quickEquipmentPicker { position: static; inset: auto; grid-template-columns: minmax(132px, .9fr) minmax(0, 1.1fr); gap: 10px; pointer-events: auto; }
+.lobbyPlayerCard .accessoryPicker.quickEquipmentPicker span { visibility: visible; }
+.lobbyPlayerCard .accessoryPicker.quickEquipmentPicker select { min-height: 44px; background: var(--game-card); }
 .lobbyPlayerCard .readyBadge { position: absolute; bottom: 18px; left: 20px; z-index: 3; min-height: 50px; padding: 8px 16px; color: color-mix(in srgb, var(--game-ink) 72%, transparent); border: 1px solid var(--game-card-border); border-radius: 14px; background: color-mix(in srgb, var(--game-card) 92%, transparent); font-size: 16px; }
 .lobbyPlayerCard .readyBadge.active { color: var(--game-success-text); }
 .lobbyPrepControls { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 128px; gap: 18px; width: min(1320px, 100%); height: 128px; margin: 0 auto; }
@@ -1189,6 +1193,9 @@ select {
   .lobbyPlayerCard .playerIdentity { margin-left: 32px; }
   .lobbyPlayerCard .playerIdentityCopy > strong { font-size: 22px; }
   .accessoryPicker { inset: 40% 12px auto 45%; }
+  .lobbyPlayerCard.hasEquipmentPicker { grid-template-columns: 1fr; grid-template-rows: auto 210px auto; height: auto; min-height: 0; }
+  .lobbyPlayerCard.hasEquipmentPicker .lobbyFigureArea { grid-column: 1; grid-row: 2; }
+  .lobbyPlayerCard.hasEquipmentPicker .quickEquipmentPicker { grid-column: 1; grid-row: 3; }
   .lobbyPrepControls { display: none; }
   .isLobby .lobbyPrepControls { display: block; width: 100%; height: auto; }
   .isLobby .lobbySettingsCard { display: flex; width: 100%; height: auto; min-height: 84px; }

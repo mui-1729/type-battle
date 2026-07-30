@@ -1084,6 +1084,15 @@ textarea::placeholder {
   transform: rotate(-4deg);
 }
 
+/* Keep lobby players lively while they wait without reusing the match-running pose. */
+.lobbyFigureArea .stickFigure[data-pose="idle"] .stickFigureLegFront {
+  animation: lobbyIdleStepFront 860ms ease-in-out infinite alternate;
+}
+
+.lobbyFigureArea .stickFigure[data-pose="idle"] .stickFigureLegBack {
+  animation: lobbyIdleStepBack 860ms ease-in-out infinite alternate;
+}
+
 .stickFigure[data-pose="run"] .stickFigureBody {
   animation: battleStageRunBob 340ms ease-in-out infinite alternate;
 }
@@ -1226,6 +1235,24 @@ textarea::placeholder {
   }
   to {
     transform: translateY(-2px) rotate(-3deg);
+  }
+}
+
+@keyframes lobbyIdleStepFront {
+  from {
+    transform: rotate(-7deg) translateY(1px);
+  }
+  to {
+    transform: rotate(7deg) translateY(-1px);
+  }
+}
+
+@keyframes lobbyIdleStepBack {
+  from {
+    transform: rotate(7deg) translateY(-1px);
+  }
+  to {
+    transform: rotate(-7deg) translateY(1px);
   }
 }
 
