@@ -23,6 +23,9 @@ for (const viewport of viewports) {
     const localCard = page.locator(".lobbyPlayerCard.hasEquipmentPicker");
     const picker = localCard.locator(".quickEquipmentPicker");
     const figure = localCard.locator(".lobbyFigureArea");
+    const header = localCard.locator(".lobbyPlayerCardTop");
+    const identity = header.locator(".playerIdentity");
+    const waitingBadge = header.locator(".readyBadge");
     await expect(localCard).toHaveCount(1);
     await expect(picker.locator("select")).toHaveCount(2);
 
@@ -45,6 +48,35 @@ for (const viewport of viewports) {
       overlapArea: 0,
       pickerFollowsFigure: true
     });
+
+    const headerGeometry = await header.evaluate((headerElement) => {
+      const card = headerElement.closest<HTMLElement>(".lobbyPlayerCard")!;
+      const identityElement = headerElement.querySelector<HTMLElement>(".playerIdentity")!;
+      const badgeElement = headerElement.querySelector<HTMLElement>(".readyBadge")!;
+      const figureElement = card.querySelector<HTMLElement>(".lobbyFigureArea")!;
+      const cardRect = card.getBoundingClientRect();
+      const identityRect = identityElement.getBoundingClientRect();
+      const badgeRect = badgeElement.getBoundingClientRect();
+      const figureRect = figureElement.getBoundingClientRect();
+      const overlapWidth = Math.max(0, Math.min(identityRect.right, badgeRect.right) - Math.max(identityRect.left, badgeRect.left));
+      const overlapHeight = Math.max(0, Math.min(identityRect.bottom, badgeRect.bottom) - Math.max(identityRect.top, badgeRect.top));
+      return {
+        identityAndBadgeDoNotOverlap: overlapWidth * overlapHeight === 0,
+        headerFitsCard: identityRect.left >= cardRect.left && badgeRect.right <= cardRect.right,
+        figureStartsAfterHeader: figureRect.top >= headerElement.getBoundingClientRect().bottom
+      };
+    });
+    expect(headerGeometry).toEqual({
+      identityAndBadgeDoNotOverlap: true,
+      headerFitsCard: true,
+      figureStartsAfterHeader: true
+    });
+    await expect(identity).toBeVisible();
+    await expect(waitingBadge).toHaveText("WAITING");
+    if (viewport.width === 320) {
+      const decorationWidth = await localCard.evaluate((card) => getComputedStyle(card, "::before").width);
+      expect(decorationWidth).toBe("48px");
+    }
 
     const selects = picker.locator("select");
     await selects.first().selectOption("headband");
