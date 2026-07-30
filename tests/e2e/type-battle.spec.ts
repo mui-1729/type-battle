@@ -1109,6 +1109,44 @@ test("applies the saved font size to typing text without horizontal overflow", a
   await mobileContext.close();
 });
 
+test("keeps the compact normal type scale in desktop battles", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+
+  await page.goto("/");
+  await setNickname(page, "BattleFont");
+  await selectBattleMode(page);
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+  await page.getByRole("button", { name: "READYにする" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const readPromptMetrics = () => page.locator(".promptBox").evaluate((element) => ({
+    display: Number.parseFloat(getComputedStyle(element.querySelector(".promptDisplay")!).fontSize),
+    guide: Number.parseFloat(getComputedStyle(element.querySelector(".promptGuide")!).fontSize),
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth
+  }));
+
+  const normal = await readPromptMetrics();
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "小" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  const small = await readPromptMetrics();
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "大" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  const large = await readPromptMetrics();
+
+  expect(normal.display).toBe(32);
+  expect(normal.guide).toBeCloseTo(18.56, 1);
+  expect(large.display).toBeGreaterThan(normal.display);
+  expect(normal.display).toBeGreaterThan(small.display);
+  expect(large.guide).toBeGreaterThan(normal.guide);
+  expect(normal.guide).toBeGreaterThan(small.guide);
+  expect(large.documentWidth).toBeLessThanOrEqual(large.viewportWidth);
+  await context.close();
+});
+
 test("keeps explicit and system dark theme text readable", async ({ browser }) => {
   const systemContext = await browser.newContext({
     colorScheme: "dark",

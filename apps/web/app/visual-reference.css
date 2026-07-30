@@ -1072,6 +1072,10 @@ select {
 @media (min-width: 761px) {
   .isBattle .battleStage { height: min(47dvh, 470px); }
   .isBattle .promptBox { gap: 10px; height: min(230px, 26dvh); min-height: 0; margin-top: 12px; padding-block: 20px; }
+  /* Battle uses a deliberately more compact baseline than practice. */
+  .font-small .isBattle { --typing-prompt-display-size: clamp(22px, 2vw, 32px); --typing-prompt-guide-size: clamp(12px, 1.2vw, 18px); }
+  .font-normal .isBattle { --typing-prompt-display-size: clamp(26px, 2.5vw, 40px); --typing-prompt-guide-size: clamp(14px, 1.45vw, 22px); }
+  .font-large .isBattle { --typing-prompt-display-size: clamp(32px, 3vw, 50px); --typing-prompt-guide-size: clamp(17px, 1.8vw, 28px); }
   .isBattle .promptDisplay { font-size: var(--typing-prompt-display-size, clamp(26px, 2.5vw, 40px)); }
   .isBattle .promptGuide { font-size: var(--typing-prompt-guide-size, clamp(14px, 1.45vw, 22px)); }
 }
