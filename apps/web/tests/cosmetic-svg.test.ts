@@ -28,6 +28,16 @@ function renderHeld(id: HeldItemId): string {
 }
 
 describe("cosmetic SVG artwork", () => {
+  it("shapes starter headwear around the head instead of as horizontal bars", () => {
+    const cap = renderHead("cap");
+    const headband = renderHead("headband");
+
+    expect(cap).toContain('d="M23 14C24 7 28 3 33 3c6 0 9 4 9 11Z"');
+    expect(cap).toContain('d="M21 14c7-2 16-2 22 1-3 2-8 3-13 1-4-1-7-1-9-1Z"');
+    expect(headband).toContain('d="M22 12c5-3 15-3 20 0l-1 5c-5-2-13-2-18 0Z"');
+    expect(headband).not.toMatch(/d="M21 12h22v6H21z"/u);
+  });
+
   it("renders every head accessory without text or emoji nodes", () => {
     for (const id of HEAD_ACCESSORY_IDS) {
       const markup = renderHead(id);
