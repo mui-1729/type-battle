@@ -563,16 +563,38 @@ test("shows acknowledged reactions, filters disabled incoming reactions, and sup
   await expect(guestKeyboardReaction).toBeDisabled();
   const mobileReactionGeometry = await guestResultReactions.evaluate((element) => {
     const rect = element.getBoundingClientRect();
+    const buttons = Array.from(element.querySelectorAll<HTMLButtonElement>("button"));
+    let scrollOwner: HTMLElement | null = element.parentElement;
+    while (
+      scrollOwner &&
+      (!/(auto|scroll)/.test(getComputedStyle(scrollOwner).overflowY) ||
+        scrollOwner.scrollHeight <= scrollOwner.clientHeight)
+    ) {
+      scrollOwner = scrollOwner.parentElement;
+    }
     return {
       documentWidth: document.documentElement.scrollWidth,
       viewportWidth: window.innerWidth,
       left: rect.left,
-      right: rect.right
+      right: rect.right,
+      buttonHeights: buttons.map((button) => button.getBoundingClientRect().height),
+      scrollOwnerClassName: scrollOwner?.className ?? null
     };
   });
   expect(mobileReactionGeometry.documentWidth).toBeLessThanOrEqual(mobileReactionGeometry.viewportWidth);
   expect(mobileReactionGeometry.left).toBeGreaterThanOrEqual(0);
   expect(mobileReactionGeometry.right).toBeLessThanOrEqual(mobileReactionGeometry.viewportWidth);
+  expect(mobileReactionGeometry.buttonHeights.length).toBeGreaterThan(0);
+  expect(Math.min(...mobileReactionGeometry.buttonHeights)).toBeGreaterThanOrEqual(44);
+  expect(mobileReactionGeometry.scrollOwnerClassName).toMatch(/workspace|matchSurface/);
+
+  const lastReactionButton = guestResultReactions.getByRole("button").last();
+  await lastReactionButton.scrollIntoViewIfNeeded();
+  await expect(lastReactionButton).toBeVisible();
+  const lastReactionBox = await lastReactionButton.boundingBox();
+  expect(lastReactionBox).not.toBeNull();
+  expect(lastReactionBox!.y).toBeGreaterThanOrEqual(0);
+  expect(lastReactionBox!.y + lastReactionBox!.height).toBeLessThanOrEqual(568);
 
   await expect(hostResultReactions.getByRole("button", { name: "もう一戦" })).toBeEnabled({ timeout: 5_000 });
   await hostResultReactions.getByRole("button", { name: "もう一戦" }).click();
