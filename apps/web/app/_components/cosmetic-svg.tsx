@@ -117,10 +117,11 @@ export function HeadAccessorySvg({ id }: HeadAccessorySvgProps) {
     case "wizard-hat":
       return (
         <g {...common}>
-          <path fill={purple} d="M23 13 31-9c7 4 10 10 8 20z" />
-          <path fill={purple} d="M15 14c9-4 25-4 34 0-7 7-27 7-34 0Z" />
-          <path fill={gold} d="M22 10h18l2 5H20z" />
-          <path fill={gold} stroke="none" d="m31 0 1.5 3 3 .5-2 2 1 3-3.5-2-3 2 1-3-2.5-2 3-.5z" />
+          <path fill={purple} d="M22 13c2-8 3-15 8-21 4 3 8 5 11 9-5 1-7 4-8 9l3 4c-4 1-9 1-14-1Z" />
+          <path fill="#a78bfa" stroke="none" d="M27 8c1-6 3-10 5-13 2 2 4 3 6 5-5 2-7 6-8 10Z" />
+          <path fill="#4c1d95" stroke="none" d="M21 13c7-3 19-3 27 1-8 5-23 5-31 0Z" />
+          <path fill="#6d28d9" d="M14 15c8-5 28-5 37 1-7 6-30 7-37-1Z" />
+          <path fill={gold} d="m25 10 2 4 4 .5-3 3 .7 4-3.7-2-3.5 2 .8-4-3-3 4-.5Z" />
         </g>
       );
     case "samurai-helmet":
@@ -149,8 +150,11 @@ export function HeadAccessorySvg({ id }: HeadAccessorySvgProps) {
     case "halo":
       return (
         <g {...common}>
-          <ellipse fill="none" stroke={gold} strokeWidth="4" cx="32" cy="0" rx="15" ry="4" />
-          <path stroke={gold} d="M14-1 9-4m41 3 5-3M15 5l-5 3m39-3 5 3" />
+          <path fill="#fff7c2" d="M19 1c0-7 26-7 26 0s-26 7-26 0Zm5 0c0 2 16 2 16 0s-16-2-16 0Z" />
+          <path fill={gold} d="M19 1c0-7 26-7 26 0-2 5-24 5-26 0Zm5 0c1 2 14 2 16 0-2-3-14-3-16 0Z" />
+          <path fill="#fff" d="M44-1c6-6 10-6 13-5-2 2-3 4-5 5 4-2 7-1 9 1-4 2-7 3-10 3 4 1 6 3 7 5-5 1-10-1-14-5Z" />
+          <path fill="#dbeafe" stroke="none" d="M47 0c4-3 7-4 10-4-4 4-6 5-10 6 4 0 6 1 8 3-4 0-7-1-10-3Z" />
+          <path fill={gold} stroke="none" d="m15-7 1 3 3 1-3 1-1 3-1-3-3-1 3-1Zm32-3 1 3 3 1-3 1-1 3-1-3-3-1 3-1Z" />
         </g>
       );
   }
@@ -270,11 +274,13 @@ export function HeldItemSvg({ id }: HeldItemSvgProps) {
     case "frozen-tuna":
       return (
         <g {...common}>
-          <path fill="#82c9ff" d="M42 43c7-13 14-18 24-16-1 9-8 17-19 21z" />
-          <path fill="#dff5ff" d="M45 42c8-7 14-10 20-11-3 8-9 13-18 16z" />
-          <path fill="#5ba7df" d="m42 43-7-6 2 9-7 4 12 1z" />
-          <circle fill={navy} stroke="none" cx="61" cy="31" r="1.5" />
-          <path stroke={cyan} d="m49 27-2-5m8 4 1-6m4 7 5-4" />
+          <path fill="#8ee7ff" d="m41 47 5-9c2-8 8-15 17-21l5-10 2 11 7 2-9 4c-3 11-10 20-20 25l-7 4 2-6Z" />
+          <path fill="#dff8ff" d="M48 38c3-8 9-14 17-19l3 2c-6 5-10 11-13 18Z" />
+          <path fill="#3ba9e8" d="m43 45-9-5 3 8-8 3 13 2Z" />
+          <path fill="#dff8ff" d="m49 31-6-5 7-1m4-5 3-7 2 6" />
+          <circle fill="#fff" cx="65" cy="21" r="3.2" />
+          <circle fill={navy} stroke="none" cx="65" cy="21" r="1.5" />
+          <path fill="none" stroke="#fff" strokeWidth="1.5" d="m47 39 15-14m-9 20 11-13" />
         </g>
       );
     case "katana":
@@ -300,11 +306,14 @@ export function HeldItemSvg({ id }: HeldItemSvgProps) {
     case "giant-pencil":
       return (
         <g {...common}>
-          <path fill={gold} d="m43 48 12-32 7 3-12 32z" />
-          <path fill="#f2c49b" d="m55 16 7-10 1 13z" />
-          <path fill={navy} d="m60 9 2-3 1 4z" />
-          <path fill={red} d="m43 48 7 3-3 7-7-3z" />
-          <path fill="#b7c4d8" d="m44 45 8 3-2 5-8-3z" />
+          <path fill="#facc15" d="m38 51 19-37 10 5-19 37Z" />
+          <path fill="#fef08a" stroke="none" d="m43 48 18-31 3 2-18 33Z" />
+          <path fill="#eab308" stroke="none" d="m52 54 12-35 3 2-15 35Z" />
+          <path fill="#f3c58c" d="m57 14 8-12 2 17Z" />
+          <path fill={navy} d="m64 4 1-2 2 4Z" />
+          <path fill="#cbd5e1" d="m38 51 10 5-3 6-10-5Z" />
+          <path fill="#f59e0b" d="m35 57 10 5-3 6-10-5Z" />
+          <path stroke="#fff" strokeWidth="1.2" d="m39 53 8 4m-10 2 8 4" />
         </g>
       );
   }
