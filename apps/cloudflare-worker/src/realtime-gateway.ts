@@ -69,6 +69,7 @@ const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありませ�
 const MAX_WEB_SOCKET_MESSAGE_BYTES = 16 * 1024;
 const MAX_MESSAGE_ID_LENGTH = 80;
 const MAX_GATEWAY_SOCKETS = 256;
+const MAX_GATEWAY_SOCKETS_PER_CLIENT_IP = 8;
 const GATEWAY_SOCKET_IDLE_MS = 15 * 60_000;
 const ROOM_COMMAND_ERROR = "Room commands must use /rooms/:roomCode/socket.";
 export const GATEWAY_ROOM_RATE_LIMIT_PATH = "/__internal/room-rate-limit";
@@ -171,7 +172,14 @@ export class RealtimeGatewayDurableObject {
 
   attachSocket(socket: CloudflareSocketLike, options: AttachSocketOptions = {}): string {
     const socketId = crypto.randomUUID();
-    if (this.sockets.size >= MAX_GATEWAY_SOCKETS) {
+    const clientIp = normalizeClientIp(options.clientIp);
+    const clientSocketCount = Array.from(this.socketStates.values())
+      .filter((state) => state.clientIp === clientIp)
+      .length;
+    if (
+      this.sockets.size >= MAX_GATEWAY_SOCKETS ||
+      clientSocketCount >= MAX_GATEWAY_SOCKETS_PER_CLIENT_IP
+    ) {
       socket.accept();
       socket.close(1013, "Gateway connection limit exceeded.");
       return socketId;
@@ -180,7 +188,7 @@ export class RealtimeGatewayDurableObject {
     this.sockets.set(socketId, socket);
     this.socketStates.set(socketId, {
       socketId,
-      clientIp: normalizeClientIp(options.clientIp)
+      clientIp
     });
     socket.accept();
 

@@ -186,6 +186,7 @@ const MAINTENANCE_ALARM_FALLBACK_MS = 5_000;
 const STALE_MAINTENANCE_ALARM_RETRY_MS = 60_000;
 const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
 const MAX_ROOM_SOCKETS = 16;
+const MAX_ROOM_SOCKETS_PER_CLIENT_IP = 4;
 const UNJOINED_SOCKET_IDLE_MS = 30_000;
 const GUEST_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MATCH_RESULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -378,8 +379,15 @@ export class RoomAuthorityDurableObject {
   attachSocket(socket: CloudflareSocketLike, options: AttachSocketOptions = {}): string {
     const socketId = crypto.randomUUID();
     const roomCode = options.roomCode ? normalizeRoomCode(options.roomCode) : null;
+    const clientIp = normalizeClientIp(options.clientIp);
+    const clientSocketCount = Array.from(this.socketStates.values())
+      .filter((state) => state.clientIp === clientIp)
+      .length;
 
-    if (this.sockets.size >= MAX_ROOM_SOCKETS) {
+    if (
+      this.sockets.size >= MAX_ROOM_SOCKETS ||
+      clientSocketCount >= MAX_ROOM_SOCKETS_PER_CLIENT_IP
+    ) {
       socket.accept();
       socket.close(1013, "Room connection limit exceeded.");
       return socketId;
@@ -392,7 +400,7 @@ export class RoomAuthorityDurableObject {
     this.sockets.set(socketId, socket);
     this.socketStates.set(socketId, {
       socketId,
-      clientIp: normalizeClientIp(options.clientIp),
+      clientIp,
       ...(roomCode ? { roomCode } : {})
     });
     socket.accept();
