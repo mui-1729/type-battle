@@ -266,8 +266,15 @@ test("keeps room creation visible while pending and copies the code for paste-to
   await host.setViewportSize({ width: 1280, height: 720 });
 
   const roomCode = await host.locator(".roomMeta strong").innerText();
-  await host.getByTestId("lobby-prep").getByRole("button", { name: "ルームコードをコピー" })
-    .evaluate((button) => (button as HTMLButtonElement).click());
+  const copyRoomCodeButton = host.getByTestId("lobby-prep").getByRole("button", { name: "ルームコードをコピー" });
+  await expect(copyRoomCodeButton).toBeVisible();
+  await expect(copyRoomCodeButton).toHaveJSProperty("disabled", false);
+  await expect.poll(() => copyRoomCodeButton.evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    const hitTarget = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return hitTarget === button || button.contains(hitTarget);
+  })).toBe(true);
+  await copyRoomCodeButton.click();
   await expect(host.getByTestId("lobby-prep").getByText("ルームコードをコピーしました。")).toBeVisible();
   const copiedRoomCode = await host.evaluate(() =>
     (window as Window & { copiedRoomCode?: string }).copiedRoomCode ?? ""
@@ -275,6 +282,12 @@ test("keeps room creation visible while pending and copies the code for paste-to
   expect(copiedRoomCode).toBe(roomCode);
   await host.setViewportSize({ width: 320, height: 720 });
   await expect(host.getByTestId("lobby-prep").getByText("ルームコードをコピーしました。")).toBeVisible();
+  await expect.poll(() => copyRoomCodeButton.evaluate((button) => {
+    const rect = button.getBoundingClientRect();
+    const hitTarget = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return hitTarget === button || button.contains(hitTarget);
+  })).toBe(true);
+  await copyRoomCodeButton.click();
 
   await guest.goto("/");
   await selectBattleMode(guest);
