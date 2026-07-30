@@ -129,16 +129,21 @@ html.theme-dark {
   --backdrop: rgba(0, 0, 0, 0.68);
 }
 
-.font-small .promptBox {
-  font-size: 22px;
+/* The prompt children define their own type scale in visual-reference.css.
+ * Keep the setting values here so every game surface can consume them. */
+.font-small {
+  --typing-prompt-display-size: clamp(24px, 2.5vw, 40px);
+  --typing-prompt-guide-size: clamp(13px, 1.4vw, 22px);
 }
 
-.font-normal .promptBox {
-  font-size: 30px;
+.font-normal {
+  --typing-prompt-display-size: clamp(30px, 3.1vw, 52px);
+  --typing-prompt-guide-size: clamp(16px, 1.8vw, 28px);
 }
 
-.font-large .promptBox {
-  font-size: 42px;
+.font-large {
+  --typing-prompt-display-size: clamp(36px, 3.7vw, 62px);
+  --typing-prompt-guide-size: clamp(19px, 2.2vw, 34px);
 }
 
 .reduced-motion .progressTrack span,
