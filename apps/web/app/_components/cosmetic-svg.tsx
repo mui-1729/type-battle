@@ -31,15 +31,16 @@ export function HeadAccessorySvg({ id }: HeadAccessorySvgProps) {
     case "cap":
       return (
         <g {...common}>
-          <path fill={blue} d="M23 14C24 7 28 3 33 3c6 0 9 4 9 11Z" />
-          <path fill={cyan} d="M21 14c7-2 16-2 22 1-3 2-8 3-13 1-4-1-7-1-9-1Z" />
+          <path fill={blue} d="M23 10C24 2 28-2 33-2c6 0 10 5 10 13-7-2-13-2-20-1Z" />
+          <path fill={cyan} d="M20 10c7-2 17-2 24 1-4 2-9 2-14 1-4-1-7-1-10-1Z" />
         </g>
       );
     case "headband":
       return (
         <g {...common}>
-          <path fill={red} d="M22 12c5-3 15-3 20 0l-1 5c-5-2-13-2-18 0Z" />
-          <path fill={red} d="m41 13 8-3-3 6 4 4-9-3Z" />
+          <path fill={red} d="M22 7c5-3 15-3 20 0l-1 5c-5-2-13-2-18 0Z" />
+          <circle fill={red} cx="42" cy="9" r="2.5" />
+          <path fill={red} d="m43 9 7-4-2 6 4 3-9-2Z" />
         </g>
       );
     case "sunglasses":

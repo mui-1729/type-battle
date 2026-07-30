@@ -32,10 +32,13 @@ describe("cosmetic SVG artwork", () => {
     const cap = renderHead("cap");
     const headband = renderHead("headband");
 
-    expect(cap).toContain('d="M23 14C24 7 28 3 33 3c6 0 9 4 9 11Z"');
-    expect(cap).toContain('d="M21 14c7-2 16-2 22 1-3 2-8 3-13 1-4-1-7-1-9-1Z"');
-    expect(headband).toContain('d="M22 12c5-3 15-3 20 0l-1 5c-5-2-13-2-18 0Z"');
-    expect(headband).not.toMatch(/d="M21 12h22v6H21z"/u);
+    expect(cap).toContain('d="M23 10C24 2 28-2 33-2c6 0 10 5 10 13-7-2-13-2-20-1Z"');
+    expect(headband).toContain('d="M22 7c5-3 15-3 20 0l-1 5c-5-2-13-2-18 0Z"');
+    expect(headband).toContain('cx="42" cy="9" r="2.5"');
+
+    for (const starterHeadwear of [cap, headband]) {
+      expect(starterHeadwear).not.toMatch(/\sd="[^"]*[hH]\d/u);
+    }
   });
 
   it("renders every head accessory without text or emoji nodes", () => {
