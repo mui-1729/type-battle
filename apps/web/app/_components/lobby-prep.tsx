@@ -266,9 +266,14 @@ function LobbyPlayerCard({
   reaction = ""
 }: LobbyPlayerCardProps) {
   const kind = player?.isBot ? "com" : isLocal ? "you" : slot === "1P" ? "one" : "two";
+  const hasEquipmentPicker = Boolean(
+    isLocal && player && onEquipmentChange && ownedHeadAccessoryIds && ownedHeldItemIds
+  );
 
   return (
-    <SurfaceCard className={`lobbyPlayerCard ${player ? "" : "isEmpty"}`.trim()}>
+    <SurfaceCard
+      className={`lobbyPlayerCard ${player ? "" : "isEmpty"} ${hasEquipmentPicker ? "hasEquipmentPicker" : ""}`.trim()}
+    >
       <div className="lobbyPlayerCardTop">
         <PlayerIdentity
           nickname={player?.nickname ?? fallbackLabel}
@@ -292,7 +297,7 @@ function LobbyPlayerCard({
           <div className="lobbyEmptyFigure" aria-hidden="true">?</div>
         )}
       </div>
-      {isLocal && player && onEquipmentChange && ownedHeadAccessoryIds && ownedHeldItemIds ? (
+      {hasEquipmentPicker && onEquipmentChange && ownedHeadAccessoryIds && ownedHeldItemIds ? (
         <div className="accessoryPicker quickEquipmentPicker" aria-label="自分の装備">
           <label>
             <span>頭</span>
