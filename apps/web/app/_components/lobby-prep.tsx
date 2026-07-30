@@ -89,13 +89,15 @@ export function LobbyPrep({
             <Clipboard size={18} />
           </Button>
         </div>
-        <p
-          className={copyFeedback.kind === "error" ? "errorText" : "infoText"}
-          role={copyFeedback.kind === "error" ? "alert" : "status"}
-          aria-live="polite"
-        >
-          {copyFeedback.message}
-        </p>
+        {copyFeedback.message ? (
+          <p
+            className={copyFeedback.kind === "error" ? "errorText" : "infoText"}
+            role={copyFeedback.kind === "error" ? "alert" : "status"}
+            aria-live="polite"
+          >
+            {copyFeedback.message}
+          </p>
+        ) : null}
       </div>
 
       <div className="lobbyPlayerGrid" aria-label="参加プレイヤー">

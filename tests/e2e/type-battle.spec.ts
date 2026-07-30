@@ -261,6 +261,9 @@ test("keeps room creation visible while pending and copies the code for paste-to
   await expect(pendingButton).toHaveAttribute("aria-busy", "true");
   await expect(host.getByRole("button", { name: "モード選択へ" })).toBeVisible();
   await expect(host.getByTestId("lobby-prep")).toBeVisible();
+  await host.setViewportSize({ width: 320, height: 720 });
+  await expect(host.locator(".lobbyPrepHeader > .infoText, .lobbyPrepHeader > .errorText")).toHaveCount(0);
+  await host.setViewportSize({ width: 1280, height: 720 });
 
   const roomCode = await host.locator(".roomMeta strong").innerText();
   await host.getByTestId("lobby-prep").getByRole("button", { name: "ルームコードをコピー" })
@@ -294,6 +297,60 @@ test("keeps room creation visible while pending and copies the code for paste-to
 
   await hostContext.close();
   await guestContext.close();
+});
+
+test("makes a timed-out room creation retryable", async ({ browser }) => {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    const webSocketPrototype = WebSocket.prototype as unknown as {
+      addEventListener: (
+        this: WebSocket,
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | AddEventListenerOptions,
+      ) => void;
+    };
+    const nativeAddEventListener = webSocketPrototype.addEventListener;
+    let droppedFirstAck = false;
+    webSocketPrototype.addEventListener = function (type, listener, options) {
+      if (type !== "message") {
+        nativeAddEventListener.call(this, type, listener, options);
+        return;
+      }
+      nativeAddEventListener.call(this, type, (event) => {
+        if (
+          !droppedFirstAck &&
+          event instanceof MessageEvent &&
+          typeof event.data === "string" &&
+          JSON.parse(event.data).type === "server:ack" &&
+          JSON.parse(event.data).command === "client:room:create"
+        ) {
+          droppedFirstAck = true;
+          return;
+        }
+        if (typeof listener === "function") {
+          listener.call(this, event);
+        } else {
+          listener.handleEvent(event);
+        }
+      }, options);
+    };
+  });
+  const page = await context.newPage();
+
+  await page.goto("/");
+  await selectBattleMode(page);
+  await setNickname(page, "RetryHost");
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+
+  await expect(page.getByRole("button", { name: "ルームを作成" })).toBeEnabled({ timeout: 12_000 });
+  await expect(page.getByText("ルーム作成の応答がありませんでした。接続を確認して、もう一度お試しください。"))
+    .toBeVisible();
+
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+  await expect(page.getByTestId("lobby-prep")).toBeVisible();
+
+  await context.close();
 });
 
 test("plays a complete two player typing match", async ({ browser }) => {

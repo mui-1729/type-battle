@@ -440,6 +440,16 @@ export default function HomePage() {
     });
   }, []);
 
+  const failPendingRoomCreate = useCallback((message: string) => {
+    if (!createPendingRef.current) {
+      return;
+    }
+
+    createPendingRef.current = false;
+    setCreatePending(false);
+    setError(message);
+  }, []);
+
   useLayoutEffect(() => {
     roomRef.current = room;
     resultRef.current = result;
@@ -502,6 +512,9 @@ export default function HomePage() {
     const isCurrentSocket = () => socketRef.current === socket;
     const applyRoomSnapshot = (nextRoom: RoomState, beforeApply?: () => void) => {
       if (!isCurrentSocket()) {
+        return false;
+      }
+      if (kind === "room" && createPendingRef.current && !roomRef.current) {
         return false;
       }
 
@@ -576,6 +589,13 @@ export default function HomePage() {
       }
 
       setConnected(false);
+      if (kind === "room" && createPendingRef.current && !roomRef.current) {
+        failPendingRoomCreate(
+          reason
+            ? `ルーム作成中に接続が切れました（${reason}）。接続を確認して、もう一度お試しください。`
+            : "ルーム作成中に接続が切れました。接続を確認して、もう一度お試しください。"
+        );
+      }
       reactionRequestPendingRef.current = false;
       setReactionFeedback((current) =>
         current.phase === "sending"
@@ -638,6 +658,10 @@ export default function HomePage() {
       if (!isCurrentSocket()) {
         return;
       }
+      if (kind === "room" && createPendingRef.current && !roomRef.current) {
+        failPendingRoomCreate("ルーム作成中に接続エラーが発生しました。接続を確認して、もう一度お試しください。");
+        return;
+      }
       setError(message);
       setRematchError(message);
       setRematchPending(false);
@@ -659,7 +683,7 @@ export default function HomePage() {
         }
       );
     });
-  }, [resetTyping]);
+  }, [failPendingRoomCreate, resetTyping]);
 
   const connectSocket = useCallback(
     (url: string, kind: "practice" | "room") => {
@@ -1632,18 +1656,22 @@ export default function HomePage() {
         deviceKind: detectDeviceKind()
       },
       (response) => {
-        createPendingRef.current = false;
-        setCreatePending(false);
         if (socketRef.current !== socket) {
           return;
         }
 
         if (!response.ok) {
-          setError(response.error);
+          failPendingRoomCreate(
+            response.error === "Realtime request timed out."
+              ? "ルーム作成の応答がありませんでした。接続を確認して、もう一度お試しください。"
+              : response.error
+          );
           disconnectCurrentSocket();
           return;
         }
 
+        createPendingRef.current = false;
+        setCreatePending(false);
         setError("");
         setCopyFeedback({ kind: "idle", message: "" });
         setPlayerId(response.data.playerId);
@@ -2159,7 +2187,7 @@ export default function HomePage() {
               <button className="iconButton" type="button" onClick={copyRoomCode} title="ルームコードをコピー">
                 <Clipboard size={18} />
               </button>
-              {room.status !== "waiting" ? (
+              {room.status !== "waiting" && copyFeedback.message ? (
                 <p
                   className={copyFeedback.kind === "error" ? "errorText" : "infoText"}
                   role={copyFeedback.kind === "error" ? "alert" : "status"}
