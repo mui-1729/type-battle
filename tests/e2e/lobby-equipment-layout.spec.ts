@@ -47,11 +47,36 @@ for (const viewport of viewports) {
     });
 
     const selects = picker.locator("select");
+    await selects.first().selectOption("headband");
+    await expect(selects.first()).toHaveValue("headband");
+
+    const pickerWidth = await picker.evaluate((element) => {
+      const selectElements = Array.from(element.querySelectorAll<HTMLSelectElement>("select"));
+      const headSelect = selectElements[0]!;
+      const selectedLabel = headSelect.selectedOptions[0]!.label;
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d")!;
+      const style = getComputedStyle(headSelect);
+      context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      return {
+        documentFitsViewport: document.documentElement.scrollWidth <= window.innerWidth,
+        headSelectWidth: headSelect.getBoundingClientRect().width,
+        headTextWidth: context.measureText(selectedLabel).width,
+        pickerFitsCard: element.scrollWidth <= element.clientWidth,
+        selectsFitPicker: selectElements.every((select) => select.getBoundingClientRect().right <= element.getBoundingClientRect().right)
+      };
+    });
+    expect(pickerWidth.documentFitsViewport).toBe(true);
+    expect(pickerWidth.pickerFitsCard).toBe(true);
+    expect(pickerWidth.selectsFitPicker).toBe(true);
+    expect(pickerWidth.headSelectWidth).toBeGreaterThanOrEqual(pickerWidth.headTextWidth + 40);
+
     await selects.first().focus();
     await expect(selects.first()).toBeFocused();
-    await selects.first().press("ArrowDown");
+    await selects.first().press("ArrowUp");
     await selects.first().press("Enter");
     await page.keyboard.press("Escape");
+    await selects.first().selectOption("headband");
 
     await localCard.scrollIntoViewIfNeeded();
     const screenshotPath = testInfo.outputPath(`lobby-equipment-${viewport.width}x${viewport.height}.png`);

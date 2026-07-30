@@ -833,7 +833,7 @@ select {
 .accessoryPicker button { width: 58px; min-height: 58px; pointer-events: auto; color: var(--game-blue); border: 0; border-radius: 50%; background: var(--game-card); box-shadow: 0 6px 14px rgba(0,48,115,.2); }
 .accessoryPicker span { visibility: hidden; }
 .lobbyPlayerCard.hasEquipmentPicker { grid-template-rows: 82px minmax(0, 1fr) auto; min-height: 470px; }
-.lobbyPlayerCard .accessoryPicker.quickEquipmentPicker { position: static; inset: auto; gap: 10px; pointer-events: auto; }
+.lobbyPlayerCard .accessoryPicker.quickEquipmentPicker { position: static; inset: auto; grid-template-columns: minmax(132px, .9fr) minmax(0, 1.1fr); gap: 10px; pointer-events: auto; }
 .lobbyPlayerCard .accessoryPicker.quickEquipmentPicker span { visibility: visible; }
 .lobbyPlayerCard .accessoryPicker.quickEquipmentPicker select { min-height: 44px; background: var(--game-card); }
 .lobbyPlayerCard .readyBadge { position: absolute; bottom: 18px; left: 20px; z-index: 3; min-height: 50px; padding: 8px 16px; color: color-mix(in srgb, var(--game-ink) 72%, transparent); border: 1px solid var(--game-card-border); border-radius: 14px; background: color-mix(in srgb, var(--game-card) 92%, transparent); font-size: 16px; }
