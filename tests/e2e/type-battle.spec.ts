@@ -1212,6 +1212,97 @@ test("saves and restores player settings from localStorage", async ({ browser })
   await context.close();
 });
 
+test("applies the saved font size to typing text without horizontal overflow", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+
+  await page.goto("/");
+  await dismissTutorial(page);
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "大" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  await setNickname(page, "FontSizePlayer");
+  await selectPracticeMode(page);
+  await page.getByRole("button", { name: "練習を開始" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const large = await page.locator(".promptBox").evaluate((element) => ({
+    display: Number.parseFloat(getComputedStyle(element.querySelector(".promptDisplay")!).fontSize),
+    guide: Number.parseFloat(getComputedStyle(element.querySelector(".promptGuide")!).fontSize),
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth
+  }));
+
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "小" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  const small = await page.locator(".promptBox").evaluate((element) => ({
+    display: Number.parseFloat(getComputedStyle(element.querySelector(".promptDisplay")!).fontSize),
+    guide: Number.parseFloat(getComputedStyle(element.querySelector(".promptGuide")!).fontSize)
+  }));
+
+  expect(large.display).toBeGreaterThan(small.display);
+  expect(large.guide).toBeGreaterThan(small.guide);
+  expect(large.documentWidth).toBeLessThanOrEqual(large.viewportWidth);
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveClass(/font-small/);
+  await context.close();
+
+  const mobileContext = await browser.newContext({ viewport: { width: 320, height: 568 } });
+  const mobilePage = await mobileContext.newPage();
+  await mobilePage.goto("/");
+  await dismissTutorial(mobilePage);
+  await mobilePage.getByTitle("設定を開く").click();
+  await mobilePage.getByRole("button", { name: "大" }).click();
+  await mobilePage.getByRole("button", { name: "閉じる", exact: true }).click();
+  await setNickname(mobilePage, "MobileFont");
+  await selectPracticeMode(mobilePage);
+  await mobilePage.getByRole("button", { name: "練習を開始" }).click();
+  await expect(mobilePage.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expect.poll(() => mobilePage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(mobilePage.getByLabel("入力欄")).toBeVisible();
+  await mobileContext.close();
+});
+
+test("keeps the compact normal type scale in desktop battles", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+
+  await page.goto("/");
+  await setNickname(page, "BattleFont");
+  await selectBattleMode(page);
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+  await page.getByRole("button", { name: "READYにする" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const readPromptMetrics = () => page.locator(".promptBox").evaluate((element) => ({
+    display: Number.parseFloat(getComputedStyle(element.querySelector(".promptDisplay")!).fontSize),
+    guide: Number.parseFloat(getComputedStyle(element.querySelector(".promptGuide")!).fontSize),
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth
+  }));
+
+  const normal = await readPromptMetrics();
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "小" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  const small = await readPromptMetrics();
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "大" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  const large = await readPromptMetrics();
+
+  expect(normal.display).toBe(32);
+  expect(normal.guide).toBeCloseTo(18.56, 1);
+  expect(large.display).toBeGreaterThan(normal.display);
+  expect(normal.display).toBeGreaterThan(small.display);
+  expect(large.guide).toBeGreaterThan(normal.guide);
+  expect(normal.guide).toBeGreaterThan(small.guide);
+  expect(large.documentWidth).toBeLessThanOrEqual(large.viewportWidth);
+  await context.close();
+});
+
 test("keeps explicit and system dark theme text readable", async ({ browser }) => {
   const systemContext = await browser.newContext({
     colorScheme: "dark",
