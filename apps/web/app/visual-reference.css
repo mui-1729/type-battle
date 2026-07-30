@@ -799,6 +799,10 @@ select {
 /* Lobby */
 .isLobby .brandBlock { width: min(470px, 42vw); }
 .isLobby .connection { display: none; }
+/* The header is visually transparent above the lobby code.  Its empty area
+   must not capture clicks intended for the room-code controls underneath. */
+.isLobby .topBar { pointer-events: none; }
+.isLobby .topBar > * { pointer-events: auto; }
 .isLobby .workspace { display: block; max-width: 1500px; }
 .isLobby .sidePanel { display: none; }
 .isLobby .matchSurface { min-height: 0; }
