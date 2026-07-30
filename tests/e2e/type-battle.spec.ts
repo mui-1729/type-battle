@@ -158,6 +158,31 @@ test("keeps nickname correction available before opening a solo activity", async
   await expect(page.getByRole("button", { name: "練習を開始" })).toBeVisible();
 });
 
+test("announces room join errors and clears stale feedback before retrying", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/");
+  await dismissTutorial(page);
+  await setNickname(page, "Guest");
+  await selectBattleMode(page);
+
+  const joinCodeInput = page.getByLabel("ルームコード");
+  await joinCodeInput.fill("ZZZZZZ");
+  await joinCodeInput.press("Enter");
+
+  const alert = page.locator(".errorText[role='alert']");
+  await expect(alert).toHaveText("ルームが見つかりません。");
+  await expectFixedViewport(page);
+
+  await joinCodeInput.fill("ZZZZZY");
+  await expect(alert).toHaveCount(0);
+  await expect(page.locator(".errorText")).toHaveCount(0);
+
+  await joinCodeInput.fill("ZZZZZZ");
+  await page.getByRole("button", { name: "参加", exact: true }).click();
+  await expect(page.locator(".errorText[role='alert']")).toHaveText("ルームが見つかりません。");
+  await expectFixedViewport(page);
+});
+
 test("keeps the how-to-play steps readable and paged across screen sizes", async ({ page }) => {
   for (const viewport of [
     { width: 1440, height: 900 },
