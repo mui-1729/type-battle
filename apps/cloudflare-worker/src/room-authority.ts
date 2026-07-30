@@ -380,13 +380,16 @@ export class RoomAuthorityDurableObject {
     const socketId = crypto.randomUUID();
     const roomCode = options.roomCode ? normalizeRoomCode(options.roomCode) : null;
     const clientIp = normalizeClientIp(options.clientIp);
-    const clientSocketCount = Array.from(this.socketStates.values())
-      .filter((state) => state.clientIp === clientIp)
-      .length;
+    const hasClientIp = Boolean(options.clientIp?.trim());
+    const clientSocketCount = hasClientIp
+      ? Array.from(this.socketStates.values())
+          .filter((state) => state.clientIp === clientIp)
+          .length
+      : 0;
 
     if (
       this.sockets.size >= MAX_ROOM_SOCKETS ||
-      clientSocketCount >= MAX_ROOM_SOCKETS_PER_CLIENT_IP
+      (hasClientIp && clientSocketCount >= MAX_ROOM_SOCKETS_PER_CLIENT_IP)
     ) {
       socket.accept();
       socket.close(1013, "Room connection limit exceeded.");

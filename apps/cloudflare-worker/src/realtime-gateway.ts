@@ -69,7 +69,9 @@ const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありませ�
 const MAX_WEB_SOCKET_MESSAGE_BYTES = 16 * 1024;
 const MAX_MESSAGE_ID_LENGTH = 80;
 const MAX_GATEWAY_SOCKETS = 256;
-const MAX_GATEWAY_SOCKETS_PER_CLIENT_IP = 8;
+// Leave enough headroom for classrooms and offices sharing one public IP while
+// preventing one address from occupying the Durable Object's entire capacity.
+const MAX_GATEWAY_SOCKETS_PER_CLIENT_IP = 32;
 const GATEWAY_SOCKET_IDLE_MS = 15 * 60_000;
 const ROOM_COMMAND_ERROR = "Room commands must use /rooms/:roomCode/socket.";
 export const GATEWAY_ROOM_RATE_LIMIT_PATH = "/__internal/room-rate-limit";
@@ -173,12 +175,15 @@ export class RealtimeGatewayDurableObject {
   attachSocket(socket: CloudflareSocketLike, options: AttachSocketOptions = {}): string {
     const socketId = crypto.randomUUID();
     const clientIp = normalizeClientIp(options.clientIp);
-    const clientSocketCount = Array.from(this.socketStates.values())
-      .filter((state) => state.clientIp === clientIp)
-      .length;
+    const hasClientIp = Boolean(options.clientIp?.trim());
+    const clientSocketCount = hasClientIp
+      ? Array.from(this.socketStates.values())
+          .filter((state) => state.clientIp === clientIp)
+          .length
+      : 0;
     if (
       this.sockets.size >= MAX_GATEWAY_SOCKETS ||
-      clientSocketCount >= MAX_GATEWAY_SOCKETS_PER_CLIENT_IP
+      (hasClientIp && clientSocketCount >= MAX_GATEWAY_SOCKETS_PER_CLIENT_IP)
     ) {
       socket.accept();
       socket.close(1013, "Gateway connection limit exceeded.");

@@ -491,7 +491,7 @@ describe("cloudflare gateway", () => {
     const gateway = new RoomDurableObject(
       new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
     );
-    const attackerSockets = Array.from({ length: 8 }, () => new FakeSocket());
+    const attackerSockets = Array.from({ length: 32 }, () => new FakeSocket());
 
     await gateway.ready;
     attackerSockets.forEach((socket) => gateway.attachSocket(socket as unknown as WebSocket, {
@@ -510,6 +510,18 @@ describe("cloudflare gateway", () => {
     expect(rejectedAttackerSocket.accepted).toBe(true);
     expect(rejectedAttackerSocket.readyState).toBe(3);
     expect(otherClientSocket.readyState).toBe(1);
+  });
+
+  it("does not group sockets without a client IP into one per-IP budget", async () => {
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const sockets = Array.from({ length: 33 }, () => new FakeSocket());
+
+    await gateway.ready;
+    sockets.forEach((socket) => gateway.attachSocket(socket as unknown as WebSocket));
+
+    expect(sockets.every((socket) => socket.readyState === 1)).toBe(true);
   });
 
   it("reports readiness from durable object storage", async () => {
@@ -567,6 +579,20 @@ describe("room authority", () => {
     expect(rejectedAttackerSocket.accepted).toBe(true);
     expect(rejectedAttackerSocket.readyState).toBe(3);
     expect(otherClientSocket.readyState).toBe(1);
+  });
+
+  it("does not group room sockets without a client IP into one per-IP budget", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const sockets = Array.from({ length: 5 }, () => new FakeSocket());
+
+    await roomAuthority.ready;
+    sockets.forEach((socket) => roomAuthority.attachSocket(socket as unknown as WebSocket, {
+      roomCode: "IP34NO"
+    }));
+
+    expect(sockets.every((socket) => socket.readyState === 1)).toBe(true);
   });
 
   it("serializes room commands across delayed rate limiting", async () => {
