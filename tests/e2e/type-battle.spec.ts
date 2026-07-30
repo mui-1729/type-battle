@@ -210,6 +210,149 @@ test("creates a room and lets a second player join", async ({ browser }) => {
   await guestContext.close();
 });
 
+test("keeps room creation visible while pending and copies the code for paste-to-join", async ({ browser }) => {
+  const hostContext = await browser.newContext();
+  const guestContext = await browser.newContext();
+  await hostContext.addInitScript(() => {
+    const webSocketPrototype = WebSocket.prototype as unknown as {
+      addEventListener: (
+        this: WebSocket,
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | AddEventListenerOptions,
+      ) => void;
+    };
+    const nativeAddEventListener = webSocketPrototype.addEventListener;
+    webSocketPrototype.addEventListener = function (type, listener, options) {
+      if (type !== "message") {
+        nativeAddEventListener.call(this, type, listener, options);
+        return;
+      }
+      nativeAddEventListener.call(this, type, (event) => {
+        window.setTimeout(() => {
+          if (typeof listener === "function") {
+            listener.call(this, event);
+          } else {
+            listener.handleEvent(event);
+          }
+        }, 750);
+      }, options);
+    };
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          (window as Window & { copiedRoomCode?: string }).copiedRoomCode = text;
+        },
+      },
+    });
+  });
+  const host = await hostContext.newPage();
+  const guest = await guestContext.newPage();
+
+  await host.goto("/");
+  await selectBattleMode(host);
+  await setNickname(host, "CopyHost");
+
+  const createButton = host.getByRole("button", { name: "ルームを作成" });
+  await createButton.click();
+  const pendingButton = host.getByRole("button", { name: "作成中…" });
+  await expect(pendingButton).toBeDisabled();
+  await expect(pendingButton).toHaveAttribute("aria-busy", "true");
+  await expect(host.getByRole("button", { name: "モード選択へ" })).toBeVisible();
+  await expect(host.getByTestId("lobby-prep")).toBeVisible();
+  await host.setViewportSize({ width: 320, height: 720 });
+  await expect(host.locator(".lobbyPrepHeader > .infoText, .lobbyPrepHeader > .errorText")).toHaveCount(0);
+  await host.setViewportSize({ width: 1280, height: 720 });
+
+  const roomCode = await host.locator(".roomMeta strong").innerText();
+  await host.getByTestId("lobby-prep").getByRole("button", { name: "ルームコードをコピー" })
+    .evaluate((button) => (button as HTMLButtonElement).click());
+  await expect(host.getByTestId("lobby-prep").getByText("ルームコードをコピーしました。")).toBeVisible();
+  const copiedRoomCode = await host.evaluate(() =>
+    (window as Window & { copiedRoomCode?: string }).copiedRoomCode ?? ""
+  );
+  expect(copiedRoomCode).toBe(roomCode);
+  await host.setViewportSize({ width: 320, height: 720 });
+  await expect(host.getByTestId("lobby-prep").getByText("ルームコードをコピーしました。")).toBeVisible();
+
+  await guest.goto("/");
+  await selectBattleMode(guest);
+  await setNickname(guest, "PasteGuest");
+  const joinCodeInput = guest.getByLabel("ルームコード");
+  await joinCodeInput.evaluate((input, text) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData("text", text);
+    input.dispatchEvent(new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData,
+    }));
+  }, copiedRoomCode.toLowerCase());
+  await expect(joinCodeInput).toHaveValue(roomCode.toUpperCase());
+  await guest.getByTitle("ルームに参加").click();
+
+  await expect(host.getByTestId("lobby-prep").getByText("PasteGuest")).toBeVisible();
+  await expect(guest.getByTestId("lobby-prep").getByText("CopyHost")).toBeVisible();
+
+  await hostContext.close();
+  await guestContext.close();
+});
+
+test("makes a timed-out room creation retryable", async ({ browser }) => {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    const webSocketPrototype = WebSocket.prototype as unknown as {
+      addEventListener: (
+        this: WebSocket,
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | AddEventListenerOptions,
+      ) => void;
+    };
+    const nativeAddEventListener = webSocketPrototype.addEventListener;
+    let droppedFirstAck = false;
+    webSocketPrototype.addEventListener = function (type, listener, options) {
+      if (type !== "message") {
+        nativeAddEventListener.call(this, type, listener, options);
+        return;
+      }
+      nativeAddEventListener.call(this, type, (event) => {
+        if (
+          !droppedFirstAck &&
+          event instanceof MessageEvent &&
+          typeof event.data === "string" &&
+          JSON.parse(event.data).type === "server:ack" &&
+          JSON.parse(event.data).command === "client:room:create"
+        ) {
+          droppedFirstAck = true;
+          return;
+        }
+        if (typeof listener === "function") {
+          listener.call(this, event);
+        } else {
+          listener.handleEvent(event);
+        }
+      }, options);
+    };
+  });
+  const page = await context.newPage();
+
+  await page.goto("/");
+  await selectBattleMode(page);
+  await setNickname(page, "RetryHost");
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+
+  await expect(page.getByRole("button", { name: "ルームを作成" })).toBeEnabled({ timeout: 12_000 });
+  await expect(page.getByText("ルーム作成の応答がありませんでした。接続を確認して、もう一度お試しください。"))
+    .toBeVisible();
+
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+  await expect(page.getByTestId("lobby-prep")).toBeVisible();
+
+  await context.close();
+});
+
 test("plays a complete two player typing match", async ({ browser }) => {
   const hostContext = await browser.newContext();
   const guestContext = await browser.newContext();
@@ -1053,6 +1196,97 @@ test("saves and restores player settings from localStorage", async ({ browser })
   await expect(page.locator("html")).toHaveClass(/theme-dark/);
   await expect(page.locator("html")).toHaveClass(/font-large/);
 
+  await context.close();
+});
+
+test("applies the saved font size to typing text without horizontal overflow", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+
+  await page.goto("/");
+  await dismissTutorial(page);
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "大" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  await setNickname(page, "FontSizePlayer");
+  await selectPracticeMode(page);
+  await page.getByRole("button", { name: "練習を開始" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const large = await page.locator(".promptBox").evaluate((element) => ({
+    display: Number.parseFloat(getComputedStyle(element.querySelector(".promptDisplay")!).fontSize),
+    guide: Number.parseFloat(getComputedStyle(element.querySelector(".promptGuide")!).fontSize),
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth
+  }));
+
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "小" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  const small = await page.locator(".promptBox").evaluate((element) => ({
+    display: Number.parseFloat(getComputedStyle(element.querySelector(".promptDisplay")!).fontSize),
+    guide: Number.parseFloat(getComputedStyle(element.querySelector(".promptGuide")!).fontSize)
+  }));
+
+  expect(large.display).toBeGreaterThan(small.display);
+  expect(large.guide).toBeGreaterThan(small.guide);
+  expect(large.documentWidth).toBeLessThanOrEqual(large.viewportWidth);
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveClass(/font-small/);
+  await context.close();
+
+  const mobileContext = await browser.newContext({ viewport: { width: 320, height: 568 } });
+  const mobilePage = await mobileContext.newPage();
+  await mobilePage.goto("/");
+  await dismissTutorial(mobilePage);
+  await mobilePage.getByTitle("設定を開く").click();
+  await mobilePage.getByRole("button", { name: "大" }).click();
+  await mobilePage.getByRole("button", { name: "閉じる", exact: true }).click();
+  await setNickname(mobilePage, "MobileFont");
+  await selectPracticeMode(mobilePage);
+  await mobilePage.getByRole("button", { name: "練習を開始" }).click();
+  await expect(mobilePage.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+  await expect.poll(() => mobilePage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(mobilePage.getByLabel("入力欄")).toBeVisible();
+  await mobileContext.close();
+});
+
+test("keeps the compact normal type scale in desktop battles", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+
+  await page.goto("/");
+  await setNickname(page, "BattleFont");
+  await selectBattleMode(page);
+  await page.getByRole("button", { name: "ルームを作成" }).click();
+  await page.getByRole("button", { name: "READYにする" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const readPromptMetrics = () => page.locator(".promptBox").evaluate((element) => ({
+    display: Number.parseFloat(getComputedStyle(element.querySelector(".promptDisplay")!).fontSize),
+    guide: Number.parseFloat(getComputedStyle(element.querySelector(".promptGuide")!).fontSize),
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth
+  }));
+
+  const normal = await readPromptMetrics();
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "小" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  const small = await readPromptMetrics();
+  await page.getByTitle("設定を開く").click();
+  await page.getByRole("button", { name: "大" }).click();
+  await page.getByRole("button", { name: "閉じる", exact: true }).click();
+  const large = await readPromptMetrics();
+
+  expect(normal.display).toBe(32);
+  expect(normal.guide).toBeCloseTo(18.56, 1);
+  expect(large.display).toBeGreaterThan(normal.display);
+  expect(normal.display).toBeGreaterThan(small.display);
+  expect(large.guide).toBeGreaterThan(normal.guide);
+  expect(normal.guide).toBeGreaterThan(small.guide);
+  expect(large.documentWidth).toBeLessThanOrEqual(large.viewportWidth);
   await context.close();
 });
 

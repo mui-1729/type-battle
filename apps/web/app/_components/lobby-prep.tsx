@@ -30,6 +30,7 @@ type LobbyPrepProps = {
   ownedHeldItemIds: readonly HeldItemId[];
   onEquipmentChange: (equipment: EquipmentSelection) => void;
   onCopyRoomCode: () => void;
+  copyFeedback?: { kind: "idle" | "success" | "error"; message: string };
   onToggleReady: () => void;
   onMatchRuleChange: (rule: MatchRule) => void;
   onPromptCategoryChange: (category: PromptCategory) => void;
@@ -48,6 +49,7 @@ export function LobbyPrep({
   ownedHeldItemIds,
   onEquipmentChange,
   onCopyRoomCode,
+  copyFeedback = { kind: "idle", message: "" },
   onToggleReady,
   onMatchRuleChange,
   onPromptCategoryChange,
@@ -87,6 +89,15 @@ export function LobbyPrep({
             <Clipboard size={18} />
           </Button>
         </div>
+        {copyFeedback.message ? (
+          <p
+            className={copyFeedback.kind === "error" ? "errorText" : "infoText"}
+            role={copyFeedback.kind === "error" ? "alert" : "status"}
+            aria-live="polite"
+          >
+            {copyFeedback.message}
+          </p>
+        ) : null}
       </div>
 
       <div className="lobbyPlayerGrid" aria-label="参加プレイヤー">

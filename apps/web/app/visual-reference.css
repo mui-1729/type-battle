@@ -1031,8 +1031,8 @@ select {
   box-shadow: var(--game-card-shadow);
   text-align: center;
 }
-.promptDisplay { font-size: clamp(30px, 3.1vw, 52px); font-weight: 1000; line-height: 1.35; letter-spacing: .05em; }
-.promptGuide { color: color-mix(in srgb, var(--game-ink) 52%, transparent); font-family: "Arial Black", ui-monospace, monospace; font-size: clamp(16px, 1.8vw, 28px); font-weight: 900; letter-spacing: .22em; }
+.promptDisplay { font-size: var(--typing-prompt-display-size, clamp(30px, 3.1vw, 52px)); font-weight: 1000; line-height: 1.35; letter-spacing: .05em; }
+.promptGuide { color: color-mix(in srgb, var(--game-ink) 52%, transparent); font-family: "Arial Black", ui-monospace, monospace; font-size: var(--typing-prompt-guide-size, clamp(16px, 1.8vw, 28px)); font-weight: 900; letter-spacing: .22em; }
 .promptGuide .char.typed { color: color-mix(in srgb, var(--game-ink) 75%, transparent); }
 .promptGuide .char.current { display: inline-grid; place-items: center; min-width: 1.2em; margin: 0 .02em; color: #062875; border: 3px solid var(--game-blue); border-radius: 8px; background: #eaf4ff; }
 
@@ -1080,8 +1080,12 @@ select {
 @media (min-width: 761px) {
   .isBattle .battleStage { height: min(47dvh, 470px); }
   .isBattle .promptBox { gap: 10px; height: min(230px, 26dvh); min-height: 0; margin-top: 12px; padding-block: 20px; }
-  .isBattle .promptDisplay { font-size: clamp(26px, 2.5vw, 40px); }
-  .isBattle .promptGuide { font-size: clamp(14px, 1.45vw, 22px); }
+  /* Battle uses a deliberately more compact baseline than practice. */
+  .font-small .isBattle { --typing-prompt-display-size: clamp(22px, 2vw, 32px); --typing-prompt-guide-size: clamp(12px, 1.2vw, 18px); }
+  .font-normal .isBattle { --typing-prompt-display-size: clamp(26px, 2.5vw, 40px); --typing-prompt-guide-size: clamp(14px, 1.45vw, 22px); }
+  .font-large .isBattle { --typing-prompt-display-size: clamp(32px, 3vw, 50px); --typing-prompt-guide-size: clamp(17px, 1.8vw, 28px); }
+  .isBattle .promptDisplay { font-size: var(--typing-prompt-display-size, clamp(26px, 2.5vw, 40px)); }
+  .isBattle .promptGuide { font-size: var(--typing-prompt-guide-size, clamp(14px, 1.45vw, 22px)); }
 }
 
 /* Countdown */
@@ -1256,8 +1260,11 @@ select {
   .raceRunner { width: 62px; }
   .raceTrack { min-height: 74px; }
   .promptBox { width: calc(100% - 10px); min-height: 155px; padding: 26px 20px; border-radius: 22px; }
-  .promptDisplay { font-size: 25px; }
-  .promptGuide { font-size: 14px; letter-spacing: .1em; overflow-wrap: anywhere; }
+  .promptDisplay { font-size: var(--typing-prompt-display-size, 25px); }
+  .promptGuide { font-size: var(--typing-prompt-guide-size, 14px); letter-spacing: .1em; overflow-wrap: anywhere; }
+  .font-small { --typing-prompt-display-size: 22px; --typing-prompt-guide-size: 12px; }
+  .font-normal { --typing-prompt-display-size: 25px; --typing-prompt-guide-size: 14px; }
+  .font-large { --typing-prompt-display-size: 30px; --typing-prompt-guide-size: 16px; }
   .hpBattleArena { grid-template-columns: 1fr 34px 1fr; }
   .hpBattlePlayer { padding: 8px 4px 0; }
   .hpBattlePlayerHeader,
