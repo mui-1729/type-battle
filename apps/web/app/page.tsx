@@ -1636,6 +1636,8 @@ export default function HomePage() {
       return;
     }
 
+    setError("");
+
     if (!realtimeConfigured || validationError || !guestId) {
       setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
       return;
@@ -1689,6 +1691,8 @@ export default function HomePage() {
     const currentNickname = nicknameRef.current;
     const roomCode = joinCode.trim().toUpperCase();
     const validationError = validateNickname(currentNickname);
+
+    setError("");
 
     if (!roomCode) {
       setError("ルームコードを入力してください。");
@@ -2158,10 +2162,25 @@ export default function HomePage() {
                   placeholder="ルームコード"
                   value={joinCode}
                   maxLength={8}
-                  onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
+                  onChange={(event) => {
+                    setJoinCode(event.target.value.toUpperCase());
+                    setError("");
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === "Enter" &&
+                      !event.nativeEvent.isComposing &&
+                      realtimeConfigured &&
+                      joinCode.trim() &&
+                      !joinPending
+                    ) {
+                      joinRoom();
+                    }
+                  }}
                   onPaste={(event) => {
                     event.preventDefault();
                     setJoinCode(event.clipboardData.getData("text").trim().toUpperCase().slice(0, 8));
+                    setError("");
                   }}
                   suppressHydrationWarning
                 />
@@ -2317,7 +2336,11 @@ export default function HomePage() {
             </Link>
           </div>
 
-          {error ? <p className="errorText">{error}</p> : null}
+          {error ? (
+            <p className="errorText" role="alert" aria-atomic="true">
+              {error}
+            </p>
+          ) : null}
 
           {room && room.status !== "waiting" ? (
             <div className="playerList">
