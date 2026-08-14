@@ -487,6 +487,43 @@ describe("cloudflare gateway", () => {
     expect(rejectedSocket.readyState).toBe(3);
   });
 
+  it("prevents one client IP from exhausting gateway socket capacity", async () => {
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const attackerSockets = Array.from({ length: 32 }, () => new FakeSocket());
+
+    await gateway.ready;
+    attackerSockets.forEach((socket) => gateway.attachSocket(socket as unknown as WebSocket, {
+      clientIp: "203.0.113.50"
+    }));
+
+    const rejectedAttackerSocket = new FakeSocket();
+    gateway.attachSocket(rejectedAttackerSocket as unknown as WebSocket, {
+      clientIp: "203.0.113.50"
+    });
+    const otherClientSocket = new FakeSocket();
+    gateway.attachSocket(otherClientSocket as unknown as WebSocket, {
+      clientIp: "198.51.100.20"
+    });
+
+    expect(rejectedAttackerSocket.accepted).toBe(true);
+    expect(rejectedAttackerSocket.readyState).toBe(3);
+    expect(otherClientSocket.readyState).toBe(1);
+  });
+
+  it("does not group sockets without a client IP into one per-IP budget", async () => {
+    const gateway = new RoomDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const sockets = Array.from({ length: 33 }, () => new FakeSocket());
+
+    await gateway.ready;
+    sockets.forEach((socket) => gateway.attachSocket(socket as unknown as WebSocket));
+
+    expect(sockets.every((socket) => socket.readyState === 1)).toBe(true);
+  });
+
   it("reports readiness from durable object storage", async () => {
     const gateway = new RoomDurableObject(
       new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
@@ -516,6 +553,48 @@ describe("cloudflare gateway", () => {
 });
 
 describe("room authority", () => {
+  it("prevents one client IP from exhausting a room's socket capacity", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const attackerSockets = Array.from({ length: 4 }, () => new FakeSocket());
+
+    await roomAuthority.ready;
+    attackerSockets.forEach((socket) => roomAuthority.attachSocket(socket as unknown as WebSocket, {
+      clientIp: "203.0.113.60",
+      roomCode: "IP23LM"
+    }));
+
+    const rejectedAttackerSocket = new FakeSocket();
+    roomAuthority.attachSocket(rejectedAttackerSocket as unknown as WebSocket, {
+      clientIp: "203.0.113.60",
+      roomCode: "IP23LM"
+    });
+    const otherClientSocket = new FakeSocket();
+    roomAuthority.attachSocket(otherClientSocket as unknown as WebSocket, {
+      clientIp: "198.51.100.30",
+      roomCode: "IP23LM"
+    });
+
+    expect(rejectedAttackerSocket.accepted).toBe(true);
+    expect(rejectedAttackerSocket.readyState).toBe(3);
+    expect(otherClientSocket.readyState).toBe(1);
+  });
+
+  it("does not group room sockets without a client IP into one per-IP budget", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const sockets = Array.from({ length: 5 }, () => new FakeSocket());
+
+    await roomAuthority.ready;
+    sockets.forEach((socket) => roomAuthority.attachSocket(socket as unknown as WebSocket, {
+      roomCode: "IP34NO"
+    }));
+
+    expect(sockets.every((socket) => socket.readyState === 1)).toBe(true);
+  });
+
   it("serializes room commands across delayed rate limiting", async () => {
     const storage = new FakeStorage();
     const gateway = new FakeGatewayRateLimitNamespace(10);
@@ -1099,6 +1178,205 @@ describe("room authority", () => {
     }));
     await flushAsyncWork();
     expect(parseMessages(guestSocket).filter((message) => message.type === "server:player:reaction")).toHaveLength(2);
+  });
+
+  it("releases reaction cooldown state when players permanently leave", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "RC23LV" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-reaction-cleanup",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-reaction-cleanup-host",
+        sessionId: "session-reaction-cleanup-host"
+      }
+    }));
+    await flushAsyncWork();
+
+    for (let index = 0; index < 20; index += 1) {
+      const guestSocket = new FakeSocket();
+      const guestId = `guest-reaction-cleanup-${index}`;
+      roomAuthority.attachSocket(guestSocket as unknown as WebSocket, { roomCode: "RC23LV" });
+      guestSocket.receive(JSON.stringify({
+        id: `msg-join-reaction-cleanup-${index}`,
+        type: "client:room:join",
+        payload: {
+          roomCode: "RC23LV",
+          nickname: "Bob",
+          guestId,
+          sessionId: `session-reaction-cleanup-${index}`
+        }
+      }));
+      guestSocket.receive(JSON.stringify({
+        id: `msg-reaction-cleanup-${index}`,
+        type: "client:player:reaction",
+        payload: { roomCode: "RC23LV", reaction: "ナイス" }
+      }));
+      guestSocket.receive(JSON.stringify({
+        id: `msg-leave-reaction-cleanup-${index}`,
+        type: "client:room:leave",
+        payload: { roomCode: "RC23LV" }
+      }));
+      await flushAsyncWork();
+      guestSocket.close();
+      await flushAsyncWork();
+    }
+
+    const reactionState = roomAuthority as unknown as {
+      reactionTimestamps: Map<string, number>;
+    };
+    expect(reactionState.reactionTimestamps.size).toBe(0);
+
+    hostSocket.receive(JSON.stringify({
+      id: "msg-reaction-before-empty-room",
+      type: "client:player:reaction",
+      payload: { roomCode: "RC23LV", reaction: "ナイス" }
+    }));
+    hostSocket.receive(JSON.stringify({
+      id: "msg-leave-empty-room",
+      type: "client:room:leave",
+      payload: { roomCode: "RC23LV" }
+    }));
+    await flushAsyncWork();
+    expect(reactionState.reactionTimestamps.size).toBe(0);
+    hostSocket.close();
+    await flushAsyncWork();
+
+    const recreatedHostSocket = new FakeSocket();
+    roomAuthority.attachSocket(recreatedHostSocket as unknown as WebSocket, { roomCode: "RC23LV" });
+    recreatedHostSocket.receive(JSON.stringify({
+      id: "msg-recreate-reaction-room",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-reaction-cleanup-host",
+        sessionId: "session-reaction-cleanup-host"
+      }
+    }));
+    recreatedHostSocket.receive(JSON.stringify({
+      id: "msg-reaction-after-room-recreate",
+      type: "client:player:reaction",
+      payload: { roomCode: "RC23LV", reaction: "よろしく" }
+    }));
+    await flushAsyncWork();
+    expect(findLastAck(recreatedHostSocket, "client:player:reaction")).toMatchObject({
+      payload: { ok: true }
+    });
+  });
+
+  it("releases reaction cooldown state after disconnected-player retention cleanup", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+    const guestSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "RC34GR" });
+    roomAuthority.attachSocket(guestSocket as unknown as WebSocket, { roomCode: "RC34GR" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-reaction-retention",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-reaction-retention-host",
+        sessionId: "session-reaction-retention-host"
+      }
+    }));
+    guestSocket.receive(JSON.stringify({
+      id: "msg-join-reaction-retention",
+      type: "client:room:join",
+      payload: {
+        roomCode: "RC34GR",
+        nickname: "Bob",
+        guestId: "guest-reaction-retention",
+        sessionId: "session-reaction-retention"
+      }
+    }));
+    guestSocket.receive(JSON.stringify({
+      id: "msg-reaction-before-retention",
+      type: "client:player:reaction",
+      payload: { roomCode: "RC34GR", reaction: "ナイス" }
+    }));
+    await flushAsyncWork();
+
+    guestSocket.close();
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await roomAuthority.alarm();
+
+    const reactionState = roomAuthority as unknown as {
+      reactionTimestamps: Map<string, number>;
+    };
+    expect(reactionState.reactionTimestamps.has("guest-reaction-retention")).toBe(false);
+  });
+
+  it("keeps reaction cooldown state across same-session socket replacement", async () => {
+    const roomAuthority = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
+    );
+    const hostSocket = new FakeSocket();
+    const firstGuestSocket = new FakeSocket();
+    const replacementGuestSocket = new FakeSocket();
+
+    await roomAuthority.ready;
+    roomAuthority.attachSocket(hostSocket as unknown as WebSocket, { roomCode: "RC45RJ" });
+    roomAuthority.attachSocket(firstGuestSocket as unknown as WebSocket, { roomCode: "RC45RJ" });
+    hostSocket.receive(JSON.stringify({
+      id: "msg-create-reaction-rejoin",
+      type: "client:room:create",
+      payload: {
+        nickname: "Alice",
+        guestId: "guest-reaction-rejoin-host",
+        sessionId: "session-reaction-rejoin-host"
+      }
+    }));
+    firstGuestSocket.receive(JSON.stringify({
+      id: "msg-join-reaction-rejoin",
+      type: "client:room:join",
+      payload: {
+        roomCode: "RC45RJ",
+        nickname: "Bob",
+        guestId: "guest-reaction-rejoin",
+        sessionId: "session-reaction-rejoin"
+      }
+    }));
+    firstGuestSocket.receive(JSON.stringify({
+      id: "msg-reaction-before-rejoin",
+      type: "client:player:reaction",
+      payload: { roomCode: "RC45RJ", reaction: "ナイス" }
+    }));
+    await flushAsyncWork();
+
+    roomAuthority.attachSocket(replacementGuestSocket as unknown as WebSocket, { roomCode: "RC45RJ" });
+    replacementGuestSocket.receive(JSON.stringify({
+      id: "msg-rejoin-reaction",
+      type: "client:room:join",
+      payload: {
+        roomCode: "RC45RJ",
+        nickname: "Bob",
+        guestId: "guest-reaction-rejoin",
+        sessionId: "session-reaction-rejoin"
+      }
+    }));
+    replacementGuestSocket.receive(JSON.stringify({
+      id: "msg-reaction-after-rejoin",
+      type: "client:player:reaction",
+      payload: { roomCode: "RC45RJ", reaction: "よろしく" }
+    }));
+    await flushAsyncWork();
+
+    expect(findLastAck(replacementGuestSocket, "client:player:reaction")).toMatchObject({
+      payload: { ok: false }
+    });
+    expect(parseMessages(hostSocket).filter((message) => message.type === "server:player:reaction"))
+      .toHaveLength(1);
   });
 
   it("shares one recovering token budget across mixed control commands", async () => {

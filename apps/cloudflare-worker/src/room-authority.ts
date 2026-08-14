@@ -186,6 +186,7 @@ const MAINTENANCE_ALARM_FALLBACK_MS = 5_000;
 const STALE_MAINTENANCE_ALARM_RETRY_MS = 60_000;
 const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありません。";
 const MAX_ROOM_SOCKETS = 16;
+const MAX_ROOM_SOCKETS_PER_CLIENT_IP = 4;
 const UNJOINED_SOCKET_IDLE_MS = 30_000;
 const GUEST_SESSION_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const MATCH_RESULT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -378,8 +379,18 @@ export class RoomAuthorityDurableObject {
   attachSocket(socket: CloudflareSocketLike, options: AttachSocketOptions = {}): string {
     const socketId = crypto.randomUUID();
     const roomCode = options.roomCode ? normalizeRoomCode(options.roomCode) : null;
+    const clientIp = normalizeClientIp(options.clientIp);
+    const hasClientIp = Boolean(options.clientIp?.trim());
+    const clientSocketCount = hasClientIp
+      ? Array.from(this.socketStates.values())
+          .filter((state) => state.clientIp === clientIp)
+          .length
+      : 0;
 
-    if (this.sockets.size >= MAX_ROOM_SOCKETS) {
+    if (
+      this.sockets.size >= MAX_ROOM_SOCKETS ||
+      (hasClientIp && clientSocketCount >= MAX_ROOM_SOCKETS_PER_CLIENT_IP)
+    ) {
       socket.accept();
       socket.close(1013, "Room connection limit exceeded.");
       return socketId;
@@ -392,7 +403,7 @@ export class RoomAuthorityDurableObject {
     this.sockets.set(socketId, socket);
     this.socketStates.set(socketId, {
       socketId,
-      clientIp: normalizeClientIp(options.clientIp),
+      clientIp,
       ...(roomCode ? { roomCode } : {})
     });
     socket.accept();
@@ -1231,6 +1242,7 @@ export class RoomAuthorityDurableObject {
   private async restoreRoom(): Promise<void> {
     this.room = null;
     this.playerSessions.clear();
+    this.reactionTimestamps.clear();
     const storedRoom = await this.state.storage.get<unknown>(ROOM_STORAGE_KEY);
     const snapshot = parsePersistedRoomSnapshotFromValue(storedRoom);
 
@@ -1402,6 +1414,7 @@ export class RoomAuthorityDurableObject {
 
     if (shouldExpireRoom(this.room, Date.now())) {
       this.room = null;
+      this.reactionTimestamps.clear();
       this.clearRoomTimers();
       await this.persistRoom(this.roomCode ?? "UNKNOWN");
     }
@@ -1438,6 +1451,7 @@ export class RoomAuthorityDurableObject {
     for (const player of expiredPlayers) {
       room.players.delete(player.id);
       this.playerSessions.delete(player.id);
+      this.reactionTimestamps.delete(player.id);
     }
     ensureConnectedHost(room);
 
@@ -2330,10 +2344,12 @@ export class RoomAuthorityDurableObject {
 
     room.players.delete(record.playerId ?? "");
     this.playerSessions.delete(player.id);
+    this.reactionTimestamps.delete(player.id);
     room.lastActivityAt = Date.now();
 
     if (room.players.size === 0) {
       this.room = null;
+      this.reactionTimestamps.clear();
       return null;
     }
 
