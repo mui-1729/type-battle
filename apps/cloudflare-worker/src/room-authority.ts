@@ -1242,6 +1242,7 @@ export class RoomAuthorityDurableObject {
   private async restoreRoom(): Promise<void> {
     this.room = null;
     this.playerSessions.clear();
+    this.reactionTimestamps.clear();
     const storedRoom = await this.state.storage.get<unknown>(ROOM_STORAGE_KEY);
     const snapshot = parsePersistedRoomSnapshotFromValue(storedRoom);
 
@@ -1413,6 +1414,7 @@ export class RoomAuthorityDurableObject {
 
     if (shouldExpireRoom(this.room, Date.now())) {
       this.room = null;
+      this.reactionTimestamps.clear();
       this.clearRoomTimers();
       await this.persistRoom(this.roomCode ?? "UNKNOWN");
     }
@@ -1449,6 +1451,7 @@ export class RoomAuthorityDurableObject {
     for (const player of expiredPlayers) {
       room.players.delete(player.id);
       this.playerSessions.delete(player.id);
+      this.reactionTimestamps.delete(player.id);
     }
     ensureConnectedHost(room);
 
@@ -2341,10 +2344,12 @@ export class RoomAuthorityDurableObject {
 
     room.players.delete(record.playerId ?? "");
     this.playerSessions.delete(player.id);
+    this.reactionTimestamps.delete(player.id);
     room.lastActivityAt = Date.now();
 
     if (room.players.size === 0) {
       this.room = null;
+      this.reactionTimestamps.clear();
       return null;
     }
 
