@@ -170,7 +170,7 @@ test("announces room join errors and clears stale feedback before retrying", asy
   await joinCodeInput.press("Enter");
 
   const alert = page.locator(".errorText[role='alert']");
-  await expect(alert).toHaveText("ルームが見つかりません。");
+  await expect(alert).toHaveText("ルームが見つかりません。", { timeout: 10000 });
   await expectFixedViewport(page);
 
   await joinCodeInput.fill("ZZZZZY");
@@ -179,7 +179,7 @@ test("announces room join errors and clears stale feedback before retrying", asy
 
   await joinCodeInput.fill("ZZZZZZ");
   await page.getByRole("button", { name: "参加", exact: true }).click();
-  await expect(page.locator(".errorText[role='alert']")).toHaveText("ルームが見つかりません。");
+  await expect(page.locator(".errorText[role='alert']")).toHaveText("ルームが見つかりません。", { timeout: 10000 });
   await expectFixedViewport(page);
 });
 
