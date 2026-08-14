@@ -158,6 +158,7 @@ export async function dismissTutorial(page: Page): Promise<void> {
   const closeButton = page.getByRole("button", { name: "遊び方を閉じる" });
   if (await closeButton.isVisible()) {
     await closeButton.click();
+    await expect(closeButton).toBeHidden();
   }
 }
 
