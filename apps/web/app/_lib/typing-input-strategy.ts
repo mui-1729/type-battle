@@ -28,6 +28,7 @@ export type TypingInputStrategy = {
   loop: boolean;
   inputMode?: TypingInputMode;
   progressBase?: number;
+  progressBaseByMode?: Partial<Record<TypingInputMode, number>>;
 };
 
 export function advanceTypingProgress({
@@ -39,8 +40,11 @@ export function advanceTypingProgress({
   romajiPlan,
   loop,
   inputMode = deviceKind === "mobile" ? "kana" : "romaji",
-  progressBase = 0
+  progressBase = 0,
+  progressBaseByMode
 }: TypingInputStrategy): ProgressUpdate {
+  const nextMode = resolveTypingInputMode(inputMode, typedText);
+
   if (progressBase > 0) {
     const localPrevious = { ...previous, progressIndex: Math.max(0, previous.progressIndex - progressBase) };
     const next = advanceTypingProgress({
@@ -53,10 +57,16 @@ export function advanceTypingProgress({
       loop: false,
       inputMode
     });
-    return { ...next, progress: { ...next.progress, progressIndex: next.progress.progressIndex + progressBase } };
+    const nextProgressBase = progressBaseByMode?.[nextMode] ?? progressBase;
+    return {
+      ...next,
+      progress: {
+        ...next.progress,
+        progressIndex: next.progress.progressIndex + nextProgressBase
+      }
+    };
   }
 
-  const nextMode = resolveTypingInputMode(inputMode, typedText);
   let modePrevious = previous;
 
   if (romajiPlan && inputMode !== nextMode) {
