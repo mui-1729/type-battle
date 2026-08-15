@@ -118,10 +118,8 @@ describe("reconcileRoomProgress", () => {
       currentStreak: 0,
       maxStreak: 0
     };
-
-    expect(reconcileRoomProgress(localProgress, {
+    const legacyPlayer: PlayerState = {
       ...player,
-      inputMode: undefined,
       deviceKind: "desktop",
       progressIndex: 1,
       typingProgressIndex: 2,
@@ -129,6 +127,9 @@ describe("reconcileRoomProgress", () => {
       correctCharacters: 1,
       currentStreak: 1,
       maxStreak: 1
-    }, "kana")).toMatchObject({ progressIndex: 1, pendingInput: "" });
+    };
+
+    expect(reconcileRoomProgress(localProgress, legacyPlayer, "kana"))
+      .toMatchObject({ progressIndex: 1, pendingInput: "" });
   });
 });
