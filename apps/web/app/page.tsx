@@ -431,8 +431,11 @@ export default function HomePage() {
   }, []);
 
   const prepareTypingInput = useCallback(() => {
+    if (activeInputDeviceKind === "mobile") {
+      return;
+    }
     typingInputRef.current?.focus({ preventScroll: true });
-  }, []);
+  }, [activeInputDeviceKind]);
 
   const updateGuestSession = useCallback(() => {
     setGuestSession((current) => {
@@ -1342,7 +1345,7 @@ export default function HomePage() {
   }, [countdownMs, room]);
 
   useEffect(() => {
-    if (!acceptingTextInput) {
+    if (!acceptingTextInput || activeInputDeviceKind === "mobile") {
       return;
     }
 
@@ -1352,7 +1355,7 @@ export default function HomePage() {
     }
 
     input.focus({ preventScroll: true });
-  }, [acceptingTextInput, activeTypingText]);
+  }, [acceptingTextInput, activeInputDeviceKind, activeTypingText]);
 
   useEffect(() => {
     const viewport = window.visualViewport;
@@ -2437,9 +2440,9 @@ export default function HomePage() {
           ref={matchSurfaceRef}
           className="matchSurface"
           aria-label="タイピング対戦"
-          onPointerDown={(event) => {
+          onClick={(event) => {
             if (!isEditableTarget(event.target)) {
-              prepareTypingInput();
+              typingInputRef.current?.focus({ preventScroll: true });
             }
           }}
         >

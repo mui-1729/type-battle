@@ -90,6 +90,19 @@ test("completes practice with actual mobile kana IME input", async ({ page }) =>
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test("starts mobile text input with a normal tap instead of background autofocus", async ({ page }) => {
+  await page.goto("/");
+  await setNickname(page, "MobileTap");
+  await selectPracticeMode(page);
+  await page.getByRole("button", { name: "練習を開始" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const textarea = page.getByLabel("入力欄");
+  await expect(textarea).not.toBeFocused();
+  await page.locator(".promptBox").click();
+  await expect(textarea).toBeFocused();
+});
+
 test("supports physical-keyboard romaji input on a mobile device", async ({ page }) => {
   await page.goto("/");
   await setNickname(page, "MobileRomaji");
