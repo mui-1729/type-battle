@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildRomajiTypingPlan,
   getCanonicalProgressForRomajiGuide
-} from "../src/index";
+} from "../src/index.js";
 
 describe("romaji progress coordinate", () => {
   it("keeps canonical progress at the unit start while a digraph is partial", () => {
