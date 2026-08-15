@@ -11,9 +11,9 @@ import {
   beginMobileComposition,
   createMobileInputBufferState,
   synchronizeMobileInputBuffer,
-  updateMobileInputBuffer,
   type MobileInputContext
 } from "../_lib/mobile-input-buffer";
+import { updateMobileImeInputBuffer } from "../_lib/mobile-ime-input-buffer";
 
 type TypingInputProps = {
   inputRef: RefObject<HTMLTextAreaElement | null>;
@@ -58,7 +58,7 @@ export function TypingInput({
     input: HTMLTextAreaElement,
     options: { composing: boolean; commit?: boolean }
   ) => {
-    const result = updateMobileInputBuffer(bufferRef.current, {
+    const result = updateMobileImeInputBuffer(bufferRef.current, {
       ...context,
       value: input.value,
       composing: options.composing,
