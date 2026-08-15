@@ -1583,3 +1583,155 @@ select {
     height: 42px;
   }
 }
+
+/* Mobile QA fixes: keep the home wordmark and compact game headers inside narrow viewports. */
+@media (max-width: 760px) {
+  .isHome .homeModeMenu > .gameLogo {
+    width: min(310px, 92vw);
+    max-width: 100%;
+  }
+
+  .isHome .gameLogoWordmark {
+    max-width: 100%;
+    white-space: nowrap;
+  }
+
+  .isHome .gameLogoWordmark > span {
+    font-size: clamp(38px, 11.5vw, 46px);
+  }
+
+  .isSoloSetup .topBar,
+  .isBattleSetup .topBar {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    min-height: 60px;
+  }
+
+  .isSoloSetup .topBar .brandBlock,
+  .isBattleSetup .topBar .brandBlock {
+    display: none;
+  }
+
+  .isSoloSetup .headerBackSlot,
+  .isBattleSetup .headerBackSlot {
+    flex: 1 1 auto;
+    min-width: 0;
+    align-self: center;
+  }
+
+  .isSoloSetup .headerBackButton,
+  .isBattleSetup .headerBackButton {
+    max-width: 100%;
+    min-height: 48px;
+    padding-inline: 12px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .isSoloSetup .headerActions,
+  .isBattleSetup .headerActions {
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+
+  .isSoloSetup .headerActions .connection,
+  .isBattleSetup .headerActions .connection {
+    display: none;
+  }
+
+  .isSoloSetup .headerActions .iconButton,
+  .isBattleSetup .headerActions .iconButton {
+    width: 48px;
+    height: 48px;
+    min-height: 48px;
+  }
+
+  .isBattle .statusPill,
+  .isPractice .statusPill {
+    width: auto;
+    min-width: max-content;
+    min-height: 40px;
+    padding-inline: 8px;
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+    word-break: keep-all;
+  }
+}
+
+/* Mobile QA fixes: keep the home wordmark and compact game headers inside narrow viewports. */
+@media (max-width: 760px) {
+  .isHome .homeModeMenu > .gameLogo {
+    width: min(310px, 92vw);
+    max-width: 100%;
+  }
+
+  .isHome .gameLogoWordmark {
+    max-width: 100%;
+    white-space: nowrap;
+  }
+
+  .isHome .gameLogoWordmark > span {
+    font-size: clamp(38px, 11.5vw, 46px);
+  }
+
+  .isSoloSetup .topBar,
+  .isBattleSetup .topBar {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    min-height: 60px;
+  }
+
+  .isSoloSetup .topBar .brandBlock,
+  .isBattleSetup .topBar .brandBlock {
+    display: none;
+  }
+
+  .isSoloSetup .headerBackSlot,
+  .isBattleSetup .headerBackSlot {
+    flex: 1 1 auto;
+    min-width: 0;
+    align-self: center;
+  }
+
+  .isSoloSetup .headerBackButton,
+  .isBattleSetup .headerBackButton {
+    max-width: 100%;
+    min-height: 48px;
+    padding-inline: 12px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .isSoloSetup .headerActions,
+  .isBattleSetup .headerActions {
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+
+  .isSoloSetup .headerActions .connection,
+  .isBattleSetup .headerActions .connection {
+    display: none;
+  }
+
+  .isSoloSetup .headerActions .iconButton,
+  .isBattleSetup .headerActions .iconButton {
+    width: 48px;
+    height: 48px;
+    min-height: 48px;
+  }
+
+  .isBattle .statusPill,
+  .isPractice .statusPill {
+    width: auto;
+    min-width: max-content;
+    min-height: 40px;
+    padding-inline: 8px;
+    font-size: 11px;
+    line-height: 1;
+    white-space: nowrap;
+    word-break: keep-all;
+  }
+}

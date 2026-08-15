@@ -58,7 +58,7 @@ export function HomeModeMenu({
             </span>
             <span className="modeCardContent">
               <span className="modeCardTitle">対戦する</span>
-              <span className="modeCardDescription">友達や世界中のプレイヤーと対戦</span>
+              <span className="modeCardDescription">友達とのルーム対戦やCOM戦</span>
             </span>
             <ChevronRight className="modeCardArrow" size={24} aria-hidden="true" />
           </button>
