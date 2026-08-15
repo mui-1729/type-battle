@@ -17,7 +17,6 @@ const contentSecurityPolicy = `
   base-uri 'self';
   form-action 'self';
   frame-ancestors 'none';
-  upgrade-insecure-requests;
 `.replace(/\s{2,}/g, " ").trim();
 
 const securityHeaders = [
