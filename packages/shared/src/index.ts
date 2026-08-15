@@ -4,6 +4,7 @@ export * from "./events.js";
 export * from "./game-state.js";
 export * from "./prompts.js";
 export * from "./time-attack.js";
+export * from "./romaji-progress-coordinate.js";
 export * from "./romaji-typing.js";
 export * from "./scoring.js";
 export * from "./typing-input-mode.js";
