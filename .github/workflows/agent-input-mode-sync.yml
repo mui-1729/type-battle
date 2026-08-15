@@ -1,0 +1,121 @@
+name: Agent input mode sync patch
+
+on:
+  push:
+    branches: ["agent/fix-input-mode-sync"]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/fix-input-mode-sync
+
+      - name: Apply guarded source patches
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}: {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          def replace_all(path, old, new, expected):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} matches, found {count}: {old[:80]!r}")
+              p.write_text(text.replace(old, new))
+
+          page = "apps/web/app/page.tsx"
+          replace_once(page,
+          '''  createRoomCode,\n  normalizeNickname,\n  validateNickname\n''',
+          '''  createRoomCode,\n  normalizeNickname,\n  resolveTypingInputMode,\n  validateNickname\n''')
+
+          replace_once(page,
+          '''  useLayoutEffect(() => {\n    const nextMode = activeInputDeviceKind === "mobile" ? "kana" : "romaji";\n    inputModeRef.current = nextMode;\n    setInputMode(nextMode);\n    setInputModeInitialized(true);\n  }, [activeInputDeviceKind, activePrompt?.id, practiceSession?.practiceId, room?.roomCode]);\n''',
+          '''  useLayoutEffect(() => {\n    const nextMode = activeInputDeviceKind === "mobile" ? "kana" : "romaji";\n    inputModeRef.current = nextMode;\n    setInputMode(nextMode);\n    setInputModeInitialized(true);\n  }, [activeInputDeviceKind, practiceSession?.practiceId, room?.roomCode, room?.round]);\n''')
+
+          replace_once(page,
+          '''  useEffect(() => {\n    if (!currentPlayer) {\n      return;\n    }\n\n    setLocalProgress((previous) => reconcileRoomProgress(previous, currentPlayer));\n  }, [currentPlayer]);\n''',
+          '''  useEffect(() => {\n    if (!currentPlayer) {\n      return;\n    }\n\n    const serverInputMode = currentPlayer.inputMode;\n    if (\n      serverInputMode &&\n      currentPlayer.totalTypedCharacters >= localProgressRef.current.totalTypedCharacters &&\n      serverInputMode !== inputModeRef.current\n    ) {\n      inputModeRef.current = serverInputMode;\n      setInputMode(serverInputMode);\n    }\n\n    setLocalProgress((previous) => reconcileRoomProgress(previous, currentPlayer, inputModeRef.current));\n  }, [currentPlayer]);\n''')
+
+          replace_all(page,
+          '''        inputModeRef.current = /[\\u3040-\\u30ff\\uff66-\\uff9f]/u.test(typedText) ? "kana" : "romaji";\n        setInputMode(inputModeRef.current);\n''',
+          '''        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedText);\n        inputModeRef.current = nextInputMode;\n        setInputMode(nextInputMode);\n''', 2)
+
+          replace_all(page,
+          '''        inputModeRef.current = /[\\u3040-\\u30ff\\uff66-\\uff9f]/u.test(typedKey) ? "kana" : "romaji";\n        setInputMode(inputModeRef.current);\n''',
+          '''        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedKey);\n        inputModeRef.current = nextInputMode;\n        setInputMode(nextInputMode);\n''', 2)
+
+          worker = "apps/cloudflare-worker/src/room-authority.ts"
+          replace_once(worker,
+          '''  getTimeAttackPromptTotalLength,\n  getRomajiTypingUnitIndex,\n  pickPrompt,\n''',
+          '''  getTimeAttackPromptTotalLength,\n  getRomajiTypingUnitIndex,\n  getCanonicalProgressForRomajiGuide,\n  pickPrompt,\n''')
+
+          replace_once(worker,
+          '''  rankPlayers,\n  resolveTimeAttackPrompts,\n  DEFAULT_EQUIPMENT,\n''',
+          '''  rankPlayers,\n  resolveTimeAttackPrompts,\n  resolveTypingInputMode,\n  DEFAULT_EQUIPMENT,\n''')
+
+          replace_once(worker,
+          '''type PersistedPlayerTypingState = {\n  typingProgressIndex?: number;\n  pendingInput?: string;\n  lastInputSequence?: number;\n''',
+          '''type PersistedPlayerTypingState = {\n  typingProgressIndex?: number;\n  pendingInput?: string;\n  inputMode?: "kana" | "romaji";\n  lastInputSequence?: number;\n''')
+
+          replace_once(worker,
+          '''      typingState[playerId] = {\n        typingProgressIndex: player.typingProgressIndex,\n        pendingInput: player.pendingInput,\n        lastInputSequence: player.lastInputSequence,\n''',
+          '''      typingState[playerId] = {\n        typingProgressIndex: player.typingProgressIndex,\n        pendingInput: player.pendingInput,\n        inputMode: player.inputMode,\n        lastInputSequence: player.lastInputSequence,\n''')
+
+          replace_once(worker,
+          '''          pendingInput: typingState[player.id]?.pendingInput ?? "",\n          lastInputSequence: typingState[player.id]?.lastInputSequence ?? 0,\n''',
+          '''          pendingInput: typingState[player.id]?.pendingInput ?? "",\n          inputMode: typingState[player.id]?.inputMode\n            ?? player.inputMode\n            ?? (player.deviceKind === "mobile" ? "kana" : "romaji"),\n          lastInputSequence: typingState[player.id]?.lastInputSequence ?? 0,\n''')
+
+          replace_once(worker,
+          '''        ...(typeof state.pendingInput === "string" ? { pendingInput: state.pendingInput } : {}),\n        ...(typeof state.lastInputSequence === "number" && Number.isSafeInteger(state.lastInputSequence)\n''',
+          '''        ...(typeof state.pendingInput === "string" ? { pendingInput: state.pendingInput } : {}),\n        ...((state.inputMode === "kana" || state.inputMode === "romaji") ? { inputMode: state.inputMode } : {}),\n        ...(typeof state.lastInputSequence === "number" && Number.isSafeInteger(state.lastInputSequence)\n''')
+
+          replace_once(worker,
+          '''    progressIndex: player.progressIndex,\n    ...(player.deviceKind === "desktop"\n      ? { typingProgressIndex: player.typingProgressIndex, pendingInput: player.pendingInput }\n      : {}),\n    correctCharacters: player.correctCharacters,\n''',
+          '''    progressIndex: player.progressIndex,\n    typingProgressIndex: player.typingProgressIndex,\n    pendingInput: player.pendingInput,\n    inputMode: player.inputMode ?? (player.deviceKind === "mobile" ? "kana" : "romaji"),\n    correctCharacters: player.correctCharacters,\n''')
+
+          replace_once(worker,
+          '''  const kanaInput = containsKana(payload.input);\n  let attackDamageDelta = 0;\n''',
+          '''  const previousInputMode = player.inputMode ?? (player.deviceKind === "mobile" ? "kana" : "romaji");\n  const nextInputMode = resolveTypingInputMode(previousInputMode, payload.input);\n  if (previousInputMode !== nextInputMode && nextInputMode === "kana") {\n    player.pendingInput = "";\n  }\n  player.inputMode = nextInputMode;\n  const kanaInput = nextInputMode === "kana";\n  let attackDamageDelta = 0;\n''')
+
+          replace_once(worker,
+          '''function containsKana(value: string): boolean {\n  return /[\\u3040-\\u30ff]/u.test(value);\n}\n\n''',
+          '''''')
+
+          replace_once(worker,
+          '''      if (completedUnit) {\n        const canonicalDelta = Array.from(completedUnit.hiragana).length;\n        player.progressIndex = loopingMatch\n          ? modulo(player.progressIndex + canonicalDelta, promptLength)\n          : clamp(player.progressIndex + canonicalDelta, 0, promptLength);\n        attackDamageDelta += canonicalDelta;\n      }\n''',
+          '''      if (completedUnit) {\n        const canonicalTarget = getCanonicalProgressForRomajiGuide(\n          plan,\n          player.typingProgressIndex,\n          loopingMatch\n        );\n        const cycleNumber = loopingMatch && guideLength > 0\n          ? Math.floor(cycleBase / guideLength)\n          : 0;\n        const currentCanonicalAbsolute = loopingMatch\n          ? cycleNumber * promptLength + player.progressIndex\n          : player.progressIndex;\n        const canonicalDelta = Math.max(canonicalTarget - currentCanonicalAbsolute, 0);\n        player.progressIndex = loopingMatch\n          ? modulo(canonicalTarget, promptLength)\n          : clamp(canonicalTarget, 0, promptLength);\n        attackDamageDelta += canonicalDelta;\n      }\n''')
+
+          replace_once(worker,
+          '''      if (unit) {\n        const delta = Array.from(unit.hiragana).length;\n        player.progressIndex += delta;\n        canonicalDelta += delta;\n      }\n''',
+          '''      if (unit) {\n        const canonicalBase = getTimeAttackCanonicalBase(prompts, position.promptIndex);\n        const canonicalTarget = canonicalBase + getCanonicalProgressForRomajiGuide(plan, after.progressIndex);\n        const delta = Math.max(canonicalTarget - player.progressIndex, 0);\n        player.progressIndex = canonicalTarget;\n        canonicalDelta += delta;\n      }\n''')
+
+          replace_once(worker,
+          '''function getTimeAttackGuideBase(prompts: Prompt[], promptIndex: number): number {\n  return prompts.slice(0, promptIndex).reduce(\n    (total, prompt) => total + buildRomajiTypingPlan(prompt.typing.hiragana).guide.length,\n    0\n  );\n}\n''',
+          '''function getTimeAttackGuideBase(prompts: Prompt[], promptIndex: number): number {\n  return prompts.slice(0, promptIndex).reduce(\n    (total, prompt) => total + buildRomajiTypingPlan(prompt.typing.hiragana).guide.length,\n    0\n  );\n}\n\nfunction getTimeAttackCanonicalBase(prompts: Prompt[], promptIndex: number): number {\n  return prompts.slice(0, promptIndex).reduce(\n    (total, prompt) => total + Array.from(prompt.typing.hiragana).length,\n    0\n  );\n}\n''')
+          PY
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/app/page.tsx apps/cloudflare-worker/src/room-authority.ts
+          if git diff --cached --quiet; then
+            echo "No patch changes to commit"
+            exit 0
+          fi
+          git commit -m "fix(sync): align client and worker input mode state"
+          git push origin HEAD:agent/fix-input-mode-sync
