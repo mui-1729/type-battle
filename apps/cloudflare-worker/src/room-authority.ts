@@ -39,6 +39,12 @@ import type {
 } from "@type-battle/shared/cloudflare-events";
 import type { RoomEngineHooks } from "@type-battle/shared/room-engine";
 import { readCloudflareClientIp } from "./client-ip.js";
+import {
+  createMatchTraceId,
+  inferMatchFinalizeReason,
+  summarizeMatchPlayers,
+  type MatchFinalizeReason
+} from "./match-observability.js";
 import { normalizeRoomCode, resolveRoomRoute } from "./room-routing.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
@@ -1134,10 +1140,14 @@ export class RoomAuthorityDurableObject {
     this.unjoinedSocketTimers.delete(socketId);
   }
 
-  private async persistRoom(roomCode: string): Promise<void> {
+  private async persistRoom(
+    roomCode: string,
+    matchTrace?: { traceId: string; reason: MatchFinalizeReason }
+  ): Promise<void> {
     this.clearPersistTimer();
 
-    const room = this.room && normalizeRoomCode(this.room.roomCode) === normalizeRoomCode(roomCode) ? this.room : null;
+    const normalizedRoomCode = normalizeRoomCode(roomCode);
+    const room = this.room && normalizeRoomCode(this.room.roomCode) === normalizedRoomCode ? this.room : null;
 
     try {
       if (!room) {
@@ -1145,7 +1155,23 @@ export class RoomAuthorityDurableObject {
       } else {
         await this.state.storage.put(ROOM_STORAGE_KEY, this.createPersistedRoomSnapshot(room));
       }
-    } catch {
+      if (matchTrace) {
+        console.info(JSON.stringify({
+          event: "match_room_persist_succeeded",
+          ...matchTrace,
+          roomCode: normalizedRoomCode,
+          storedRoom: Boolean(room)
+        }));
+      }
+    } catch (error) {
+      if (matchTrace) {
+        console.warn(JSON.stringify({
+          event: "match_room_persist_failed",
+          ...matchTrace,
+          roomCode: normalizedRoomCode,
+          error: error instanceof Error ? error.message : String(error)
+        }));
+      }
       // Persistence is best-effort for live gameplay.
     }
 
@@ -1180,6 +1206,8 @@ export class RoomAuthorityDurableObject {
     const roomCode = normalizeRoomCode(input.roomCode);
     const storageKey = `${MATCH_RESULT_STORAGE_PREFIX}${roomCode}:${input.round}`;
 
+    const traceId = createMatchTraceId(roomCode, input.round);
+
     try {
       await this.state.storage.put<MatchResultStorageRecord>(storageKey, {
         ...input,
@@ -1188,7 +1216,20 @@ export class RoomAuthorityDurableObject {
       });
       await this.refreshRetentionAlarmAt();
       await this.scheduleMaintenanceAlarm();
-    } catch {
+      console.info(JSON.stringify({
+        event: "match_result_record_persist_succeeded",
+        traceId,
+        roomCode,
+        round: input.round
+      }));
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "match_result_record_persist_failed",
+        traceId,
+        roomCode,
+        round: input.round,
+        error: error instanceof Error ? error.message : String(error)
+      }));
       // Result persistence is best-effort; gameplay completion must still be emitted.
     }
   }
@@ -1378,21 +1419,96 @@ export class RoomAuthorityDurableObject {
     this.clearMatchTimers();
 
     const room = this.room;
+    const round = room?.round ?? 0;
+    const traceId = createMatchTraceId(result.roomCode, round);
+    const reason = room
+      ? inferMatchFinalizeReason({
+          matchRule: room.matchRule,
+          now: Date.now(),
+          ...(room.matchEndsAt === undefined ? {} : { matchEndsAt: room.matchEndsAt }),
+          players: [...room.players.values()]
+        })
+      : "unknown";
     const notificationKey = `${normalizeRoomCode(result.roomCode)}:${room?.round ?? "unknown"}`;
 
+    console.info(JSON.stringify({
+      event: "match_notification_started",
+      traceId,
+      reason,
+      roomCode: normalizeRoomCode(result.roomCode),
+      round,
+      source: "room_authority"
+    }));
+
     if (room && normalizeRoomCode(room.roomCode) === normalizeRoomCode(result.roomCode)) {
-      this.broadcastRoomState(room);
-    }
-    if (this.lastFinalizedNotificationKey !== notificationKey) {
-      this.lastFinalizedNotificationKey = notificationKey;
-      this.broadcastToAll({
-        id: crypto.randomUUID(),
-        type: "server:match:result",
-        payload: result
-      });
+      try {
+        this.broadcastRoomState(room);
+        console.info(JSON.stringify({
+          event: "match_room_state_broadcast_succeeded",
+          traceId,
+          reason,
+          roomCode: room.roomCode,
+          round
+        }));
+      } catch (error) {
+        console.warn(JSON.stringify({
+          event: "match_room_state_broadcast_failed",
+          traceId,
+          reason,
+          roomCode: room.roomCode,
+          round,
+          error: error instanceof Error ? error.message : String(error)
+        }));
+      }
     }
 
-    this.runInBackground(this.persistRoom(result.roomCode), "persist_room_failed");
+    if (this.lastFinalizedNotificationKey !== notificationKey) {
+      this.lastFinalizedNotificationKey = notificationKey;
+      try {
+        this.broadcastToAll({
+          id: crypto.randomUUID(),
+          type: "server:match:result",
+          payload: result
+        });
+        console.info(JSON.stringify({
+          event: "match_result_broadcast_succeeded",
+          traceId,
+          reason,
+          roomCode: normalizeRoomCode(result.roomCode),
+          round
+        }));
+      } catch (error) {
+        console.warn(JSON.stringify({
+          event: "match_result_broadcast_failed",
+          traceId,
+          reason,
+          roomCode: normalizeRoomCode(result.roomCode),
+          round,
+          error: error instanceof Error ? error.message : String(error)
+        }));
+      }
+    } else {
+      console.info(JSON.stringify({
+        event: "match_result_broadcast_suppressed",
+        traceId,
+        reason,
+        roomCode: normalizeRoomCode(result.roomCode),
+        round,
+        notificationKey
+      }));
+    }
+
+    console.info(JSON.stringify({
+      event: "match_room_persist_scheduled",
+      traceId,
+      reason,
+      roomCode: normalizeRoomCode(result.roomCode),
+      round
+    }));
+    this.runInBackground(
+      this.persistRoom(result.roomCode, { traceId, reason }),
+      "persist_room_failed"
+    );
   }
 
   private clearRoomTimers(): void {
@@ -2465,11 +2581,50 @@ export class RoomAuthorityDurableObject {
   }
 
   private finalizeRoom(room: InternalRoom): MatchResult {
+    const traceId = createMatchTraceId(room.roomCode, room.round);
+    const reason = inferMatchFinalizeReason({
+      matchRule: room.matchRule,
+      now: Date.now(),
+      ...(room.matchEndsAt === undefined ? {} : { matchEndsAt: room.matchEndsAt }),
+      players: [...room.players.values()]
+    });
+
     if (room.status === "finished" && room.result) {
+      console.info(JSON.stringify({
+        event: "match_finalize_reused",
+        traceId,
+        reason,
+        roomCode: room.roomCode,
+        round: room.round,
+        matchRule: room.matchRule,
+        source: "room_authority"
+      }));
       return room.result;
     }
 
+    console.info(JSON.stringify({
+      event: "match_finalize_started",
+      traceId,
+      reason,
+      roomCode: room.roomCode,
+      round: room.round,
+      matchRule: room.matchRule,
+      source: "room_authority",
+      players: summarizeMatchPlayers([...room.players.values()])
+    }));
+
     const result = finalizeRoom(room);
+
+    console.info(JSON.stringify({
+      event: "match_finalize_result_created",
+      traceId,
+      reason,
+      roomCode: room.roomCode,
+      round: room.round,
+      matchRule: room.matchRule,
+      resultPlayerCount: result.players.length,
+      players: summarizeMatchPlayers([...room.players.values()])
+    }));
 
     this.hooks.recordMatchResult?.({
       roomCode: room.roomCode,
