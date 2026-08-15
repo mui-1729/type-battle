@@ -1,0 +1,22 @@
+name: Agent debug mobile WebKit
+
+on:
+  push:
+    branches: ["agent/fix-ios-keyboard-prompt"]
+
+jobs:
+  debug-mobile-webkit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps webkit
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL: ws://127.0.0.1:8787
+      - name: Run only mobile WebKit typing spec
+        run: npx playwright test tests/e2e/mobile-typing.spec.ts --project=mobile-webkit --reporter=list
