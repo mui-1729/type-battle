@@ -1,0 +1,63 @@
+name: Agent match observability patch
+
+on:
+  push:
+    branches: ["agent/add-match-observability"]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/add-match-observability
+
+      - name: Apply guarded observability patches
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("apps/cloudflare-worker/src/room-authority.ts")
+          text = path.read_text()
+
+          def replace_once(old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one match, found {count}: {old[:120]!r}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+          '''import { readCloudflareClientIp } from "./client-ip.js";\n''',
+          '''import { readCloudflareClientIp } from "./client-ip.js";\nimport {\n  createMatchTraceId,\n  inferMatchFinalizeReason,\n  summarizeMatchPlayers,\n  type MatchFinalizeReason\n} from "./match-observability.js";\n''')
+
+          replace_once(
+          '''  private async persistRoom(roomCode: string): Promise<void> {\n    this.clearPersistTimer();\n\n    const room = this.room && normalizeRoomCode(this.room.roomCode) === normalizeRoomCode(roomCode) ? this.room : null;\n\n    try {\n      if (!room) {\n        await this.state.storage.delete(ROOM_STORAGE_KEY);\n      } else {\n        await this.state.storage.put(ROOM_STORAGE_KEY, this.createPersistedRoomSnapshot(room));\n      }\n    } catch {\n      // Persistence is best-effort for live gameplay.\n    }\n\n    await this.scheduleMaintenanceAlarm();\n  }\n''',
+          '''  private async persistRoom(\n    roomCode: string,\n    matchTrace?: { traceId: string; reason: MatchFinalizeReason }\n  ): Promise<void> {\n    this.clearPersistTimer();\n\n    const normalizedRoomCode = normalizeRoomCode(roomCode);\n    const room = this.room && normalizeRoomCode(this.room.roomCode) === normalizedRoomCode ? this.room : null;\n\n    try {\n      if (!room) {\n        await this.state.storage.delete(ROOM_STORAGE_KEY);\n      } else {\n        await this.state.storage.put(ROOM_STORAGE_KEY, this.createPersistedRoomSnapshot(room));\n      }\n      if (matchTrace) {\n        console.info(JSON.stringify({\n          event: "match_room_persist_succeeded",\n          ...matchTrace,\n          roomCode: normalizedRoomCode,\n          storedRoom: Boolean(room)\n        }));\n      }\n    } catch (error) {\n      if (matchTrace) {\n        console.warn(JSON.stringify({\n          event: "match_room_persist_failed",\n          ...matchTrace,\n          roomCode: normalizedRoomCode,\n          error: error instanceof Error ? error.message : String(error)\n        }));\n      }\n      // Persistence is best-effort for live gameplay.\n    }\n\n    await this.scheduleMaintenanceAlarm();\n  }\n''')
+
+          replace_once(
+          '''    try {\n      await this.state.storage.put<MatchResultStorageRecord>(storageKey, {\n        ...input,\n        roomCode,\n        createdAt: new Date().toISOString()\n      });\n      await this.refreshRetentionAlarmAt();\n      await this.scheduleMaintenanceAlarm();\n    } catch {\n      // Result persistence is best-effort; gameplay completion must still be emitted.\n    }\n''',
+          '''    const traceId = createMatchTraceId(roomCode, input.round);\n\n    try {\n      await this.state.storage.put<MatchResultStorageRecord>(storageKey, {\n        ...input,\n        roomCode,\n        createdAt: new Date().toISOString()\n      });\n      await this.refreshRetentionAlarmAt();\n      await this.scheduleMaintenanceAlarm();\n      console.info(JSON.stringify({\n        event: "match_result_record_persist_succeeded",\n        traceId,\n        roomCode,\n        round: input.round\n      }));\n    } catch (error) {\n      console.warn(JSON.stringify({\n        event: "match_result_record_persist_failed",\n        traceId,\n        roomCode,\n        round: input.round,\n        error: error instanceof Error ? error.message : String(error)\n      }));\n      // Result persistence is best-effort; gameplay completion must still be emitted.\n    }\n''')
+
+          replace_once(
+          '''  private notifyMatchFinalized(result: MatchResult): void {\n    this.clearMatchTimers();\n\n    const room = this.room;\n    const notificationKey = `${normalizeRoomCode(result.roomCode)}:${room?.round ?? "unknown"}`;\n\n    if (room && normalizeRoomCode(room.roomCode) === normalizeRoomCode(result.roomCode)) {\n      this.broadcastRoomState(room);\n    }\n    if (this.lastFinalizedNotificationKey !== notificationKey) {\n      this.lastFinalizedNotificationKey = notificationKey;\n      this.broadcastToAll({\n        id: crypto.randomUUID(),\n        type: "server:match:result",\n        payload: result\n      });\n    }\n\n    this.runInBackground(this.persistRoom(result.roomCode), "persist_room_failed");\n  }\n''',
+          '''  private notifyMatchFinalized(result: MatchResult): void {\n    this.clearMatchTimers();\n\n    const room = this.room;\n    const round = room?.round ?? 0;\n    const traceId = createMatchTraceId(result.roomCode, round);\n    const reason = room\n      ? inferMatchFinalizeReason({\n          matchRule: room.matchRule,\n          now: Date.now(),\n          ...(room.matchEndsAt === undefined ? {} : { matchEndsAt: room.matchEndsAt }),\n          players: [...room.players.values()]\n        })\n      : "unknown";\n    const notificationKey = `${normalizeRoomCode(result.roomCode)}:${room?.round ?? "unknown"}`;\n\n    console.info(JSON.stringify({\n      event: "match_notification_started",\n      traceId,\n      reason,\n      roomCode: normalizeRoomCode(result.roomCode),\n      round,\n      source: "room_authority"\n    }));\n\n    if (room && normalizeRoomCode(room.roomCode) === normalizeRoomCode(result.roomCode)) {\n      try {\n        this.broadcastRoomState(room);\n        console.info(JSON.stringify({\n          event: "match_room_state_broadcast_succeeded",\n          traceId,\n          reason,\n          roomCode: room.roomCode,\n          round\n        }));\n      } catch (error) {\n        console.warn(JSON.stringify({\n          event: "match_room_state_broadcast_failed",\n          traceId,\n          reason,\n          roomCode: room.roomCode,\n          round,\n          error: error instanceof Error ? error.message : String(error)\n        }));\n      }\n    }\n\n    if (this.lastFinalizedNotificationKey !== notificationKey) {\n      this.lastFinalizedNotificationKey = notificationKey;\n      try {\n        this.broadcastToAll({\n          id: crypto.randomUUID(),\n          type: "server:match:result",\n          payload: result\n        });\n        console.info(JSON.stringify({\n          event: "match_result_broadcast_succeeded",\n          traceId,\n          reason,\n          roomCode: normalizeRoomCode(result.roomCode),\n          round\n        }));\n      } catch (error) {\n        console.warn(JSON.stringify({\n          event: "match_result_broadcast_failed",\n          traceId,\n          reason,\n          roomCode: normalizeRoomCode(result.roomCode),\n          round,\n          error: error instanceof Error ? error.message : String(error)\n        }));\n      }\n    } else {\n      console.info(JSON.stringify({\n        event: "match_result_broadcast_suppressed",\n        traceId,\n        reason,\n        roomCode: normalizeRoomCode(result.roomCode),\n        round,\n        notificationKey\n      }));\n    }\n\n    console.info(JSON.stringify({\n      event: "match_room_persist_scheduled",\n      traceId,\n      reason,\n      roomCode: normalizeRoomCode(result.roomCode),\n      round\n    }));\n    this.runInBackground(\n      this.persistRoom(result.roomCode, { traceId, reason }),\n      "persist_room_failed"\n    );\n  }\n''')
+
+          replace_once(
+          '''  private finalizeRoom(room: InternalRoom): MatchResult {\n    if (room.status === "finished" && room.result) {\n      return room.result;\n    }\n\n    const result = finalizeRoom(room);\n\n    this.hooks.recordMatchResult?.({\n''',
+          '''  private finalizeRoom(room: InternalRoom): MatchResult {\n    const traceId = createMatchTraceId(room.roomCode, room.round);\n    const reason = inferMatchFinalizeReason({\n      matchRule: room.matchRule,\n      now: Date.now(),\n      ...(room.matchEndsAt === undefined ? {} : { matchEndsAt: room.matchEndsAt }),\n      players: [...room.players.values()]\n    });\n\n    if (room.status === "finished" && room.result) {\n      console.info(JSON.stringify({\n        event: "match_finalize_reused",\n        traceId,\n        reason,\n        roomCode: room.roomCode,\n        round: room.round,\n        matchRule: room.matchRule,\n        source: "room_authority"\n      }));\n      return room.result;\n    }\n\n    console.info(JSON.stringify({\n      event: "match_finalize_started",\n      traceId,\n      reason,\n      roomCode: room.roomCode,\n      round: room.round,\n      matchRule: room.matchRule,\n      source: "room_authority",\n      players: summarizeMatchPlayers([...room.players.values()])\n    }));\n\n    const result = finalizeRoom(room);\n\n    console.info(JSON.stringify({\n      event: "match_finalize_result_created",\n      traceId,\n      reason,\n      roomCode: room.roomCode,\n      round: room.round,\n      matchRule: room.matchRule,\n      resultPlayerCount: result.players.length,\n      players: summarizeMatchPlayers([...room.players.values()])\n    }));\n\n    this.hooks.recordMatchResult?.({\n''')
+
+          path.write_text(text)
+          PY
+          git rm .github/workflows/agent-match-observability-patch.yml
+
+      - name: Commit patch and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/cloudflare-worker/src/room-authority.ts
+          git commit -m "chore(observability): trace match finalization lifecycle"
+          git push origin HEAD:agent/add-match-observability
