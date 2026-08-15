@@ -20,6 +20,23 @@ describe("romaji progress coordinate", () => {
     expect(getCanonicalProgressForRomajiGuide(plan, 4)).toBe(3);
   });
 
+  it("does not double-count canonical progress already reached before a mode switch", () => {
+    const plan = buildRomajiTypingPlan("しゅう");
+    const canonicalBeforeSwitch = 1;
+    const canonicalTargetAfterRomajiUnit = getCanonicalProgressForRomajiGuide(plan, 3);
+
+    expect(canonicalTargetAfterRomajiUnit).toBe(2);
+    expect(Math.max(canonicalTargetAfterRomajiUnit - canonicalBeforeSwitch, 0)).toBe(1);
+  });
+
+  it("does not award extra progress when canonical state is already at the unit boundary", () => {
+    const plan = buildRomajiTypingPlan("しゅう");
+    const canonicalBeforeSwitch = 2;
+    const canonicalTargetAfterRomajiUnit = getCanonicalProgressForRomajiGuide(plan, 3);
+
+    expect(Math.max(canonicalTargetAfterRomajiUnit - canonicalBeforeSwitch, 0)).toBe(0);
+  });
+
   it("maps looping guide cycles to cumulative canonical progress", () => {
     const plan = buildRomajiTypingPlan("しゅう");
 
