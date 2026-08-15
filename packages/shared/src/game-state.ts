@@ -1,4 +1,5 @@
 import type { HeadAccessoryId, HeldItemId } from "./cosmetics.js";
+import type { TypingInputMode } from "./typing-input-mode.js";
 
 export type MatchStatus = "waiting" | "countdown" | "playing" | "finished";
 
@@ -24,6 +25,7 @@ export type PlayerState = {
   progressIndex: number;
   typingProgressIndex?: number;
   pendingInput?: string;
+  inputMode?: TypingInputMode;
   correctCharacters: number;
   totalTypedCharacters: number;
   mistakes: number;
