@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import type { RomajiTypingPlan } from "../_lib/romaji-typing";
-import { getRomajiTypingUnitIndex, pickRomajiDisplayCandidate } from "../_lib/romaji-typing";
+import { pickRomajiDisplayCandidate } from "../_lib/romaji-typing";
+import { getInputGuideUnitIndex } from "../_lib/input-guide-progress";
 
 type TypingPromptProps = {
   displayText: string;
@@ -26,7 +27,7 @@ export function TypingPrompt({
         romajiPlan ? (
           <div className="promptGuide" aria-label="入力ガイド">
             {romajiPlan.units.map((unit, unitIndex) => {
-              const currentUnitIndex = getRomajiTypingUnitIndex(romajiPlan, progressIndex);
+              const currentUnitIndex = getInputGuideUnitIndex(romajiPlan, progressIndex, inputText);
 
               if (unitIndex < currentUnitIndex) {
                 return (
