@@ -90,6 +90,19 @@ test("completes practice with actual mobile kana IME input", async ({ page }) =>
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test("starts mobile text input with a normal tap instead of background autofocus", async ({ page }) => {
+  await page.goto("/");
+  await setNickname(page, "MobileTap");
+  await selectPracticeMode(page);
+  await page.getByRole("button", { name: "練習を開始" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const textarea = page.getByLabel("入力欄");
+  await expect(textarea).not.toBeFocused();
+  await page.locator(".promptBox").click();
+  await expect(textarea).toBeFocused();
+});
+
 test("supports physical-keyboard romaji input on a mobile device", async ({ page }) => {
   await page.goto("/");
   await setNickname(page, "MobileRomaji");
@@ -128,10 +141,13 @@ test("keeps the typing prompt reachable when the software keyboard reduces the v
   await page.getByRole("button", { name: "練習を開始" }).click();
   await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
+  const textarea = page.getByLabel("入力欄");
+  await expect(textarea).not.toBeFocused();
+  await page.locator(".promptBox").click();
+  await expect(textarea).toBeFocused();
   await page.evaluate(() => {
     (window as typeof window & { simulateSoftwareKeyboard: (height: number) => void }).simulateSoftwareKeyboard(500);
   });
-  await page.getByLabel("入力欄").focus();
 
   await expect.poll(async () => page.locator(".matchSurface").evaluate((surface) => {
     const prompt = surface.querySelector<HTMLElement>(".promptBox");
@@ -180,6 +196,8 @@ test("keeps the COM battle stage inside a mobile viewport with kana input", asyn
   const textarea = page.getByLabel("入力欄");
   await expect(stage).toHaveAttribute("data-mode", "hpBattle");
   await expect(stage.locator(".hpBattlePlayerLeft .hpBattleIdentity strong")).toHaveAttribute("title", nickname);
+  await expect(textarea).not.toBeFocused();
+  await page.locator(".promptBox").click();
   await expect(textarea).toBeFocused();
 
   const viewport = await page.evaluate(() => ({
