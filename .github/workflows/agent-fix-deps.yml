@@ -1,0 +1,36 @@
+name: Agent fix dependency audit
+
+on:
+  push:
+    branches: ["agent/fix-dependency-audit"]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/fix-dependency-audit
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Apply non-breaking audit fixes
+        run: npm audit fix
+      - name: Verify production audit
+        run: npm audit --omit=dev
+      - name: Verify full audit
+        run: npm audit
+      - name: Commit lockfile fixes and remove diagnostic workflows
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/agent-audit-deps.yml .github/workflows/agent-fix-deps.yml
+          git add package.json package-lock.json
+          git commit -m "chore(deps): resolve development audit findings"
+          git push origin HEAD:agent/fix-dependency-audit
