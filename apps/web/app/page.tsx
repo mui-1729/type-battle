@@ -1378,7 +1378,8 @@ export default function HomePage() {
       return;
     }
 
-    const frame = window.requestAnimationFrame(() => {
+    let followUpFrame: number | null = null;
+    const revealTypingPrompt = () => {
       const surface = matchSurfaceRef.current;
       const prompt = surface?.querySelector<HTMLElement>(".promptBox");
       if (!surface || !prompt) {
@@ -1399,9 +1400,19 @@ export default function HomePage() {
       if (Math.abs(nextScrollTop - surface.scrollTop) > 1) {
         surface.scrollTo({ top: nextScrollTop, behavior: "instant" });
       }
+    };
+
+    const frame = window.requestAnimationFrame(() => {
+      revealTypingPrompt();
+      followUpFrame = window.requestAnimationFrame(revealTypingPrompt);
     });
 
-    return () => window.cancelAnimationFrame(frame);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (followUpFrame !== null) {
+        window.cancelAnimationFrame(followUpFrame);
+      }
+    };
   }, [acceptingTextInput, activeTypingText, visualViewportHeight]);
 
   const emitProgress = useCallback(
