@@ -18,7 +18,7 @@ describe("TypingPrompt", () => {
     );
 
     expect(markup).toContain(
-      '<span class="char typed">k</span><span class="char typed">a</span><span class="char current">k</span>'
+      '<span class="char typed">k</span><span class="char typed">a</span><span class="char current">k</span><span class="char current">i</span>'
     );
   });
 
@@ -34,10 +34,12 @@ describe("TypingPrompt", () => {
       />
     );
 
-    expect(markup).toContain('<span class="char current">s</span><span class="char">h</span><span class="char">u</span>');
+    expect(markup).toContain(
+      '<span class="char current">s</span><span class="char current">h</span><span class="char current">u</span>'
+    );
   });
 
-  it("preserves pending romaji prefix rendering", () => {
+  it("preserves an unambiguous canonical romaji prefix", () => {
     const plan = buildRomajiTypingPlan("か");
     const markup = renderToStaticMarkup(
       <TypingPrompt
@@ -51,5 +53,42 @@ describe("TypingPrompt", () => {
     );
 
     expect(markup).toContain('<span class="char typed">k</span><span class="char current">a</span>');
+  });
+
+  it("does not claim that h is the only valid next key for si", () => {
+    const plan = buildRomajiTypingPlan("し");
+    const markup = renderToStaticMarkup(
+      <TypingPrompt
+        displayText="し"
+        inputText={plan.guide}
+        progressIndex={0}
+        inputGuideEnabled
+        pendingInput="s"
+        romajiPlan={plan}
+      />
+    );
+
+    expect(markup).toContain(
+      '<span class="char typed">s</span><span class="char current">h</span><span class="char current">i</span>'
+    );
+  });
+
+  it("keeps the canonical guide stable after an alternative path diverges", () => {
+    const plan = buildRomajiTypingPlan("しゃ");
+    const markup = renderToStaticMarkup(
+      <TypingPrompt
+        displayText="しゃ"
+        inputText={plan.guide}
+        progressIndex={0}
+        inputGuideEnabled
+        pendingInput="sy"
+        romajiPlan={plan}
+      />
+    );
+
+    expect(markup).toContain(
+      '<span class="char typed">s</span><span class="char current">h</span><span class="char current">a</span>'
+    );
+    expect(markup).not.toContain(">y<");
   });
 });
