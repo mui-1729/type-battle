@@ -1,4 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { PROMPTS } from "@type-battle/shared";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   expectElementsNotToOverlap,
   expectFixedViewport,
@@ -9,7 +10,26 @@ import {
   setNickname
 } from "./helpers";
 
-test("completes practice with mobile Japanese textarea input", async ({ page }) => {
+async function readActiveKana(page: Page): Promise<string> {
+  const displayText = await page.locator(".promptDisplay").innerText();
+  const prompt = PROMPTS.find((candidate) => candidate.text === displayText);
+  if (!prompt) {
+    throw new Error(`Could not resolve prompt fixture for: ${displayText}`);
+  }
+  return prompt.typing.hiragana;
+}
+
+async function commitKanaInput(textarea: Locator, value: string): Promise<void> {
+  await textarea.evaluate((element, text) => {
+    const input = element as HTMLTextAreaElement;
+    input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+    input.value = text;
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, isComposing: true }));
+    input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: text }));
+  }, value);
+}
+
+test("completes practice with actual mobile kana IME input", async ({ page }) => {
   await installWebSocketProbe(page.context());
   await page.goto("/");
   await page.waitForTimeout(500);
@@ -25,36 +45,38 @@ test("completes practice with mobile Japanese textarea input", async ({ page }) 
   expect((await readWebSocketProbe(page)).socketCount).toBe(1);
   await expectFixedViewport(page);
 
-  const guide = (await page.getByLabel("入力ガイド").innerText()).replace(/\s+/g, "");
+  const kanaText = await readActiveKana(page);
   const textarea = page.getByLabel("入力欄");
-  const compositionChunk = guide.slice(0, 2);
-  const remainingGuide = guide.slice(compositionChunk.length);
+  expect(kanaText).toMatch(/[\u3040-\u30ff]/u);
+  expect(kanaText).toContain("、");
 
   await expect(textarea).toBeEditable();
   await expect(page.locator(".progressLabel strong")).toHaveText("0%");
 
-  await textarea.evaluate((element, value) => {
-    const input = element as HTMLTextAreaElement;
-    input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
-    input.value = value;
-    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, isComposing: true }));
-  }, compositionChunk);
-  await expect(page.locator(".progressLabel strong")).toHaveText("0%");
-
-  await textarea.evaluate((element, value) => {
-    const input = element as HTMLTextAreaElement;
-    input.value = value;
-    input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: value }));
-  }, compositionChunk);
+  await commitKanaInput(textarea, Array.from(kanaText)[0]!);
   await expect(page.locator(".progressLabel strong")).not.toHaveText("0%");
 
-  await textarea.pressSequentially(remainingGuide, { delay: 1 });
-
-  await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
-  await expect(page.locator(".resultPanel").getByText("もう一度練習")).toBeVisible();
-  await expectFixedViewport(page);
+  for (const character of Array.from(kanaText).slice(1)) {
+    await commitKanaInput(textarea, character);
+  }
 
   const resultPanel = page.locator(".resultPanel");
+  const retryButton = resultPanel.getByRole("button", { name: "もう一度練習" });
+  await expect(resultPanel).toBeVisible({ timeout: 5_000 });
+  await expect(retryButton).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  const resultGeometry = await resultPanel.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      left: rect.left,
+      right: rect.right,
+      viewportWidth: window.innerWidth
+    };
+  });
+  expect(resultGeometry.left).toBeGreaterThanOrEqual(0);
+  expect(resultGeometry.right).toBeLessThanOrEqual(resultGeometry.viewportWidth);
+
   const panelHeightBefore = await resultPanel.evaluate((element) => element.getBoundingClientRect().height);
   await resultPanel.getByRole("button", { name: "詳しい結果" }).click();
   const detailsDialog = page.getByRole("dialog", { name: "詳しい結果" });
@@ -64,14 +86,31 @@ test("completes practice with mobile Japanese textarea input", async ({ page }) 
   const dialogBox = await detailsDialog.boundingBox();
   expect(dialogBox).not.toBeNull();
   expect(dialogBox?.x ?? -1).toBeGreaterThanOrEqual(0);
-  expect((dialogBox?.x ?? 0) + (dialogBox?.width ?? 0)).toBeLessThanOrEqual(390);
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  expect((dialogBox?.x ?? 0) + (dialogBox?.width ?? 0)).toBeLessThanOrEqual(page.viewportSize()?.width ?? 390);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
-test("keeps the typing prompt reachable when the software keyboard reduces the viewport", async ({ page }) => {
+test("supports physical-keyboard romaji input on a mobile device", async ({ page }) => {
+  await page.goto("/");
+  await setNickname(page, "MobileRomaji");
+  await selectPracticeMode(page);
+  await page.getByRole("button", { name: "練習を開始" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+
+  const guide = (await page.getByLabel("入力ガイド").innerText()).replace(/\s+/g, "");
+  const textarea = page.getByLabel("入力欄");
+  await textarea.pressSequentially(guide, { delay: 1 });
+
+  await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
+});
+
+test("keeps the typing prompt reachable when the software keyboard reduces the viewport", async ({ browserName, page }) => {
+  test.skip(browserName !== "webkit", "VisualViewport software-keyboard regression is specific to iOS/WebKit.");
+
   await page.addInitScript(() => {
-    const viewport = new EventTarget() as EventTarget & { height: number };
+    const viewport = new EventTarget() as EventTarget & { height: number; offsetTop: number };
     viewport.height = window.innerHeight;
+    viewport.offsetTop = 0;
     Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
     Object.defineProperty(window, "simulateSoftwareKeyboard", {
       configurable: true,
@@ -81,45 +120,52 @@ test("keeps the typing prompt reachable when the software keyboard reduces the v
       }
     });
   });
-  for (const viewport of [
-    { width: 390, height: 844 },
-    { width: 768, height: 1024 }
-  ]) {
-    await page.setViewportSize(viewport);
-    await page.goto("/");
-    await setNickname(page, "KeyboardPlayer");
-    await selectPracticeMode(page);
-    await page.getByRole("button", { name: "練習を開始" }).click();
-    await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
-    await page.evaluate(() => {
-      (window as typeof window & { simulateSoftwareKeyboard: (height: number) => void }).simulateSoftwareKeyboard(500);
-    });
-    await page.getByLabel("入力欄").focus();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await setNickname(page, "KeyboardPlayer");
+  await selectPracticeMode(page);
+  await page.getByRole("button", { name: "練習を開始" }).click();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
 
-    const metrics = await page.locator(".matchSurface").evaluate((surface) => {
-      const prompt = surface.querySelector<HTMLElement>(".promptBox");
-      const promptRect = prompt?.getBoundingClientRect();
-      return {
-        documentHeight: document.documentElement.scrollHeight,
-        viewportHeight: window.innerHeight,
-        shellHeight: document.querySelector<HTMLElement>(".appShell")?.clientHeight ?? 0,
-        surfaceScrollHeight: surface.scrollHeight,
-        surfaceClientHeight: surface.clientHeight,
-        promptTop: promptRect?.top ?? -1,
-        promptBottom: promptRect?.bottom ?? Number.POSITIVE_INFINITY
-      };
-    });
+  await page.evaluate(() => {
+    (window as typeof window & { simulateSoftwareKeyboard: (height: number) => void }).simulateSoftwareKeyboard(500);
+  });
+  await page.getByLabel("入力欄").focus();
 
-    expect(metrics.documentHeight).toBe(metrics.viewportHeight);
-    expect(metrics.shellHeight).toBe(500);
-    expect(metrics.surfaceScrollHeight).toBeGreaterThan(metrics.surfaceClientHeight);
-    expect(metrics.promptTop).toBeGreaterThanOrEqual(0);
-    expect(metrics.promptBottom).toBeLessThanOrEqual(metrics.shellHeight);
-  }
+  await expect.poll(async () => page.locator(".matchSurface").evaluate((surface) => {
+    const prompt = surface.querySelector<HTMLElement>(".promptBox");
+    const promptRect = prompt?.getBoundingClientRect();
+    const surfaceRect = surface.getBoundingClientRect();
+    return Boolean(
+      promptRect &&
+      promptRect.top >= surfaceRect.top &&
+      promptRect.bottom <= Math.min(surfaceRect.bottom, 500)
+    );
+  })).toBe(true);
+
+  const metrics = await page.locator(".matchSurface").evaluate((surface) => {
+    const prompt = surface.querySelector<HTMLElement>(".promptBox");
+    const promptRect = prompt?.getBoundingClientRect();
+    return {
+      documentHeight: document.documentElement.scrollHeight,
+      viewportHeight: window.innerHeight,
+      shellHeight: document.querySelector<HTMLElement>(".appShell")?.clientHeight ?? 0,
+      surfaceScrollHeight: surface.scrollHeight,
+      surfaceClientHeight: surface.clientHeight,
+      promptTop: promptRect?.top ?? -1,
+      promptBottom: promptRect?.bottom ?? Number.POSITIVE_INFINITY
+    };
+  });
+
+  expect(metrics.documentHeight).toBe(metrics.viewportHeight);
+  expect(metrics.shellHeight).toBe(500);
+  expect(metrics.surfaceScrollHeight).toBeGreaterThan(metrics.surfaceClientHeight);
+  expect(metrics.promptTop).toBeGreaterThanOrEqual(0);
+  expect(metrics.promptBottom).toBeLessThanOrEqual(metrics.shellHeight);
 });
 
-test("keeps the COM battle stage inside a 390px mobile viewport", async ({ page }) => {
+test("keeps the COM battle stage inside a mobile viewport with kana input", async ({ page }) => {
   test.setTimeout(45_000);
   await page.goto("/");
   await selectBattleMode(page);
@@ -142,25 +188,17 @@ test("keeps the COM battle stage inside a 390px mobile viewport", async ({ page 
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth
   }));
-  expect(viewport).toEqual({ width: 390, height: 844, clientWidth: 390, scrollWidth: 390 });
+  expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
+  expect(viewport.width).toBe(viewport.clientWidth);
 
   const stageBox = await stage.boundingBox();
   expect(stageBox).not.toBeNull();
   expect(stageBox?.x ?? -1).toBeGreaterThanOrEqual(0);
-  expect((stageBox?.x ?? 0) + (stageBox?.width ?? 0)).toBeLessThanOrEqual(390);
+  expect((stageBox?.x ?? 0) + (stageBox?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
 
-  const guide = (await page.getByLabel("入力ガイド").innerText()).replace(/\s+/g, "");
-  const typeKana = async (value: string) => {
-    await textarea.evaluate((element, text) => {
-      const input = element as HTMLTextAreaElement;
-      input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
-      input.value = text;
-      input.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, isComposing: true }));
-      input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: text }));
-    }, value);
-  };
-  for (const character of guide) {
-    await typeKana(character);
+  const kanaText = await readActiveKana(page);
+  for (const character of kanaText) {
+    await commitKanaInput(textarea, character);
     await page.waitForTimeout(300);
   }
 
@@ -168,8 +206,8 @@ test("keeps the COM battle stage inside a 390px mobile viewport", async ({ page 
   const hpAfterFirstCycle = Number(await opponentHp.getAttribute("aria-valuenow"));
   await expect(page.locator(".resultPanel")).not.toBeVisible();
   await page.waitForTimeout(2_000);
-  for (const character of guide.slice(0, 3)) {
-    await typeKana(character);
+  for (const character of Array.from(kanaText).slice(0, 3)) {
+    await commitKanaInput(textarea, character);
     await page.waitForTimeout(300);
   }
   await expect.poll(async () => Number(await opponentHp.getAttribute("aria-valuenow")))

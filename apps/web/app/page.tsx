@@ -70,6 +70,7 @@ import { resolveRoomSnapshot } from "./_lib/room-state-order";
 import { copyText } from "./_lib/clipboard";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
 import { getPracticeSocketToRelease } from "./_lib/practice-socket-lifecycle";
+import { getScrollTopToRevealTarget } from "./_lib/scroll-visibility";
 import {
   INITIAL_REACTION_FEEDBACK,
   REACTION_COOLDOWN_MS,
@@ -1377,12 +1378,24 @@ export default function HomePage() {
     const frame = window.requestAnimationFrame(() => {
       const surface = matchSurfaceRef.current;
       const prompt = surface?.querySelector<HTMLElement>(".promptBox");
-      if (!surface || !prompt || surface.scrollHeight <= surface.clientHeight) {
+      if (!surface || !prompt) {
         return;
       }
 
-      const promptBottom = prompt.offsetTop + prompt.offsetHeight;
-      surface.scrollTo({ top: Math.max(0, promptBottom - surface.clientHeight + 12), behavior: "instant" });
+      const surfaceBounds = surface.getBoundingClientRect();
+      const promptBounds = prompt.getBoundingClientRect();
+      const nextScrollTop = getScrollTopToRevealTarget({
+        scrollTop: surface.scrollTop,
+        containerTop: surfaceBounds.top,
+        containerBottom: surfaceBounds.bottom,
+        targetTop: promptBounds.top,
+        targetBottom: promptBounds.bottom,
+        padding: 12
+      });
+
+      if (Math.abs(nextScrollTop - surface.scrollTop) > 1) {
+        surface.scrollTo({ top: nextScrollTop, behavior: "instant" });
+      }
     });
 
     return () => window.cancelAnimationFrame(frame);
