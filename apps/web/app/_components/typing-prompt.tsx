@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import React, { Fragment } from "react";
 import type { RomajiTypingPlan } from "../_lib/romaji-typing";
 import { pickRomajiDisplayCandidate } from "../_lib/romaji-typing";
 import { getInputGuideUnitIndex } from "../_lib/input-guide-progress";
