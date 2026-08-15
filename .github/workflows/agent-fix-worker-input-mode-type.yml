@@ -1,0 +1,40 @@
+name: Agent fix worker input mode type
+
+on:
+  push:
+    branches: ["agent/fix-input-mode-sync"]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/fix-input-mode-sync
+
+      - name: Apply guarded patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("apps/cloudflare-worker/src/room-authority.ts")
+          text = path.read_text()
+          old = '''        inputMode: player.inputMode,\n'''
+          new = '''        ...(player.inputMode ? { inputMode: player.inputMode } : {}),\n'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"expected one inputMode persistence match, found {count}")
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git rm .github/workflows/agent-fix-worker-input-mode-type.yml
+
+      - name: Commit patch and remove workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/cloudflare-worker/src/room-authority.ts
+          git commit -m "fix(sync): omit undefined persisted input mode"
+          git push origin HEAD:agent/fix-input-mode-sync
