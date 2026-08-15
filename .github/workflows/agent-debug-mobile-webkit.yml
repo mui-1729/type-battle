@@ -18,10 +18,9 @@ jobs:
       - run: npm run build
         env:
           NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL: ws://127.0.0.1:8787
-      - name: Create WebKit boot diagnostic
+      - name: Append WebKit boot diagnostic to matched mobile spec
         run: |
-          cat > tests/e2e/debug-webkit-boot.spec.ts <<'EOF'
-          import { expect, test } from "@playwright/test";
+          cat >> tests/e2e/mobile-typing.spec.ts <<'EOF'
 
           test("prints WebKit boot errors", async ({ page }) => {
             page.on("pageerror", (error) => console.log("PAGEERROR:", error.message, error.stack));
@@ -35,9 +34,10 @@ jobs:
             console.log("BODY BEFORE:", (await page.locator("body").innerText()).slice(0, 1200));
             await page.waitForTimeout(4_000);
             console.log("BODY AFTER:", (await page.locator("body").innerText()).slice(0, 1200));
-            console.log("SETTINGS HYDRATED:", await page.evaluate(() => localStorage.getItem("type-battle:player-settings")));
+            console.log("SHELL HYDRATED:", await page.locator(".appShell").getAttribute("data-settings-hydrated"));
+            console.log("SETTINGS STORAGE:", await page.evaluate(() => localStorage.getItem("type-battle:player-settings")));
             await expect(page.locator("body")).toBeVisible();
           });
           EOF
       - name: Run WebKit boot diagnostic
-        run: npx playwright test tests/e2e/debug-webkit-boot.spec.ts --project=mobile-webkit --reporter=list
+        run: npx playwright test tests/e2e/mobile-typing.spec.ts --project=mobile-webkit -g "prints WebKit boot errors" --reporter=list
