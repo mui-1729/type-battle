@@ -1,15 +1,23 @@
-import type { PlayerState } from "@type-battle/shared";
+import type { PlayerState, TypingInputMode } from "@type-battle/shared";
 import type { ProgressState } from "./typing-progress";
 
-export function reconcileRoomProgress(previous: ProgressState, player: PlayerState): ProgressState {
+export function reconcileRoomProgress(
+  previous: ProgressState,
+  player: PlayerState,
+  localInputMode: TypingInputMode = player.deviceKind === "mobile" ? "kana" : "romaji"
+): ProgressState {
   // Local input is optimistic. A state with fewer processed keystrokes is an
   // older server broadcast and must not move the input guide backwards.
   if (player.totalTypedCharacters < previous.totalTypedCharacters) {
     return previous;
   }
 
-  const progressIndex = player.typingProgressIndex ?? player.progressIndex;
-  const pendingInput = player.pendingInput ?? "";
+  const inputMode = player.inputMode ?? localInputMode;
+  const progressIndex =
+    inputMode === "romaji"
+      ? player.typingProgressIndex ?? player.progressIndex
+      : player.progressIndex;
+  const pendingInput = inputMode === "romaji" ? player.pendingInput ?? "" : "";
 
   if (
     progressIndex === previous.progressIndex &&

@@ -133,6 +133,60 @@ describe("typing input strategy", () => {
     });
   });
 
+  it("uses the romaji cumulative base when time attack switches from kana to romaji", () => {
+    const result = advanceTypingProgress({
+      ...baseInput,
+      previous: {
+        ...createEmptyProgress(),
+        progressIndex: 2,
+        correctCharacters: 2,
+        totalTypedCharacters: 2
+      },
+      typedText: "u",
+      deviceKind: "mobile",
+      canonicalText: "う",
+      displayText: "u",
+      romajiPlan: buildRomajiTypingPlan("う"),
+      inputMode: "kana",
+      progressBase: 2,
+      progressBaseByMode: { kana: 2, romaji: 4 }
+    });
+
+    expect(result.progress).toMatchObject({
+      progressIndex: 5,
+      correctCharacters: 3,
+      totalTypedCharacters: 3,
+      mistakes: 0
+    });
+  });
+
+  it("uses the kana cumulative base when time attack switches from romaji to kana", () => {
+    const result = advanceTypingProgress({
+      ...baseInput,
+      previous: {
+        ...createEmptyProgress(),
+        progressIndex: 4,
+        correctCharacters: 2,
+        totalTypedCharacters: 2
+      },
+      typedText: "う",
+      deviceKind: "desktop",
+      canonicalText: "う",
+      displayText: "u",
+      romajiPlan: buildRomajiTypingPlan("う"),
+      inputMode: "romaji",
+      progressBase: 4,
+      progressBaseByMode: { kana: 2, romaji: 4 }
+    });
+
+    expect(result.progress).toMatchObject({
+      progressIndex: 3,
+      correctCharacters: 3,
+      totalTypedCharacters: 3,
+      mistakes: 0
+    });
+  });
+
   it("records a mistake in the fallback canonical strategy", () => {
     const result = advanceTypingProgress({
       ...baseInput,

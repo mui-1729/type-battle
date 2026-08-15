@@ -1,4 +1,8 @@
-import type { DeviceKind } from "@type-battle/shared";
+import {
+  resolveTypingInputMode,
+  type DeviceKind,
+  type TypingInputMode
+} from "@type-battle/shared";
 import {
   advanceLoopingRomajiProgressWithMistakes,
   getCanonicalProgressIndex,
@@ -22,8 +26,9 @@ export type TypingInputStrategy = {
   displayText: string;
   romajiPlan: RomajiTypingPlan | null;
   loop: boolean;
-  inputMode?: "kana" | "romaji";
+  inputMode?: TypingInputMode;
   progressBase?: number;
+  progressBaseByMode?: Partial<Record<TypingInputMode, number>>;
 };
 
 export function advanceTypingProgress({
@@ -35,8 +40,11 @@ export function advanceTypingProgress({
   romajiPlan,
   loop,
   inputMode = deviceKind === "mobile" ? "kana" : "romaji",
-  progressBase = 0
+  progressBase = 0,
+  progressBaseByMode
 }: TypingInputStrategy): ProgressUpdate {
+  const nextMode = resolveTypingInputMode(inputMode, typedText);
+
   if (progressBase > 0) {
     const localPrevious = { ...previous, progressIndex: Math.max(0, previous.progressIndex - progressBase) };
     const next = advanceTypingProgress({
@@ -49,9 +57,16 @@ export function advanceTypingProgress({
       loop: false,
       inputMode
     });
-    return { ...next, progress: { ...next.progress, progressIndex: next.progress.progressIndex + progressBase } };
+    const nextProgressBase = progressBaseByMode?.[nextMode] ?? progressBase;
+    return {
+      ...next,
+      progress: {
+        ...next.progress,
+        progressIndex: next.progress.progressIndex + nextProgressBase
+      }
+    };
   }
-  const nextMode = containsKanaInput(typedText) ? "kana" : "romaji";
+
   let modePrevious = previous;
 
   if (romajiPlan && inputMode !== nextMode) {
@@ -71,31 +86,11 @@ export function advanceTypingProgress({
     return advanceProgressWithMistakes(modePrevious, canonicalText, typedText, loop);
   }
 
-  if (romajiPlan && containsKanaInput(typedText)) {
-    const canonicalPrevious = modePrevious;
-    const next = advanceProgressWithMistakes(canonicalPrevious, canonicalText, typedText, loop);
-
-    return {
-      ...next,
-      progress: {
-        ...next.progress,
-        progressIndex: getRomajiProgressIndexForCanonicalProgress(
-          romajiPlan,
-          next.progress.progressIndex
-        )
-      }
-    };
-  }
-
   if (romajiPlan) {
     return loop
       ? advanceLoopingRomajiProgressWithMistakes(modePrevious, romajiPlan, typedText)
       : advanceRomajiProgressWithMistakes(modePrevious, romajiPlan, typedText);
   }
 
-  return advanceProgressWithMistakes(previous, displayText, typedText, loop);
-}
-
-function containsKanaInput(value: string): boolean {
-  return /[\u3040-\u30ff\uff66-\uff9f]/u.test(value);
+  return advanceProgressWithMistakes(modePrevious, displayText, typedText, loop);
 }

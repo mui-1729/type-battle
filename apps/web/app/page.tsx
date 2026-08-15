@@ -15,6 +15,7 @@ import {
   calculateWpm,
   createRoomCode,
   normalizeNickname,
+  resolveTypingInputMode,
   validateNickname
 } from "@type-battle/shared";
 import type {
@@ -325,6 +326,8 @@ export default function HomePage() {
     activeTimeAttackRemainingSeconds,
     usesTimeAttackPromptSequence,
     activeProgressBase,
+    activeCanonicalProgressBase,
+    activeRomajiProgressBase,
     completedTimeAttackPrompts,
     acceptingTextInput,
     progressSyncState,
@@ -337,7 +340,7 @@ export default function HomePage() {
     inputModeRef.current = nextMode;
     setInputMode(nextMode);
     setInputModeInitialized(true);
-  }, [activeInputDeviceKind, activePrompt?.id, practiceSession?.practiceId, room?.roomCode]);
+  }, [activeInputDeviceKind, practiceSession?.practiceId, room?.roomCode, room?.round]);
 
   const setPromptCategory = useCallback(
     (category: "short" | "standard" | "long") => {
@@ -1266,7 +1269,17 @@ export default function HomePage() {
       return;
     }
 
-    setLocalProgress((previous) => reconcileRoomProgress(previous, currentPlayer));
+    const serverInputMode = currentPlayer.inputMode;
+    if (
+      serverInputMode &&
+      currentPlayer.totalTypedCharacters >= localProgressRef.current.totalTypedCharacters &&
+      serverInputMode !== inputModeRef.current
+    ) {
+      inputModeRef.current = serverInputMode;
+      setInputMode(serverInputMode);
+    }
+
+    setLocalProgress((previous) => reconcileRoomProgress(previous, currentPlayer, inputModeRef.current));
   }, [currentPlayer]);
 
   useEffect(() => {
@@ -1432,10 +1445,15 @@ export default function HomePage() {
           romajiPlan: activeRomajiTypingPlan,
           loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
           progressBase: activeProgressBase,
+          progressBaseByMode: {
+            kana: activeCanonicalProgressBase,
+            romaji: activeRomajiProgressBase
+          },
           inputMode: inputModeRef.current
         });
-        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedText) ? "kana" : "romaji";
-        setInputMode(inputModeRef.current);
+        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedText);
+        inputModeRef.current = nextInputMode;
+        setInputMode(nextInputMode);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
 
         setLocalProgress(next.progress);
@@ -1464,10 +1482,15 @@ export default function HomePage() {
           romajiPlan: activeRomajiTypingPlan,
           loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
           progressBase: activeProgressBase,
+          progressBaseByMode: {
+            kana: activeCanonicalProgressBase,
+            romaji: activeRomajiProgressBase
+          },
           inputMode: inputModeRef.current
         });
-        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedText) ? "kana" : "romaji";
-        setInputMode(inputModeRef.current);
+        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedText);
+        inputModeRef.current = nextInputMode;
+        setInputMode(nextInputMode);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
 
         setPracticeProgress(next.progress);
@@ -1545,10 +1568,15 @@ export default function HomePage() {
           romajiPlan: activeRomajiTypingPlan,
           loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
           progressBase: activeProgressBase,
+          progressBaseByMode: {
+            kana: activeCanonicalProgressBase,
+            romaji: activeRomajiProgressBase
+          },
           inputMode: inputModeRef.current
         });
-        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedKey) ? "kana" : "romaji";
-        setInputMode(inputModeRef.current);
+        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedKey);
+        inputModeRef.current = nextInputMode;
+        setInputMode(nextInputMode);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const soundOptions = settingsRef.current;
 
@@ -1578,10 +1606,15 @@ export default function HomePage() {
           romajiPlan: activeRomajiTypingPlan,
           loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
           progressBase: activeProgressBase,
+          progressBaseByMode: {
+            kana: activeCanonicalProgressBase,
+            romaji: activeRomajiProgressBase
+          },
           inputMode: inputModeRef.current
         });
-        inputModeRef.current = /[\u3040-\u30ff\uff66-\uff9f]/u.test(typedKey) ? "kana" : "romaji";
-        setInputMode(inputModeRef.current);
+        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedKey);
+        inputModeRef.current = nextInputMode;
+        setInputMode(nextInputMode);
         const correct = next.progress.correctCharacters > previous.correctCharacters;
         const soundOptions = settingsRef.current;
 

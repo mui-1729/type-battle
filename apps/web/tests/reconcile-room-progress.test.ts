@@ -49,6 +49,7 @@ describe("reconcileRoomProgress", () => {
 
     expect(reconcileRoomProgress(localProgress, {
       ...player,
+      inputMode: "romaji",
       typingProgressIndex: 0,
       pendingInput: "k",
       correctCharacters: 1,
@@ -56,5 +57,79 @@ describe("reconcileRoomProgress", () => {
       currentStreak: 1,
       maxStreak: 1
     })).toMatchObject({ progressIndex: 0, pendingInput: "k", totalTypedCharacters: 1 });
+  });
+
+  it("uses canonical progress for desktop kana input instead of the romaji guide coordinate", () => {
+    const localProgress = {
+      progressIndex: 0,
+      pendingInput: "",
+      correctCharacters: 0,
+      totalTypedCharacters: 0,
+      mistakes: 0,
+      currentStreak: 0,
+      maxStreak: 0
+    };
+
+    expect(reconcileRoomProgress(localProgress, {
+      ...player,
+      deviceKind: "desktop",
+      inputMode: "kana",
+      progressIndex: 1,
+      typingProgressIndex: 2,
+      totalTypedCharacters: 1,
+      correctCharacters: 1,
+      currentStreak: 1,
+      maxStreak: 1
+    })).toMatchObject({ progressIndex: 1, pendingInput: "" });
+  });
+
+  it("restores romaji partial input on a mobile physical keyboard", () => {
+    const localProgress = {
+      progressIndex: 0,
+      pendingInput: "",
+      correctCharacters: 0,
+      totalTypedCharacters: 0,
+      mistakes: 0,
+      currentStreak: 0,
+      maxStreak: 0
+    };
+
+    expect(reconcileRoomProgress(localProgress, {
+      ...player,
+      deviceKind: "mobile",
+      inputMode: "romaji",
+      progressIndex: 0,
+      typingProgressIndex: 0,
+      pendingInput: "k",
+      totalTypedCharacters: 1,
+      correctCharacters: 1,
+      currentStreak: 1,
+      maxStreak: 1
+    })).toMatchObject({ progressIndex: 0, pendingInput: "k" });
+  });
+
+  it("falls back to the current local mode for older server states without inputMode", () => {
+    const localProgress = {
+      progressIndex: 0,
+      pendingInput: "",
+      correctCharacters: 0,
+      totalTypedCharacters: 0,
+      mistakes: 0,
+      currentStreak: 0,
+      maxStreak: 0
+    };
+    const legacyPlayer: PlayerState = {
+      ...player,
+      deviceKind: "desktop",
+      progressIndex: 1,
+      typingProgressIndex: 2,
+      totalTypedCharacters: 1,
+      correctCharacters: 1,
+      currentStreak: 1,
+      maxStreak: 1
+    };
+
+    expect(reconcileRoomProgress(localProgress, legacyPlayer, "kana"))
+      .toMatchObject({ progressIndex: 1, pendingInput: "" });
   });
 });
