@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { getScrollTopToRevealTarget } from "../app/_lib/scroll-visibility";
 
 describe("scroll visibility", () => {
-  it("scrolls down by the actual rendered overflow below the container", () => {
+  it("aligns an obscured target to the visible container top", () => {
     expect(getScrollTopToRevealTarget({
       scrollTop: 40,
       containerTop: 80,
@@ -10,7 +10,7 @@ describe("scroll visibility", () => {
       targetTop: 430,
       targetBottom: 614,
       padding: 12
-    })).toBe(166);
+    })).toBe(378);
   });
 
   it("scrolls up when the target is above the visible container", () => {
