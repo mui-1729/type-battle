@@ -11,9 +11,11 @@ import {
   getTimeAttackPromptPosition,
   getTimeAttackPromptTotalLength,
   getRomajiTypingUnitIndex,
+  getCanonicalProgressForRomajiGuide,
   pickPrompt,
   rankPlayers,
   resolveTimeAttackPrompts,
+  resolveTypingInputMode,
   DEFAULT_EQUIPMENT,
 } from "@type-battle/shared";
 import { isValidRoomCode, normalizeNickname, validateNickname } from "@type-battle/shared";
@@ -108,6 +110,7 @@ type PersistedRoomSnapshot = {
 type PersistedPlayerTypingState = {
   typingProgressIndex?: number;
   pendingInput?: string;
+  inputMode?: "kana" | "romaji";
   lastInputSequence?: number;
   typingRateTokens?: number;
   typingRateLastRefillAt?: number;
@@ -1202,6 +1205,7 @@ export class RoomAuthorityDurableObject {
       typingState[playerId] = {
         typingProgressIndex: player.typingProgressIndex,
         pendingInput: player.pendingInput,
+        inputMode: player.inputMode,
         lastInputSequence: player.lastInputSequence,
         typingRateTokens: player.typingRateTokens,
         typingRateLastRefillAt: player.typingRateLastRefillAt
@@ -2699,10 +2703,6 @@ function isTimeAttackExpired(room: InternalRoom, now: number): boolean {
   return room.matchRule === "timeAttack" && room.matchEndsAt !== undefined && now >= room.matchEndsAt;
 }
 
-function containsKana(value: string): boolean {
-  return /[\u3040-\u30ff]/u.test(value);
-}
-
 function getRomajiProgressIndexForCanonicalProgress(
   plan: ReturnType<typeof buildRomajiTypingPlan>,
   canonicalProgressIndex: number,
@@ -2773,7 +2773,13 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
   const now = Date.now();
   const startedAt = room.serverStartAt ?? now;
   const loopingMatch = room.matchRule === "timeAttack" || room.matchRule === "hpBattle";
-  const kanaInput = containsKana(payload.input);
+  const previousInputMode = player.inputMode ?? (player.deviceKind === "mobile" ? "kana" : "romaji");
+  const nextInputMode = resolveTypingInputMode(previousInputMode, payload.input);
+  if (previousInputMode !== nextInputMode && nextInputMode === "kana") {
+    player.pendingInput = "";
+  }
+  player.inputMode = nextInputMode;
+  const kanaInput = nextInputMode === "kana";
   let attackDamageDelta = 0;
 
   if (room.matchRule === "timeAttack" && room.timeAttackPromptIds?.length) {
@@ -2809,10 +2815,21 @@ function applyTypingInput(player: InternalPlayer, room: InternalRoom, payload: T
       player.typingProgressIndex = cycleBase + after.progressIndex;
 
       if (completedUnit) {
-        const canonicalDelta = Array.from(completedUnit.hiragana).length;
+        const canonicalTarget = getCanonicalProgressForRomajiGuide(
+          plan,
+          player.typingProgressIndex,
+          loopingMatch
+        );
+        const cycleNumber = loopingMatch && guideLength > 0
+          ? Math.floor(cycleBase / guideLength)
+          : 0;
+        const currentCanonicalAbsolute = loopingMatch
+          ? cycleNumber * promptLength + player.progressIndex
+          : player.progressIndex;
+        const canonicalDelta = Math.max(canonicalTarget - currentCanonicalAbsolute, 0);
         player.progressIndex = loopingMatch
-          ? modulo(player.progressIndex + canonicalDelta, promptLength)
-          : clamp(player.progressIndex + canonicalDelta, 0, promptLength);
+          ? modulo(canonicalTarget, promptLength)
+          : clamp(canonicalTarget, 0, promptLength);
         attackDamageDelta += canonicalDelta;
       }
     }
@@ -2905,8 +2922,10 @@ function applyTimeAttackTyping(player: InternalPlayer, room: InternalRoom, input
       applyGuardedProgress(player, before, after);
       player.typingProgressIndex += Math.max(after.progressIndex - before.progressIndex, 0);
       if (unit) {
-        const delta = Array.from(unit.hiragana).length;
-        player.progressIndex += delta;
+        const canonicalBase = getTimeAttackCanonicalBase(prompts, position.promptIndex);
+        const canonicalTarget = canonicalBase + getCanonicalProgressForRomajiGuide(plan, after.progressIndex);
+        const delta = Math.max(canonicalTarget - player.progressIndex, 0);
+        player.progressIndex = canonicalTarget;
         canonicalDelta += delta;
       }
     }
@@ -2917,6 +2936,13 @@ function applyTimeAttackTyping(player: InternalPlayer, room: InternalRoom, input
 function getTimeAttackGuideBase(prompts: Prompt[], promptIndex: number): number {
   return prompts.slice(0, promptIndex).reduce(
     (total, prompt) => total + buildRomajiTypingPlan(prompt.typing.hiragana).guide.length,
+    0
+  );
+}
+
+function getTimeAttackCanonicalBase(prompts: Prompt[], promptIndex: number): number {
+  return prompts.slice(0, promptIndex).reduce(
+    (total, prompt) => total + Array.from(prompt.typing.hiragana).length,
     0
   );
 }
@@ -3186,9 +3212,9 @@ function toPublicPlayer(player: InternalPlayer, hostPlayerId: string): PlayerSta
     isHost: player.id === hostPlayerId,
     isBot: player.isBot,
     progressIndex: player.progressIndex,
-    ...(player.deviceKind === "desktop"
-      ? { typingProgressIndex: player.typingProgressIndex, pendingInput: player.pendingInput }
-      : {}),
+    typingProgressIndex: player.typingProgressIndex,
+    pendingInput: player.pendingInput,
+    inputMode: player.inputMode ?? (player.deviceKind === "mobile" ? "kana" : "romaji"),
     correctCharacters: player.correctCharacters,
     totalTypedCharacters: player.totalTypedCharacters,
     mistakes: player.mistakes,
@@ -3338,6 +3364,9 @@ function createRoomStateFromSnapshot(
               : 0
           ),
           pendingInput: typingState[player.id]?.pendingInput ?? "",
+          inputMode: typingState[player.id]?.inputMode
+            ?? player.inputMode
+            ?? (player.deviceKind === "mobile" ? "kana" : "romaji"),
           lastInputSequence: typingState[player.id]?.lastInputSequence ?? 0,
           typingRateTokens: typingState[player.id]?.typingRateTokens
             ?? (room.status === "playing" ? 0 : TYPING_INITIAL_BURST_CANONICAL),
@@ -3424,6 +3453,7 @@ function parseSnapshotInternal(value: unknown): PersistedRoomSnapshot["internal"
           ? { typingProgressIndex: state.typingProgressIndex }
           : {}),
         ...(typeof state.pendingInput === "string" ? { pendingInput: state.pendingInput } : {}),
+        ...((state.inputMode === "kana" || state.inputMode === "romaji") ? { inputMode: state.inputMode } : {}),
         ...(typeof state.lastInputSequence === "number" && Number.isSafeInteger(state.lastInputSequence)
           ? { lastInputSequence: state.lastInputSequence }
           : {}),
