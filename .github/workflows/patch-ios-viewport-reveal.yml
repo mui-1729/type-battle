@@ -1,0 +1,68 @@
+name: Patch iOS viewport reveal
+
+on:
+  push:
+    branches:
+      - agent/stabilize-ios-viewport-e2e
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/stabilize-ios-viewport-e2e
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Patch viewport reveal scheduling
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/web/app/page.tsx')
+          text = path.read_text()
+
+          start_marker = '''  useEffect(() => {\n    if (!acceptingTextInput || visualViewportHeight === null) {\n      return;\n    }\n\n    const frame = window.requestAnimationFrame(() => {'''
+          end_marker = '''  }, [acceptingTextInput, activeTypingText, visualViewportHeight]);'''
+          assert text.count(start_marker) == 1, 'viewport reveal effect start mismatch'
+          start = text.index(start_marker)
+          end = text.index(end_marker, start) + len(end_marker)
+
+          old_block = text[start:end]
+          body_start = old_block.index('    const frame = window.requestAnimationFrame(() => {')
+          callback_start = body_start + len('    const frame = window.requestAnimationFrame(() => {\n')
+          callback_end = old_block.rindex('    });\n\n    return () => window.cancelAnimationFrame(frame);')
+          reveal_body = old_block[callback_start:callback_end]
+          reveal_body = '\n'.join(
+            line[6:] if line.startswith('      ') else line
+            for line in reveal_body.splitlines()
+          )
+
+          new_block = '''  useEffect(() => {\n    if (!acceptingTextInput || visualViewportHeight === null) {\n      return;\n    }\n\n    let followUpFrame: number | null = null;\n    const revealTypingPrompt = () => {\n''' + '\n'.join('      ' + line if line else '' for line in reveal_body.splitlines()) + '''\n    };\n\n    const frame = window.requestAnimationFrame(() => {\n      revealTypingPrompt();\n      followUpFrame = window.requestAnimationFrame(revealTypingPrompt);\n    });\n\n    return () => {\n      window.cancelAnimationFrame(frame);\n      if (followUpFrame !== null) {\n        window.cancelAnimationFrame(followUpFrame);\n      }\n    };\n  }, [acceptingTextInput, activeTypingText, visualViewportHeight]);'''
+
+          text = text[:start] + new_block + text[end:]
+          path.write_text(text)
+          PY
+          git diff --check
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm run test
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/patch-ios-viewport-reveal.yml
+          git add apps/web/app/page.tsx
+          git commit -m "fix(mobile): VisualViewport縮小後に問題文位置を再調整する"
+          git push origin HEAD:agent/stabilize-ios-viewport-e2e
