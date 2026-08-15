@@ -47,8 +47,14 @@ export default defineConfig({
       testMatch: /mobile-.*\.spec\.ts/,
       use: {
         ...devices["Pixel 5"],
-        ...chromiumLaunchOptions,
-        viewport: { width: 390, height: 844 }
+        ...chromiumLaunchOptions
+      }
+    },
+    {
+      name: "mobile-webkit",
+      testMatch: /mobile-typing\.spec\.ts/,
+      use: {
+        ...devices["iPhone 13"]
       }
     }
   ]
