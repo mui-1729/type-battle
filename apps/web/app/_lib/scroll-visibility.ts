@@ -15,8 +15,12 @@ export function getScrollTopToRevealTarget({
   targetBottom,
   padding = 12
 }: ScrollVisibilityInput): number {
+  const visualViewport = typeof window === "undefined" ? null : window.visualViewport;
+  const visualViewportBottom = visualViewport
+    ? visualViewport.offsetTop + visualViewport.height
+    : containerBottom;
   const visibleTop = containerTop + padding;
-  const visibleBottom = containerBottom - padding;
+  const visibleBottom = Math.min(containerBottom, visualViewportBottom) - padding;
 
   if (targetBottom > visibleBottom) {
     return Math.max(0, scrollTop + targetBottom - visibleBottom);
