@@ -1,0 +1,36 @@
+name: Agent update dev tools
+
+on:
+  push:
+    branches: ["agent/fix-dev-tool-audit"]
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/fix-dev-tool-audit
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Update Cloudflare development tools
+        run: npm install --workspace @type-battle/cloudflare-worker --save-dev wrangler@latest miniflare@latest
+      - name: Verify production dependencies
+        run: npm audit --omit=dev
+      - name: Verify all dependencies
+        run: npm audit
+      - name: Remove one-shot workflow and commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/agent-update-dev-tools.yml
+          git add apps/cloudflare-worker/package.json package-lock.json
+          git commit -m "chore(deps): update Cloudflare development tools"
+          git push origin HEAD:agent/fix-dev-tool-audit
