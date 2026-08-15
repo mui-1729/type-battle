@@ -1,6 +1,6 @@
-import { Fragment } from "react";
+import React, { Fragment } from "react";
 import type { RomajiTypingPlan } from "../_lib/romaji-typing";
-import { getRomajiTypingUnitIndex, pickRomajiDisplayCandidate } from "../_lib/romaji-typing";
+import { getInputGuideUnitIndex } from "../_lib/input-guide-progress";
 
 type TypingPromptProps = {
   displayText: string;
@@ -26,7 +26,7 @@ export function TypingPrompt({
         romajiPlan ? (
           <div className="promptGuide" aria-label="入力ガイド">
             {romajiPlan.units.map((unit, unitIndex) => {
-              const currentUnitIndex = getRomajiTypingUnitIndex(romajiPlan, progressIndex);
+              const currentUnitIndex = getInputGuideUnitIndex(romajiPlan, progressIndex, inputText);
 
               if (unitIndex < currentUnitIndex) {
                 return (
@@ -44,13 +44,11 @@ export function TypingPrompt({
                 );
               }
 
-              const displayCandidate = pickRomajiDisplayCandidate(unit, pendingInput);
-              const typedLength = Math.min(pendingInput.length, displayCandidate.length);
+              const typedGuideLength = getStableGuideTypedLength(unit.guide, pendingInput);
 
               return (
                 <Fragment key={`${unit.hiragana}-${unitIndex}`}>
-                  {renderChars(displayCandidate.slice(0, typedLength), "typed")}
-                  {renderCurrentAndFutureChars(displayCandidate.slice(typedLength))}
+                  {renderCurrentUnitChars(unit.guide, typedGuideLength)}
                 </Fragment>
               );
             })}
@@ -74,6 +72,22 @@ export function TypingPrompt({
   );
 }
 
+function getStableGuideTypedLength(guide: string, pendingInput: string): number {
+  const guideCharacters = Array.from(guide);
+  const pendingCharacters = Array.from(pendingInput);
+  let matched = 0;
+
+  while (
+    matched < guideCharacters.length &&
+    matched < pendingCharacters.length &&
+    guideCharacters[matched] === pendingCharacters[matched]
+  ) {
+    matched += 1;
+  }
+
+  return matched;
+}
+
 function renderChars(text: string, className: string) {
   return text.split("").map((char, index) => (
     <span className={`char ${className}`.trim()} key={`${char}-${index}-${className}`}>
@@ -82,9 +96,9 @@ function renderChars(text: string, className: string) {
   ));
 }
 
-function renderCurrentAndFutureChars(text: string) {
+function renderCurrentUnitChars(text: string, typedLength: number) {
   return text.split("").map((char, index) => (
-    <span className={index === 0 ? "char current" : "char"} key={`${char}-${index}`}>
+    <span className={index < typedLength ? "char typed" : "char current"} key={`${char}-${index}`}>
       {char}
     </span>
   ));
