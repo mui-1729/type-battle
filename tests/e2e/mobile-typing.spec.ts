@@ -60,11 +60,23 @@ test("completes practice with actual mobile kana IME input", async ({ page }) =>
     await commitKanaInput(textarea, character);
   }
 
-  await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
-  await expect(page.locator(".resultPanel").getByText("もう一度練習")).toBeVisible();
-  await expectFixedViewport(page);
-
   const resultPanel = page.locator(".resultPanel");
+  const retryButton = resultPanel.getByRole("button", { name: "もう一度練習" });
+  await expect(resultPanel).toBeVisible({ timeout: 5_000 });
+  await expect(retryButton).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  const resultGeometry = await resultPanel.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      left: rect.left,
+      right: rect.right,
+      viewportWidth: window.innerWidth
+    };
+  });
+  expect(resultGeometry.left).toBeGreaterThanOrEqual(0);
+  expect(resultGeometry.right).toBeLessThanOrEqual(resultGeometry.viewportWidth);
+
   const panelHeightBefore = await resultPanel.evaluate((element) => element.getBoundingClientRect().height);
   await resultPanel.getByRole("button", { name: "詳しい結果" }).click();
   const detailsDialog = page.getByRole("dialog", { name: "詳しい結果" });
@@ -94,8 +106,9 @@ test("supports physical-keyboard romaji input on a mobile device", async ({ page
 
 test("keeps the typing prompt reachable when the software keyboard reduces the viewport", async ({ page }) => {
   await page.addInitScript(() => {
-    const viewport = new EventTarget() as EventTarget & { height: number };
+    const viewport = new EventTarget() as EventTarget & { height: number; offsetTop: number };
     viewport.height = window.innerHeight;
+    viewport.offsetTop = 0;
     Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
     Object.defineProperty(window, "simulateSoftwareKeyboard", {
       configurable: true,
