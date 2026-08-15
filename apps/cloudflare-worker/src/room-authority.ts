@@ -1205,7 +1205,7 @@ export class RoomAuthorityDurableObject {
       typingState[playerId] = {
         typingProgressIndex: player.typingProgressIndex,
         pendingInput: player.pendingInput,
-        inputMode: player.inputMode,
+        ...(player.inputMode ? { inputMode: player.inputMode } : {}),
         lastInputSequence: player.lastInputSequence,
         typingRateTokens: player.typingRateTokens,
         typingRateLastRefillAt: player.typingRateLastRefillAt
