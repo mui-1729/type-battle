@@ -104,7 +104,9 @@ test("supports physical-keyboard romaji input on a mobile device", async ({ page
   await expect(page.locator(".resultPanel")).toBeVisible({ timeout: 5_000 });
 });
 
-test("keeps the typing prompt reachable when the software keyboard reduces the viewport", async ({ page }) => {
+test("keeps the typing prompt reachable when the software keyboard reduces the viewport", async ({ browserName, page }) => {
+  test.skip(browserName !== "webkit", "VisualViewport software-keyboard regression is specific to iOS/WebKit.");
+
   await page.addInitScript(() => {
     const viewport = new EventTarget() as EventTarget & { height: number; offsetTop: number };
     viewport.height = window.innerHeight;
