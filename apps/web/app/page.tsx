@@ -326,6 +326,8 @@ export default function HomePage() {
     activeTimeAttackRemainingSeconds,
     usesTimeAttackPromptSequence,
     activeProgressBase,
+    activeCanonicalProgressBase,
+    activeRomajiProgressBase,
     completedTimeAttackPrompts,
     acceptingTextInput,
     progressSyncState,
@@ -1443,6 +1445,10 @@ export default function HomePage() {
           romajiPlan: activeRomajiTypingPlan,
           loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
           progressBase: activeProgressBase,
+          progressBaseByMode: {
+            kana: activeCanonicalProgressBase,
+            romaji: activeRomajiProgressBase
+          },
           inputMode: inputModeRef.current
         });
         const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedText);
@@ -1476,6 +1482,10 @@ export default function HomePage() {
           romajiPlan: activeRomajiTypingPlan,
           loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
           progressBase: activeProgressBase,
+          progressBaseByMode: {
+            kana: activeCanonicalProgressBase,
+            romaji: activeRomajiProgressBase
+          },
           inputMode: inputModeRef.current
         });
         const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedText);
@@ -1558,6 +1568,10 @@ export default function HomePage() {
           romajiPlan: activeRomajiTypingPlan,
           loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
           progressBase: activeProgressBase,
+          progressBaseByMode: {
+            kana: activeCanonicalProgressBase,
+            romaji: activeRomajiProgressBase
+          },
           inputMode: inputModeRef.current
         });
         const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedKey);
@@ -1592,6 +1606,10 @@ export default function HomePage() {
           romajiPlan: activeRomajiTypingPlan,
           loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
           progressBase: activeProgressBase,
+          progressBaseByMode: {
+            kana: activeCanonicalProgressBase,
+            romaji: activeRomajiProgressBase
+          },
           inputMode: inputModeRef.current
         });
         const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedKey);

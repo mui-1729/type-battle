@@ -107,14 +107,21 @@ export function getHomePageViewModel({
     : null;
   if (timeAttackPosition) activePrompt = timeAttackPosition.prompt;
   const activePromptText = activePrompt?.text ?? "";
-  const activeProgressBase = timeAttackPosition
+  const activeCanonicalProgressBase = timeAttackPosition
     ? timeAttackPrompts.slice(0, timeAttackPosition.promptIndex).reduce(
-        (total, prompt) => total + (effectiveInputMode === "kana"
-          ? Array.from(prompt.typing.hiragana).length
-          : buildRomajiTypingPlan(prompt.typing.hiragana).guide.length),
+        (total, prompt) => total + Array.from(prompt.typing.hiragana).length,
         0
       )
     : 0;
+  const activeRomajiProgressBase = timeAttackPosition
+    ? timeAttackPrompts.slice(0, timeAttackPosition.promptIndex).reduce(
+        (total, prompt) => total + buildRomajiTypingPlan(prompt.typing.hiragana).guide.length,
+        0
+      )
+    : 0;
+  const activeProgressBase = effectiveInputMode === "kana"
+    ? activeCanonicalProgressBase
+    : activeRomajiProgressBase;
   const completedTimeAttackPrompts = timeAttackPosition?.completedPrompts ?? 0;
   const dailyChallengeInfo = getDailyChallengeInfo(dailyChallengeNow);
   const dailyChallengePrompt = pickDailyChallengePrompt(dailyChallengeNow);
@@ -221,6 +228,8 @@ export function getHomePageViewModel({
     isTimeAttackExpired,
     activeTimeAttackRemainingSeconds,
     activeProgressBase,
+    activeCanonicalProgressBase,
+    activeRomajiProgressBase,
     completedTimeAttackPrompts,
     acceptingTextInput,
     progressSyncState,
