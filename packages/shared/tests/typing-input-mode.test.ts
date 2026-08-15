@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveTypingInputMode } from "../src/typing-input-mode";
+import { resolveTypingInputMode } from "../src/typing-input-mode.js";
 
 describe("typing input mode", () => {
   it.each(["、", "。", "！", "？", ",", ".", "!", "?", " ", "-"])(
