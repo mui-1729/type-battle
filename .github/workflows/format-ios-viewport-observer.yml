@@ -1,0 +1,42 @@
+name: Format iOS viewport observer
+
+on:
+  push:
+    branches:
+      - agent/stabilize-ios-viewport-observer
+    paths:
+      - ".github/workflows/format-ios-viewport-observer.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/stabilize-ios-viewport-observer
+      - name: Fix effect indentation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("apps/web/app/page.tsx")
+          text = path.read_text()
+          start_marker = '  useLayoutEffect(() => {\n  if (!acceptingTextInput || visualViewportHeight === null) {'
+          end_marker = '}, [acceptingTextInput, activeTypingText, visualViewportHeight]);'
+          start = text.index(start_marker)
+          end = text.index(end_marker, start) + len(end_marker)
+          block = text[start:end].splitlines()
+          block = [block[0], *[("  " + line) if line else line for line in block[1:]]]
+          block[-1] = '  ' + end_marker
+          path.write_text(text[:start] + "\n".join(block) + text[end:])
+          PY
+          git diff --check
+      - name: Commit formatting
+        run: |
+          git config user.name "mui-1729"
+          git config user.email "s1f102503015@iniad.org"
+          git add apps/web/app/page.tsx
+          git commit -m "style(mobile): viewport追従effectのインデントを整える"
+          git push origin HEAD:agent/stabilize-ios-viewport-observer
