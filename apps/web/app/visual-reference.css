@@ -1324,8 +1324,8 @@ select {
     scrollbar-gutter: stable;
   }
 
-  .appShell:not(.isHome) .sidePanel,
-  .appShell:not(.isHome) .matchSurface {
+  .appShell:not(.isHome):not(.hasConstrainedViewport) .sidePanel,
+  .appShell:not(.isHome):not(.hasConstrainedViewport) .matchSurface {
     height: auto;
     max-height: none;
     overflow: visible;
