@@ -21,27 +21,18 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-
           path = Path("apps/web/app/visual-reference.css")
           text = path.read_text()
-          old = '''  .appShell:not(.isHome) .sidePanel,
-  .appShell:not(.isHome) .matchSurface {
-    height: auto;
-    max-height: none;
-    overflow: visible;
-  }
-'''
-          new = '''  .appShell:not(.isHome):not(.hasConstrainedViewport) .sidePanel,
-  .appShell:not(.isHome):not(.hasConstrainedViewport) .matchSurface {
-    height: auto;
-    max-height: none;
-    overflow: visible;
-  }
-'''
-          count = text.count(old)
-          if count != 1:
-              raise SystemExit(f"expected exactly one mobile override block, found {count}")
-          path.write_text(text.replace(old, new))
+          replacements = [
+              (".appShell:not(.isHome) .sidePanel,", ".appShell:not(.isHome):not(.hasConstrainedViewport) .sidePanel,"),
+              (".appShell:not(.isHome) .matchSurface {", ".appShell:not(.isHome):not(.hasConstrainedViewport) .matchSurface {")
+          ]
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected exactly one selector {old!r}, found {count}")
+              text = text.replace(old, new)
+          path.write_text(text)
           PY
       - name: Commit patch
         run: |
