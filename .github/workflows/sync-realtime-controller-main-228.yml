@@ -1,0 +1,27 @@
+name: Sync realtime controller with latest main
+
+on:
+  push:
+    branches:
+      - agent/refactor-web-realtime-controller
+    paths:
+      - ".github/workflows/sync-realtime-controller-main-228.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/refactor-web-realtime-controller
+          fetch-depth: 0
+      - name: Merge latest main
+        run: |
+          git config user.name "mui-1729"
+          git config user.email "s1f102503015@iniad.org"
+          git fetch origin main
+          git merge --no-edit origin/main
+          git push origin HEAD:agent/refactor-web-realtime-controller
