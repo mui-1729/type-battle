@@ -1373,47 +1373,57 @@ export default function HomePage() {
     return () => viewport.removeEventListener("resize", updateViewportHeight);
   }, []);
 
-  useEffect(() => {
-    if (!acceptingTextInput || visualViewportHeight === null) {
-      return;
-    }
+  useLayoutEffect(() => {
+  if (!acceptingTextInput || visualViewportHeight === null) {
+    return;
+  }
 
-    let followUpFrame: number | null = null;
-    const revealTypingPrompt = () => {
-      const surface = matchSurfaceRef.current;
-      const prompt = surface?.querySelector<HTMLElement>(".promptBox");
-      if (!surface || !prompt) {
-        return;
-      }
+  const surface = matchSurfaceRef.current;
+  const prompt = surface?.querySelector<HTMLElement>(".promptBox");
+  if (!surface || !prompt) {
+    return;
+  }
 
-      const surfaceBounds = surface.getBoundingClientRect();
-      const promptBounds = prompt.getBoundingClientRect();
-      const nextScrollTop = getScrollTopToRevealTarget({
-        scrollTop: surface.scrollTop,
-        containerTop: surfaceBounds.top,
-        containerBottom: surfaceBounds.bottom,
-        targetTop: promptBounds.top,
-        targetBottom: promptBounds.bottom,
-        padding: 12
-      });
-
-      if (Math.abs(nextScrollTop - surface.scrollTop) > 1) {
-        surface.scrollTo({ top: nextScrollTop, behavior: "instant" });
-      }
-    };
-
-    const frame = window.requestAnimationFrame(() => {
-      revealTypingPrompt();
-      followUpFrame = window.requestAnimationFrame(revealTypingPrompt);
+  let frame: number | null = null;
+  const revealTypingPrompt = () => {
+    frame = null;
+    const surfaceBounds = surface.getBoundingClientRect();
+    const promptBounds = prompt.getBoundingClientRect();
+    const nextScrollTop = getScrollTopToRevealTarget({
+      scrollTop: surface.scrollTop,
+      containerTop: surfaceBounds.top,
+      containerBottom: surfaceBounds.bottom,
+      targetTop: promptBounds.top,
+      targetBottom: promptBounds.bottom,
+      padding: 12
     });
 
-    return () => {
+    if (Math.abs(nextScrollTop - surface.scrollTop) > 1) {
+      surface.scrollTo({ top: nextScrollTop, behavior: "instant" });
+    }
+  };
+  const scheduleReveal = () => {
+    if (frame !== null) {
       window.cancelAnimationFrame(frame);
-      if (followUpFrame !== null) {
-        window.cancelAnimationFrame(followUpFrame);
-      }
-    };
-  }, [acceptingTextInput, activeTypingText, visualViewportHeight]);
+    }
+    frame = window.requestAnimationFrame(revealTypingPrompt);
+  };
+
+  scheduleReveal();
+  const resizeObserver = new ResizeObserver(scheduleReveal);
+  resizeObserver.observe(surface);
+  resizeObserver.observe(prompt);
+  const viewport = window.visualViewport;
+  viewport?.addEventListener("resize", scheduleReveal);
+
+  return () => {
+    resizeObserver.disconnect();
+    viewport?.removeEventListener("resize", scheduleReveal);
+    if (frame !== null) {
+      window.cancelAnimationFrame(frame);
+    }
+  };
+}, [acceptingTextInput, activeTypingText, visualViewportHeight]);
 
   const emitProgress = useCallback(
     (input: string, finish: boolean) => {
