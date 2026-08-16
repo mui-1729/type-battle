@@ -1,0 +1,94 @@
+name: Patch iOS viewport observer
+
+on:
+  push:
+    branches:
+      - agent/stabilize-ios-viewport-observer
+    paths:
+      - ".github/workflows/patch-ios-viewport-observer.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/stabilize-ios-viewport-observer
+      - name: Replace viewport reveal effect
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/web/app/page.tsx")
+          text = path.read_text()
+          start_marker = '  useEffect(() => {\n    if (!acceptingTextInput || visualViewportHeight === null) {'
+          end_marker = '\n\n  const emitProgress = useCallback('
+          start = text.index(start_marker)
+          end = text.index(end_marker, start)
+          replacement = '''  useLayoutEffect(() => {
+            if (!acceptingTextInput || visualViewportHeight === null) {
+              return;
+            }
+
+            const surface = matchSurfaceRef.current;
+            const prompt = surface?.querySelector<HTMLElement>(".promptBox");
+            if (!surface || !prompt) {
+              return;
+            }
+
+            let frame: number | null = null;
+            const revealTypingPrompt = () => {
+              frame = null;
+              const surfaceBounds = surface.getBoundingClientRect();
+              const promptBounds = prompt.getBoundingClientRect();
+              const nextScrollTop = getScrollTopToRevealTarget({
+                scrollTop: surface.scrollTop,
+                containerTop: surfaceBounds.top,
+                containerBottom: surfaceBounds.bottom,
+                targetTop: promptBounds.top,
+                targetBottom: promptBounds.bottom,
+                padding: 12
+              });
+
+              if (Math.abs(nextScrollTop - surface.scrollTop) > 1) {
+                surface.scrollTo({ top: nextScrollTop, behavior: "instant" });
+              }
+            };
+            const scheduleReveal = () => {
+              if (frame !== null) {
+                window.cancelAnimationFrame(frame);
+              }
+              frame = window.requestAnimationFrame(revealTypingPrompt);
+            };
+
+            scheduleReveal();
+            const resizeObserver = new ResizeObserver(scheduleReveal);
+            resizeObserver.observe(surface);
+            resizeObserver.observe(prompt);
+            const viewport = window.visualViewport;
+            viewport?.addEventListener("resize", scheduleReveal);
+
+            return () => {
+              resizeObserver.disconnect();
+              viewport?.removeEventListener("resize", scheduleReveal);
+              if (frame !== null) {
+                window.cancelAnimationFrame(frame);
+              }
+            };
+          }, [acceptingTextInput, activeTypingText, visualViewportHeight]);'''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
+      - name: Validate targeted diff
+        run: |
+          git diff --check
+          git diff -- apps/web/app/page.tsx
+      - name: Commit patch
+        run: |
+          git config user.name "mui-1729"
+          git config user.email "s1f102503015@iniad.org"
+          git add apps/web/app/page.tsx
+          git commit -m "fix(mobile): viewport再レイアウト後も問題文を追従する"
+          git push origin HEAD:agent/stabilize-ios-viewport-observer
