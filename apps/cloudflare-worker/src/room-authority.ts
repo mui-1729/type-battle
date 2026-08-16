@@ -46,6 +46,11 @@ import {
   type MatchFinalizeReason
 } from "./match-observability.js";
 import { normalizeRoomCode, resolveRoomRoute } from "./room-routing.js";
+import {
+  createPersistedRoomSnapshot,
+  type PersistedPlayerTypingState,
+  type PersistedRoomSnapshot
+} from "./room-persistence.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
   isCloudflareClientMessageType,
@@ -96,30 +101,6 @@ type ControlRateBucket = {
 type AttachSocketOptions = {
   clientIp?: string;
   roomCode?: string;
-};
-
-type PersistedRoomSnapshot = {
-  schemaVersion?: number;
-  room: RoomState;
-  playerSessions?: Record<string, string>;
-  disconnectedAt?: Record<string, number>;
-  internal?: {
-    round?: number;
-    promptHistory?: string[];
-    createdAt?: number;
-    lastActivityAt?: number;
-    finishedAt?: number;
-    typingState?: Record<string, PersistedPlayerTypingState>;
-  };
-};
-
-type PersistedPlayerTypingState = {
-  typingProgressIndex?: number;
-  pendingInput?: string;
-  inputMode?: "kana" | "romaji";
-  lastInputSequence?: number;
-  typingRateTokens?: number;
-  typingRateLastRefillAt?: number;
 };
 
 type RoomAuthorityEnv = {
@@ -181,7 +162,6 @@ type MatchResultStorageRecord = Parameters<NonNullable<RoomEngineHooks["recordMa
 const OPEN_STATE = 1;
 const ROOM_STORAGE_KEY = "room";
 const RETENTION_ALARM_STORAGE_KEY = "retention-alarm-at";
-const ROOM_SNAPSHOT_SCHEMA_VERSION = 2;
 const GUEST_SESSION_STORAGE_PREFIX = "guest-session:";
 const MATCH_RESULT_STORAGE_PREFIX = "match-result:";
 const BOT_TICK_MS = 500;
@@ -1153,7 +1133,14 @@ export class RoomAuthorityDurableObject {
       if (!room) {
         await this.state.storage.delete(ROOM_STORAGE_KEY);
       } else {
-        await this.state.storage.put(ROOM_STORAGE_KEY, this.createPersistedRoomSnapshot(room));
+        await this.state.storage.put(
+          ROOM_STORAGE_KEY,
+          createPersistedRoomSnapshot({
+            room,
+            publicRoom: toPublicRoom(room),
+            playerSessions: this.playerSessions
+          })
+        );
       }
       if (matchTrace) {
         console.info(JSON.stringify({
@@ -1232,41 +1219,6 @@ export class RoomAuthorityDurableObject {
       }));
       // Result persistence is best-effort; gameplay completion must still be emitted.
     }
-  }
-
-  private createPersistedRoomSnapshot(room: InternalRoom): PersistedRoomSnapshot {
-    const disconnectedAt: Record<string, number> = {};
-    const typingState: Record<string, PersistedPlayerTypingState> = {};
-
-    for (const [playerId, player] of room.players.entries()) {
-      if (player.disconnectedAt !== undefined) {
-        disconnectedAt[playerId] = player.disconnectedAt;
-      }
-
-      typingState[playerId] = {
-        typingProgressIndex: player.typingProgressIndex,
-        pendingInput: player.pendingInput,
-        ...(player.inputMode ? { inputMode: player.inputMode } : {}),
-        lastInputSequence: player.lastInputSequence,
-        typingRateTokens: player.typingRateTokens,
-        typingRateLastRefillAt: player.typingRateLastRefillAt
-      };
-    }
-
-    return {
-      schemaVersion: ROOM_SNAPSHOT_SCHEMA_VERSION,
-      room: toPublicRoom(room),
-      playerSessions: Object.fromEntries(this.playerSessions.entries()),
-      disconnectedAt,
-      internal: {
-        round: room.round,
-        promptHistory: [...room.promptHistory],
-        createdAt: room.createdAt,
-        lastActivityAt: room.lastActivityAt,
-        ...(room.finishedAt !== undefined ? { finishedAt: room.finishedAt } : {}),
-        typingState
-      }
-    };
   }
 
   private schedulePersistRoom(roomCode: string): void {
