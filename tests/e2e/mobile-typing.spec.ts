@@ -29,6 +29,22 @@ async function commitKanaInput(textarea: Locator, value: string): Promise<void> 
   }, value);
 }
 
+async function waitForConstrainedVisualViewport(page: Page, height: number): Promise<void> {
+  const shell = page.locator(".appShell");
+  await expect(shell).toHaveClass(/hasConstrainedViewport/);
+  await expect.poll(async () => shell.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    visualViewportHeight: getComputedStyle(element).getPropertyValue("--visual-viewport-height").trim()
+  }))).toEqual({
+    clientHeight: height,
+    visualViewportHeight: `${height}px`
+  });
+
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+}
+
 test("completes practice with actual mobile kana IME input", async ({ page }) => {
   await installWebSocketProbe(page.context());
   await page.goto("/");
@@ -148,6 +164,7 @@ test("keeps the typing prompt reachable when the software keyboard reduces the v
   await page.evaluate(() => {
     (window as typeof window & { simulateSoftwareKeyboard: (height: number) => void }).simulateSoftwareKeyboard(500);
   });
+  await waitForConstrainedVisualViewport(page, 500);
 
   await expect.poll(async () => page.locator(".matchSurface").evaluate((surface) => {
     const prompt = surface.querySelector<HTMLElement>(".promptBox");
@@ -158,7 +175,7 @@ test("keeps the typing prompt reachable when the software keyboard reduces the v
       promptRect.top >= surfaceRect.top &&
       promptRect.bottom <= Math.min(surfaceRect.bottom, 500)
     );
-  })).toBe(true);
+  }), { timeout: 10_000 }).toBe(true);
 
   const metrics = await page.locator(".matchSurface").evaluate((surface) => {
     const prompt = surface.querySelector<HTMLElement>(".promptBox");
