@@ -1365,19 +1365,20 @@ export default function HomePage() {
     return () => viewport.removeEventListener("resize", updateViewportHeight);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!acceptingTextInput || visualViewportHeight === null) {
       return;
     }
 
-    let followUpFrame: number | null = null;
-    const revealTypingPrompt = () => {
-      const surface = matchSurfaceRef.current;
-      const prompt = surface?.querySelector<HTMLElement>(".promptBox");
-      if (!surface || !prompt) {
-        return;
-      }
+    const surface = matchSurfaceRef.current;
+    const prompt = surface?.querySelector<HTMLElement>(".promptBox");
+    if (!surface || !prompt) {
+      return;
+    }
 
+    let frame: number | null = null;
+    const revealTypingPrompt = () => {
+      frame = null;
       const surfaceBounds = surface.getBoundingClientRect();
       const promptBounds = prompt.getBoundingClientRect();
       const nextScrollTop = getScrollTopToRevealTarget({
@@ -1393,16 +1394,25 @@ export default function HomePage() {
         surface.scrollTo({ top: nextScrollTop, behavior: "instant" });
       }
     };
+    const scheduleReveal = () => {
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      frame = window.requestAnimationFrame(revealTypingPrompt);
+    };
 
-    const frame = window.requestAnimationFrame(() => {
-      revealTypingPrompt();
-      followUpFrame = window.requestAnimationFrame(revealTypingPrompt);
-    });
+    scheduleReveal();
+    const resizeObserver = new ResizeObserver(scheduleReveal);
+    resizeObserver.observe(surface);
+    resizeObserver.observe(prompt);
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", scheduleReveal);
 
     return () => {
-      window.cancelAnimationFrame(frame);
-      if (followUpFrame !== null) {
-        window.cancelAnimationFrame(followUpFrame);
+      resizeObserver.disconnect();
+      viewport?.removeEventListener("resize", scheduleReveal);
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
       }
     };
   }, [acceptingTextInput, activeTypingText, visualViewportHeight]);
