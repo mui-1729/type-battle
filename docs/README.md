@@ -65,23 +65,23 @@ Security / 保守性の改善として、#196、#197、#198 も進行中です�
 
 - [quality-ci-cd.md](quality-ci-cd.md): Test / Build / CI / CD
 - [github.md](github.md): GitHub 運用
-- [git-branch-rules.md](git-branch-rules.md): ブランチルールの詳細
+- [git-branch-rules.md](git-branch-rules.md): 現在の推奨ブランチ / PR ルール
 - [features/deployment-private-beta.md](features/deployment-private-beta.md): Private Beta デプロイ仕様
 
 ## Cloudflare 関連資料
 
-次は Cloudflare 移行時の設計・監査記録です。現在の構成を確認するときは [architecture.md](architecture.md) を優先してください。
+次は Cloudflare 移行時の設計・監査記録です。**現在の構成や現在の料金・上限を判断する資料ではありません。** 現在の構成は [architecture.md](architecture.md) を優先してください。
 
-- [cloudflare-migration-plan.md](cloudflare-migration-plan.md): 移行計画
-- [cloudflare-issue-tracker.md](cloudflare-issue-tracker.md): 移行 Issue の追跡記録
-- [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md): Free Tier 監査
+- [cloudflare-migration-plan.md](cloudflare-migration-plan.md): 完了済みの Realtime 移行記録
+- [cloudflare-issue-tracker.md](cloudflare-issue-tracker.md): 移行 Issue の分担・依存関係の履歴
+- [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md): 移行時点の容量 / Free Tier 監査記録
 
 ## 更新ルール
 
 実装を変更した PR では、必要に応じて同じ PR で docs も更新します。
 
 - ゲームルール変更 → `game-design.md`
-- Realtime / storage /構成変更 → `architecture.md`
+- Realtime / storage / 構成変更 → `architecture.md`
 - 実装済み機能の変更 → `current-implementation.md`
 - リリース基準や CI 変更 → `quality-ci-cd.md`
 - 今後の優先順位変更 → `roadmap.md` / `features/feature-backlog.md`
