@@ -1,177 +1,122 @@
-# Cloudflare Free Tier Audit
+# Cloudflare Free Tier 監査記録
 
-## 目的
+この文書は Issue #22 で実施した、Cloudflare Realtime 移行時点の容量・コスト観点の監査記録です。
 
-Cloudflare へ realtime を移す場合に、無料枠で private beta まで耐えられるかを見積もる。
+**重要:** Cloudflare の料金・無料枠・上限値は変更される可能性があります。この文書に残る数値を現在の上限として扱わず、Public Beta や負荷試験の前には公式ドキュメントと実測値で再確認してください。
 
-この監査は issue #22 の成果物であり、issue #21 の移行追跡にぶら下がる。
+## 監査の目的
 
-## 監査対象
+Cloudflare Worker / Durable Object を Realtime backend にした場合に、Private Beta の小規模利用でどこがボトルネックになりやすいかを整理しました。
+
+当時の主な監査対象:
 
 - Workers Free plan
-- Durable Objects on Workers Free plan
-- Durable Object SQLite storage
+- Durable Objects
+- Durable Object storage
+- typing input の message 数
+- COM timer
+- persistence write
 
-## 参照した現状実装
+## 現在も有効な前提
 
-- `apps/web/app/page.tsx` は `typing:progress` / `typing:finish` を keydown ごとに送る。
-- `packages/shared/src/cloudflare-events.ts` は command ごとに ack を返す前提になっている。
-- `packages/shared/src/room-engine.ts` の `BOT_TICK_MS` は 500 ms。
-- `apps/cloudflare-worker/src/worker.ts` は practice / shared rate limit を `GATEWAY` Durable Object、room state / room socket を room code ごとの `ROOMS` Durable Object へ振り分ける。既存storage継承のため、`GATEWAY` は legacy gateway class 名の `RoomDurableObject` に binding し、`ROOMS` は `RoomAuthorityDurableObject` に binding する。
+実装の詳細は変わっても、次の考え方は現在も有効です。
 
-## 公式ドキュメントの要点
-
-以下は Cloudflare 公式ドキュメントの現時点の上限。
-
-- Workers Free: `100,000` requests / day、CPU `10 ms` / HTTP request、Subrequests `50` / request、Memory `128 MB`。
-- Durable Objects Free: SQLite-backed Durable Objects のみ利用可、最大 class 数 `100`、account storage `5 GB`、WebSocket message size `32 MiB`、CPU per request `30 s`（WebSocket messages を含む）、単一 DO の soft limit は `1,000 requests / sec`。
-- D1: database size `10 GB`、Worker invocation あたりの D1 同時接続 `6`。現時点では D1 は未使用で、guest session / match result は Durable Object SQLite storage に保存する。
-
-参考:
-
-- Workers limits: https://developers.cloudflare.com/workers/platform/limits/
-- Durable Objects limits: https://developers.cloudflare.com/durable-objects/platform/limits/
-- D1 limits: https://developers.cloudflare.com/d1/platform/limits/
-
-## 見積もりの前提
-
-以下はこの repo の current implementation からの推定。
-
-- 1 keydown = 1 `typing:progress` または `typing:finish`
-- 1 accepted typing update = 1 room authoritative update
-- 1 room authoritative update = 1 room authority DO message 相当
-- 1 update につき、少なくとも 1 ack と 1 room broadcast が発生する
-- 2 人対戦が基本で、room 1 つあたりの同時接続は最大 2 人
-- room gameplay は room code ごとの DO に分散し、create / join の共有 rate limit は gateway DO に集約する
+- 2 人対戦では入力イベントが短時間に多く発生する
+- room gameplay は room code ごとの Durable Object に分散する
+- client command には ack / room update が伴う
+- COM 戦では人間の入力以外に server timer の処理が発生する
+- typing hot path に長期保存処理を入れない
+- room 横断のランキング・検索は room authority と別責務にする
 
 ## 1 試合あたりの概算モデル
 
-### Human-only race
-
-保守的に、1 試合あたり 1 人 150 回前後の keydown を見込む。
+移行時の簡易モデルでは、Human-only の Race を次のように見積もりました。
 
 - 2 人対戦
-- 1 人あたり 150 keydown
-- 1 試合あたりの client command は約 `300` 件
-- `match:start` / countdown / result / rematch などの制御メッセージを足しても、合計はおおむね `310` から `340` 件程度
+- 1 人あたり約 150 keydown
+- typing command は合計約 300 件
+- start / countdown / result / rematch などを加えて約 310〜340 command
 
-この値は「1 request = 1 authoritative update」とみなした概算。
-WebSocket の ack や broadcast を含めた message 数はこれより多いが、Workers / DO の制約を見るときはまず authoritative update 数を数えるのが実用的。
+これは容量を比較するための**粗いモデル**であり、Cloudflare の課金 request 数と 1:1 で一致すると保証するものではありません。
 
-### COM match
+実際の判断では Worker / Durable Object の metrics と billing dashboard を優先します。
 
-COM ありの試合では、人間の typing update に加えて bot tick が入る。
+## COM 戦
 
-- `BOT_TICK_MS = 500 ms`
-- 30 秒試合なら bot tick は最大 `60` 回
-- 60 秒試合なら bot tick は最大 `120` 回
+COM 戦では bot timer が追加されるため、Human-only より処理回数が増えます。
 
-したがって、COM 試合の request 負荷は human-only より明確に重い。
+移行時には 500 ms tick を前提としていましたが、現在の実装値や Cloudflare の課金単位を固定前提にしません。
 
-### Persistence
+Public Beta 前に確認すること:
 
-理想は次の通り。
+- 1 試合あたりの bot tick 数
+- bot tick 中に state change がない場合の無駄な処理
+- room 数が増えたときの timer コスト
+- tick 間隔を変更したときのゲーム体験
 
-- guest session: room create / join 時に 1 回ずつ
-- match result: 1 試合につき 1 回
+## Persistence
 
-逆に、room snapshot を typing update ごとに D1 へ書くのは避けるべき。Cloudflare gateway では DO storage への snapshot 保存を debounce し、typing hot path の write 回数を間引く。
+永続化では次を原則にします。
 
-## 想定上限
+### Hot path に入れないもの
 
-### Workers Free
+- typing 1 回ごとの長期ログ保存
+- typing 1 回ごとの分析 DB write
+- progress event の無制限な履歴保存
 
-Requests は `100,000 / day` が上限。
+### 低頻度で保存するもの
 
-human-only の試合を `320` requests / match とみなすと、1 日あたりの上限は概算で次の通り。
+- room snapshot
+- guest session
+- match result
 
-- `100,000 / 320 ≒ 312` matches / day
+room snapshot の保存頻度は Realtime の正しさと storage write の両方を見ながら調整します。
 
-COM ありで `380` requests / match 程度まで膨らむと、概算は次の通り。
+## 当時の結論
 
-- `100,000 / 380 ≒ 263` matches / day
+移行時点では、Private Beta の小規模利用なら Cloudflare Free で検証する余地があると判断しました。
 
-つまり、無料枠は private beta の小規模利用には足りるが、継続的な public beta には余裕が薄い。
+一方、Public Beta では次を推測だけで決めず実測する必要があります。
 
-### Durable Objects Free
+- 1 試合あたりの Worker / Durable Object 使用量
+- 同時 room 数
+- 同時 WebSocket 接続数
+- typing command / broadcast 数
+- COM timer の使用量
+- storage read / write
+- 1 日・1 か月あたりの費用
 
-DO 単体の soft limit は `1,000 requests / sec`。現在の実装は room code ごとの Room Authority DO に gameplay を分散するため、typing hot path は 1 room 単位の負荷で見る。
+## 最適化候補
 
-この repo の 2 人対戦で、1 room が 1 人あたり毎秒 5 〜 10 回程度更新すると、1 room あたり最大 `10` 〜 `20` message / sec 程度になる。room 単位 DO ではこの負荷が room ごとに分かれるため、単一 gateway 集約時より per-object soft limit への接近は遅い。
+実測で必要性が確認された場合に検討します。
 
-ただし、private beta 規模では Workers Free の daily request が先に効く可能性が高い。public beta 前には progress broadcast の coalescing と gateway 側 shared rate limit の計測を優先する。
+- progress update / broadcast の coalescing
+- 同じ state を送る不要な broadcast の削減
+- bot timer 間隔の調整
+- persistence debounce の調整
+- gateway に集中する処理の分散
 
-### Persistence storage
+これらは「昔の監査で候補に挙がった」という理由だけで先に実装しません。ユーザー体験・負荷・コストの実測を Issue 化の根拠にします。
 
-guest session と match result は低頻度イベントとして Durable Object storage に保存する。room create / join と match result のみが対象なので、typing hot path には入れない。
+## Public Beta 前の再監査
 
-永続化が危険になるのは次のケース。
+Public Beta へ進む前に、別途 load / cost baseline を作ります。
 
-- typing update ごとに長期保存へ書く
-- room state snapshot を毎回永続化する
-- イベントログを storage に積み続ける
+再監査では最低限次を記録します。
 
-そのため、初期 persistence は「低頻度の永続化」に限定するのが前提。横断検索や集計が必要になった段階で D1 へ移す。
-
-## ボトルネック判定
-
-現状の想定では、最初に詰まりやすいのは次の順。
-
-1. Workers の daily request 100k
-2. room authority DO / gateway shared rate limit の局所的な message 集中
-3. COM tick の無駄打ち
-4. DO storage / D1 による hot path 化
-
-DO の per-object soft limit は、2 人対戦中心の private beta ならすぐには優先ボトルネックになりにくい。ただし room create / join の shared rate limit は gateway DO に集約されるため、abuse 対策の計測対象にする。
-
-## throttling / coalescing 方針
-
-### 必須
-
-- 永続レコード書き込みは room create / join / match result などの低頻度イベントに限定する
-- room snapshot を keydown ごとに即時永続化せず、DO storage 書き込みを debounce する
-- `server:room:state` の完全な再送は必要時のみ行う
-
-### 推奨
-
-- `player:progress` は 1 keydown = 1 update のままでもよいが、公開 beta 前に 50 〜 100 ms の coalescing を検討する
-- bot tick は free-tier では 500 ms 固定ではなく、`750 ms` 〜 `1,000 ms` に落とせるようにする
-- progress が変わらない update は broadcast しない
-
-## COM tick の結論
-
-結論として、**free tier では COM tick を 1,000 ms 前後まで落とす方が安全**。
-
-理由:
-
-- bot tick は人間の入力と違って、負荷が使用量に比例せず一定間隔で発生する
-- 500 ms のままだと、30 秒試合で 60 回、60 秒試合で 120 回の追加 invocation が出る
-- private beta では許容できても、room 数が増えたときに request budget を食いやすい
-
-したがって:
-
-- local/dev や paid plan: 500 ms でもよい
-- free tier の private beta: 1,000 ms を既定にした方が無難
-
-## 必要な follow-up
-
-この監査結果から、追加で切るべき issue は次の 2 つ。
-
-1. `feat(cloudflare): coalesce progress broadcasts`
-2. `feat(cloudflare): make bot tick interval adaptive`
-
-ただし、private beta の範囲では「必須」ではなく、計測後の後追いで十分。
-
-## 結論
-
-- private beta 規模なら Cloudflare Free で realtime を試す余地はある
-- ただし request/day が最初の上限なので、hot path の永続化は最小限に絞る
-- public beta を見据えるなら、progress broadcast の coalescing と COM tick の適応化はほぼ必須
+1. 監査日
+2. 使用 plan
+3. Cloudflare 公式の当日時点の上限 / 料金
+4. 対象 commit
+5. 1 match の実測使用量
+6. 同時接続試験の条件
+7. 想定 Daily / Monthly usage
+8. 最適化が必要になる閾値
 
 ## 関連
 
-- [docs/cloudflare-migration-plan.md](cloudflare-migration-plan.md)
-- [docs/architecture.md](architecture.md)
-- [docs/current-implementation.md](current-implementation.md)
-- issue #21
-- issue #22
+- [architecture.md](architecture.md): 現在の構成
+- [current-implementation.md](current-implementation.md): 現在の実装
+- [cloudflare-migration-plan.md](cloudflare-migration-plan.md): 移行記録
+- [features/feature-backlog.md](features/feature-backlog.md): 今後の Issue 候補
+- Issue #22（完了済み）
