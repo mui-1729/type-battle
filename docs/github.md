@@ -1,118 +1,150 @@
-# GitHub 連携・運用
+# GitHub 運用
 
-## 現在のローカル状態
+Type Battle の Issue / branch / PR / merge の基本ルールです。
 
-2026-06-07 時点で、この作業ディレクトリは Git リポジトリとして初期化済みです。GitHub CLI も認証済みのため、GitHub リポジトリを作成して remote 接続できます。
+## 基本方針
 
-## 推奨リポジトリ設定
+- `main` は動作確認済みの安定版として扱う
+- `main` へ直接 push しない
+- 変更は Pull Request 経由で入れる
+- CI が green でない PR は merge しない
+- 1 PR はできるだけ 1 つの目的に絞る
+- Issue / docs / 実装の状態を同じ PR で必要に応じて更新する
 
-- Repository name: `type-battle`
-- Visibility: 最初は `private` 推奨
-- Default branch: `main`
-- Issue templates: 後で追加
-- GitHub Actions: 実装開始後に追加
+## `main` の保護
 
-## 初期接続手順
+Repository Ruleset で `main` を保護しています。
 
-```bash
-git add README.md docs
-git commit -m "Add initial planning docs"
-gh repo create type-battle --private --source=. --remote=origin --push
+- Pull Request 必須
+- required status check: `ci`
+- force push 禁止
+- branch deletion 禁止
+- bypass actor なし
+- required review は個人開発を妨げない設定
+
+`ci` では lint / typecheck / test / build / E2E を実行します。
+
+## ブランチ
+
+通常の変更では目的が分かる名前を使います。
+
+```txt
+feat/<topic>
+fix/<topic>
+refactor/<topic>
+test/<topic>
+docs/<topic>
+chore/<topic>
 ```
 
-すでに GitHub 側に空リポジトリを作っている場合は、代わりに次を使います。
+自動エージェントが独立した作業 branch を作る場合は `agent/<topic>` を使用して構いません。
 
-```bash
-git remote add origin git@github.com:<owner>/type-battle.git
-git push -u origin main
-```
+詳細は [git-branch-rules.md](git-branch-rules.md) も参照してください。
 
-## ブランチ運用
+## Commit
 
-- `main`: 動作確認済みの安定版
-- `feat/<topic>`: 新機能
-- `fix/<topic>`: バグ修正
-- `docs/<topic>`: ドキュメント更新
-
-例:
-
-```bash
-git checkout -b feat/mvp-room-match
-```
-
-## Issue 分類
-
-- `feature`: 新機能
-- `bug`: バグ
-- `docs`: ドキュメント
-- `infra`: デプロイ、CI、DB、Redis
-- `test`: テスト
-- `game-design`: ルール、スコア、体験設計
-
-## 最初に作る Issue 案
-
-1. Project scaffold: Next.js + TypeScript
-2. Shared event types package
-3. Realtime server scaffold
-4. Room create / join
-5. Countdown and match start
-6. Typing progress sync
-7. Finish validation and result screen
-8. Two-player Playwright E2E
-9. Basic prompt text dataset
-10. Deployment investigation
-
-## PR ルール
-
-- 1 PR は 1 つの目的に絞る。
-- 実装 PR には最低限のテストを含める。
-- 実装 PR は lint、typecheck、test、build を通す。
-- Cloudflare realtime message payload を変更する場合は `packages/shared` の型も更新する。
-- ゲームルール変更は `docs/game-design.md` も更新する。
-- Test / Build / CI / CD の詳細は [quality-ci-cd.md](quality-ci-cd.md) に従う。
-
-## コミットメッセージ
-
-コミットメッセージは Conventional Commits v1.0.0 に準拠する。
+Conventional Commits に合わせます。
 
 ```txt
 <type>[optional scope]: <description>
 ```
 
-Reference: https://www.conventionalcommits.org/en/v1.0.0/
+主に使う type:
 
-## GitHub Actions 初期案
+- `feat`: 新機能
+- `fix`: バグ修正
+- `refactor`: 挙動を変えない責務整理
+- `test`: テスト
+- `docs`: ドキュメント
+- `security`: security 改善
+- `chore`: 運用・設定・依存関係など
 
-実装開始後に次を追加します。
+## Issue の役割
 
-- install
-- lint
-- typecheck
-- unit tests
-- integration tests
-- build
-- Playwright E2E
-- private beta deploy smoke
+Issue は「やること」を追跡します。現在の実装状態そのものの正本にはしません。
 
-Node.js は LTS を使います。2026-06-07 時点では Node.js 24 LTS を第一候補にします。
+現在の実装状態は [current-implementation.md](current-implementation.md) を参照します。
 
-## Branch Protection
+### Issue 本文の推奨構成
 
-`main` には repository ruleset を設定しています。
+```md
+## 状態
+P0 / P1 / P2 など。Open PR がある場合はここに書く。
 
-- Target: `main`
-- Enforcement: `active`
-- Merge path: pull request 経由のみ
-- Required status checks: `ci`
-- Force push: 禁止
-- Branch deletion: 禁止
-- Bypass actors: なし
-- Required reviews: 0
+## 目的
+なぜ必要か。
 
-`ci` は `.github/workflows/ci.yml` の単一 workflow job で、`Lint` / `Typecheck` / `Test` / `Build` / `E2E` を順に実行します。
+## 対応内容
+何を変えるか。
 
-運用ルール:
+## 受け入れ条件
+- [ ] ...
 
-- `main` への直接 push は拒否される
-- CI が失敗した PR は merge できない
-- ルールを一時的に変える必要がある場合は、ruleset を編集して戻す
+## テスト
+- ...
+
+## 関連
+- Issue / PR / docs
+```
+
+すべての Issue で完全に同じ見出しを強制する必要はありませんが、「今どこまで進んでいるか」と「何をもって完了か」は読める状態にします。
+
+## 優先度
+
+- `P0`: Private Beta 公開・重大な本番問題を止めるもの
+- `P1`: 早めに解消したい品質・運用問題
+- `P2`: defense in depth / refactor / Public Beta 準備
+- `P3`: 長期拡張
+
+優先度は severity と同じではありません。たとえば refactor はコードが大きくても、現時点で障害を起こしていなければ P2 とします。
+
+## Issue 整理ルール
+
+- 実装済みの内容と重複する Issue を作らない
+- Open PR ができたら Issue に PR と残作業を書く
+- PR が一部だけを実装する場合は `Refs #...` とし、Issue を誤って close しない
+- 完了 PR なら `Closes #...` を使う
+- 既に完了した Issue を関連欄に書く場合は「完了済み」と分かるようにする
+- 外部設定が必要な Issue は「コード変更」と混ぜない
+- 親 Issue は子 Issue の状態を定期的に更新する
+
+現在の主要 Open Issue は [features/feature-backlog.md](features/feature-backlog.md) にまとめます。
+
+## PR ルール
+
+PR 本文には最低限、次を含めます。
+
+- 何を変えるか
+- なぜ必要か
+- Issue との関係
+- テスト / 検証内容
+- deploy や migration への影響
+
+### Realtime / game logic を変更する場合
+
+- shared event type を必要に応じて更新する
+- Worker / Web の contract を同時に確認する
+- game rule を変えたら [game-design.md](game-design.md) を更新する
+- architecture を変えたら [architecture.md](architecture.md) を更新する
+- 主要フローを変えたら E2E を更新する
+
+### Refactor の場合
+
+- user-visible behavior を変える変更と混ぜない
+- 分割前に既存テストで挙動を固定する
+- 「ファイルを小さくする」ではなく、責務・入力・出力の境界を目的にする
+
+## Merge 後
+
+必要に応じて次を確認します。
+
+- Issue が正しく close / open のままになっている
+- docs が `main` の実装と一致している
+- Worker 変更なら deploy 対象か判断する
+- Production へ出した場合は smoke / health を確認する
+
+## Release 関連
+
+Private Beta の Production deploy / rollback は [features/deployment-private-beta.md](features/deployment-private-beta.md) にまとめます。
+
+現在は #167 が Production Secrets、#232 が Production acceptance のゲートです。
