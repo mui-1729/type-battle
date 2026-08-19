@@ -1,89 +1,63 @@
-﻿# Git / ブランチ運用ルール
+# Git / ブランチ運用ルール
 
-このプロジェクトでは、Issue 単位で branch を切り、PR でレビューしてから `main` に取り込みます。
-AI エージェントが作業する場合もこのルールに従います。
+この文書は、Type Battle で日常的に使う Git / ブランチ運用の推奨ルールです。
+
+GitHub 上で実際に強制される設定は repository ruleset が正です。現在の強制内容は [github.md](github.md) にまとめます。
 
 ## 基本方針
 
-- 作業 branch は必ず最新の `main` から切る。
-- 1 issue に対して 1 branch / 1 PR を基本にする。
-- 大きい作業は tracking issue で分割し、個別 issue ごとに PR を作る。
-- PR は小さく保ち、同じファイルを複数人で同時に触らないようにする。
-- Cloudflare 移行のような並行作業では、tracking issue の担当分けと merge 順を優先する。
-- 複数人で並行作業する場合は、担当 issue ごとに `git worktree` を分ける。
+- `main` へ直接 push せず、Pull Request 経由で変更する。
+- 作業 branch は原則として最新の `main` から切る。
+- 1 PR は 1 つの目的に絞る。
+- 大きな Issue は、独立して確認できる単位へ段階的に分ける。
+- Open PR が依存する場合は、本文に依存関係と merge 順を明記する。
+- unrelated な変更を同じ PR に混ぜない。
 
-## ブランチ命名
+## ブランチ名
 
-```txt
-<type>/<issue-number>-<short-description>
-```
-
-### type
-
-| type | 用途 |
-| --- | --- |
-| `feature` | 新機能 |
-| `fix` | バグ修正 |
-| `refactor` | リファクタリング |
-| `docs` | ドキュメント変更 |
-| `chore` | 設定、依存関係、運用作業 |
-| `test` | テスト追加、テスト修正 |
-
-### 例
+人が作る branch は、次のような短い名前を推奨します。
 
 ```txt
-feature/16-web-cloudflare-transport
-refactor/10-room-engine-runtime-neutral
-docs/22-cloudflare-free-tier-risk
-chore/8-cloudflare-worker-skeleton
+feat/<short-description>
+fix/<short-description>
+refactor/<short-description>
+docs/<short-description>
+chore/<short-description>
+test/<short-description>
 ```
 
-### ルール
+Issue 番号がある場合は含めても構いません。
 
-- issue 番号を必ず含める。
-- 説明は英語・小文字・ハイフン区切りにする。
-- 説明は短くし、30 文字程度を目安にする。
-- `main` に直接 commit しない。
+```txt
+fix/168-preview-realtime
+refactor/197-web-session
+```
 
+AI / 自動化ツールが専用 prefix を使う場合は、そのツールの規約を優先して構いません。
 
-## worktree 運用
+```txt
+agent/docs-issue-cleanup
+```
 
-複数人や複数エージェントで並行作業する場合は、`main` の checkout で直接作業せず、issue ごとに worktree を作ります。
+重要なのは prefix の完全統一よりも、PR の目的と対象 Issue が追えることです。
 
-### 基本手順
+## ローカルでの並行作業
+
+複数の branch を同時に触る場合は `git worktree` を使うと安全です。ただし必須ではありません。
 
 ```bash
 git switch main
 git pull --ff-only origin main
-git worktree add -b <type>/<issue-number>-<short-description> ../type-battle-issue-<issue-number> main
+git worktree add -b feat/example ../type-battle-example main
 ```
 
-作業は作成した worktree 側で行います。
+作業完了後は不要な worktree を削除します。
 
 ```bash
-cd ../type-battle-issue-<issue-number>
+git worktree remove ../type-battle-example
+git branch -d feat/example
 ```
 
-### 例
-
-```bash
-git worktree add -b feature/9-cloudflare-transport-contract ../type-battle-issue-9 main
-git worktree add -b refactor/10-room-engine-runtime-neutral ../type-battle-issue-10 main
-git worktree add -b feature/16-web-cloudflare-transport ../type-battle-issue-16 main
-```
-
-### ルール
-
-- `main` の作業ディレクトリでは直接実装しない。
-- 1 issue につき 1 worktree を基本にする。
-- worktree 名は `../type-battle-issue-<issue-number>` を基本にする。
-- 新しい issue に着手する前に、元の repo の `main` を `origin/main` に合わせる。
-- merge 済み branch の worktree は削除する。
-
-```bash
-git worktree remove ../type-battle-issue-<issue-number>
-git branch -d <type>/<issue-number>-<short-description>
-```
 ## コミットメッセージ
 
 Conventional Commits 形式を使います。
@@ -92,88 +66,73 @@ Conventional Commits 形式を使います。
 <type>(<scope>): <要約>
 ```
 
-scope は必要な場合だけ付けます。
-
-### type
+主な `type`:
 
 | type | 用途 |
 | --- | --- |
 | `feat` | 新機能 |
 | `fix` | バグ修正 |
-| `refactor` | リファクタリング |
-| `test` | テスト追加、テスト修正 |
-| `docs` | ドキュメント変更 |
-| `chore` | 設定、依存関係、運用作業 |
-| `style` | 表記やフォーマットのみの変更 |
+| `refactor` | 挙動を変えない整理 |
+| `test` | テスト |
+| `docs` | ドキュメント |
+| `chore` | 設定・依存関係・運用 |
+| `style` | 表記・フォーマットのみ |
 
-### 例
+例:
 
 ```txt
-feat(web): Cloudflare realtime adapterを追加
-refactor(game): room状態管理をruntime非依存に分離
-docs(cloudflare): 無料枠のrealtimeリスクを整理
-chore(cloudflare): Workerワークスペースを追加
+feat(web): 対戦モード選択を追加する
+fix(mobile): iOSの入力画面を安定化する
+refactor(worker): 永続化責務を分離する
+docs: Issueと現在地を整理する
 ```
 
-### ルール
-
-- 1 行目は 50 文字以内を目安にする。
-- 日本語の要約を基本にする。
-- 何を変えたかだけでなく、目的が伝わるように書く。
-- AI が作った commit message もこのルールに合わせる。
+要約は日本語でも英語でも構いませんが、何を変えたかが短く分かる形にします。
 
 ## PR タイトル
 
-PR タイトルも Conventional Commits 形式にします。
+PR タイトルも Conventional Commits 形式を基本にします。
 
 ```txt
-feat(web): Cloudflare realtime adapterを追加 (#16)
+fix(preview): Realtime接続先を本番から分離する
 ```
 
-### ルール
-
-- issue 番号をタイトルか本文に含める。
-- タイトルは日本語 Conventional 形式を基本にする。
-- 複数 issue を閉じる PR は、本文に対象 issue を列挙する。
+Issue を完了する PR は本文で `Closes #123`、段階的な PR は `Refs #123` のように区別します。
 
 ## PR 本文
 
-本文には以下を含めます。
+実装 PR では、最低限次を記載します。
 
-- 変更の概要
+- 何を変更したか
 - なぜ必要か
+- 対象 Issue / 関連 PR
 - 影響範囲
-- テスト結果
-- UI 変更がある場合はスクリーンショット
+- 実行したテスト
+- 残作業
+
+UI を変更した場合は、必要に応じてスクリーンショットや実機確認結果も残します。
 
 ## Merge ルール
 
-- Squash merge を基本にする。
-- CI が通ってから merge する。
-- 最低 1 人のレビュー承認を得る。
-- AI が作った PR もレビュー必須とする。
-- conflict が起きた場合は、作業 branch 側を最新 `main` に追従させて解消する。
+- required CI が成功してから merge する。
+- branch protection / ruleset を迂回して `main` へ入れない。
+- Squash merge を基本とする。
+- レビューは重要な変更では推奨するが、現在の repository ruleset では必須人数を固定していない。
+- conflict がある場合は、作業 branch を最新 `main` に追従させて解消する。
 
-## Cloudflare 移行時の注意
+## 複数 PR を並行させるとき
 
-- `apps/web/app/page.tsx` は web integration 担当だけが触る。
-- `packages/shared/src/room-engine.ts` は room engine 担当だけが触る。
-- `apps/cloudflare-worker/wrangler.toml` は Cloudflare 基盤担当と backend 担当で事前に同期する。
-- `package-lock.json` を触る PR は同時に複数出さない。
-- cleanup PR は最後に単独で出す。
+同じ大きな Issue を段階的に進める場合は、PR 本文に次を明記します。
 
-## AI エージェント向け短縮ルール
+- この PR が何段階目か
+- base が `main` 以外の場合、その理由
+- この PR 単独で親 Issue を close するかどうか
+- 次に残る責務
 
-```md
-## Git Rules
+現在の #197 / #198 のような段階的リファクタでは、この形式を使います。
 
-- Start every branch from the latest `main`.
-- Use `git worktree` for issue-based parallel work.
-- Branch naming: `<type>/<issue-number>-<short-description>`.
-- Include the issue number in every branch name.
-- Use Conventional Commits for commits and PR titles.
-- Prefer Japanese summaries in commit and PR titles.
-- Keep the first commit line around 50 characters.
-- Do not mix unrelated changes in one PR.
-- Prefer squash merge.
-```
+## 更新方針
+
+GitHub の実設定とこの文書が食い違った場合は、先に [github.md](github.md) と実際の repository ruleset を確認します。
+
+過去の Cloudflare 移行時だけ必要だった担当固定・merge 順は、現在の一般ルールには含めません。履歴は [cloudflare-issue-tracker.md](cloudflare-issue-tracker.md) に残します。
