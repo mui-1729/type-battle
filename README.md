@@ -124,6 +124,8 @@ npm run build
 npm run test:e2e
 ```
 
+CI の E2E では通常の desktop flow に加えて、mobile Chromium / WebKit の入力・viewport 回帰も確認します。
+
 環境変数の雛形は [.env.example](.env.example) を参照してください。
 
 ## Cloudflare Worker
