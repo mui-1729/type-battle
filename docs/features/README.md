@@ -1,91 +1,112 @@
-# Feature Specs
+# 機能仕様
 
-今後の機能実装に使う仕様置き場です。要件や設計を「実装タスクに落とせる粒度」でまとめます。
+機能ごとの振る舞い・受け入れ条件・テスト観点をまとめる場所です。
+
+## 重要
+
+ここに仕様ファイルが存在していても、その機能が実装済みとは限りません。
+
+- 現在の実装状態: [../current-implementation.md](../current-implementation.md)
+- 今後の順序: [../roadmap.md](../roadmap.md)
+- 現在の主要 Issue / 候補: [feature-backlog.md](feature-backlog.md)
+
+を参照してください。
 
 ## 目的
 
-- 実装前に振る舞い、イベント、受け入れ条件を揃える。
-- MVP から private beta、public beta へ進む時に必要な機能を見失わない。
-- GitHub Issues / PR にそのまま転記できる粒度にする。
+- 実装前に振る舞い・状態・イベント・受け入れ条件を揃える
+- MVP → Private Beta → Public Beta の段階を混同しない
+- GitHub Issue / PR に切り出せる粒度で設計する
+- 実装後も回帰テストや仕様確認に使える形を保つ
 
-## 機能別 docs
+## 機能別ドキュメント
 
 ### 全体
 
-- [feature-catalog.md](feature-catalog.md): 機能一覧、優先度、カテゴリ
-- [feature-backlog.md](feature-backlog.md): GitHub Issues へ切り出す候補
+- [feature-catalog.md](feature-catalog.md): 機能一覧と公開段階
+- [feature-backlog.md](feature-backlog.md): 現在の主要 Open Issue と今後の Issue 候補
 
 ### 対戦成立
 
-- [com-opponent.md](com-opponent.md): COM 対戦、難易度、bot 挙動
-- [matchmaking.md](matchmaking.md): 人がいない場合の bot fallback、将来のランダムマッチ
-- [disconnect-reconnect.md](disconnect-reconnect.md): 切断、リロード、復帰、失格
-- [room-lifecycle.md](room-lifecycle.md): room の作成、期限切れ、再戦、削除
-- [rematch-session.md](rematch-session.md): 再戦、連続試合、session summary
+- [com-opponent.md](com-opponent.md): COM 対戦
+- [matchmaking.md](matchmaking.md): quick match / random matchmaking
+- [disconnect-reconnect.md](disconnect-reconnect.md): 切断・再接続・失格
+- [room-lifecycle.md](room-lifecycle.md): room lifecycle / TTL
+- [rematch-session.md](rematch-session.md): 再戦・session flow
 
 ### プレイ体験
 
-- [prompt-library.md](prompt-library.md): 課題文、長さ、カテゴリ、難易度
-- [practice-mode.md](practice-mode.md): 一人練習、retry、practice result
-- [result-analytics.md](result-analytics.md): 結果分析、成績差分、接戦情報
-- [player-settings.md](player-settings.md): nickname、theme、sound、表示設定
-- [japanese-typing-mode.md](japanese-typing-mode.md): ローマ字入力、IME、日本語 prompt
-- [spectator-mode.md](spectator-mode.md): 観戦、観戦者権限、配信向け表示
+- [prompt-library.md](prompt-library.md): 課題文
+- [practice-mode.md](practice-mode.md): Practice / retry
+- [result-analytics.md](result-analytics.md): 結果分析
+- [player-settings.md](player-settings.md): 設定
+- [japanese-typing-mode.md](japanese-typing-mode.md): 日本語入力
+- [spectator-mode.md](spectator-mode.md): 観戦
 
 ### 公開・コミュニティ
 
-- [public-lobby.md](public-lobby.md): 公開 room 一覧、知らない人との入口
-- [moderation-report.md](moderation-report.md): 通報、block、nickname 制御
-- [anti-cheat-abuse.md](anti-cheat-abuse.md): 不正入力、event spam、suspicious flag
-- [profiles-guest-identity.md](profiles-guest-identity.md): guest id、profile、将来の login
-- [ranking-rating.md](ranking-rating.md): ranking、rating、戦績
-- [friends-invites.md](friends-invites.md): invite link、friends、recent opponents
-- [tournaments.md](tournaments.md): 大会、bracket、event 運営
+- [public-lobby.md](public-lobby.md): 公開 lobby
+- [moderation-report.md](moderation-report.md): moderation / report / block
+- [anti-cheat-abuse.md](anti-cheat-abuse.md): anti-cheat / abuse
+- [profiles-guest-identity.md](profiles-guest-identity.md): identity / profile
+- [ranking-rating.md](ranking-rating.md): ranking / rating
+- [friends-invites.md](friends-invites.md): friends / invite
+- [tournaments.md](tournaments.md): tournament
 
 ### 運用
 
-- [observability-rate-limit.md](observability-rate-limit.md): ログ、監視、rate limit
-- [deployment-private-beta.md](deployment-private-beta.md): private beta デプロイ要件
-- [notification-feedback.md](notification-feedback.md): お知らせ、障害 banner、feedback 導線
+- [observability-rate-limit.md](observability-rate-limit.md): observability / rate limit
+- [deployment-private-beta.md](deployment-private-beta.md): Private Beta deploy
+- [notification-feedback.md](notification-feedback.md): notification / feedback
+
+## 現在の優先度
+
+### Private Beta 公開前
+
+新機能を増やすより、次を完了させます。
+
+1. #167 Production deploy Secrets / Variables
+2. #232 Production acceptance
+3. #168 Preview Realtime environment
+4. #193 dependency audit gate
+
+### Private Beta 中
+
+実利用で見つかった同期・入力・モバイル不具合を優先します。
+
+Security / refactor は #196 / #197 / #198 を段階的に進めます。
+
+### Public Beta 前
+
+1. terms / privacy / contact
+2. moderation / report / block
+3. anti-cheat / abuse monitoring
+4. load / cost baseline
+5. public lobby / quick match
+6. identity / match history
+7. ranking / rating
+
+### その後
+
+- 完成版 Japanese typing mode
+- spectator
+- friends / invites
+- authenticated users
+- tournaments
+- replay
 
 ## 共通フォーマット
 
-各仕様は次を含めます。
+新しい仕様は必要に応じて次を含めます。
 
 - 目的
 - 対象ステージ
 - ユーザー体験
-- サーバー挙動
-- UI 状態
-- データ / イベント
-- 受け入れ条件
-- テスト観点
+- state / server behavior
+- UI state
+- data / event
+- acceptance criteria
+- test 観点
 - 未決定事項
 
-## 優先度
-
-Private beta 前に優先する順序:
-
-1. room lifecycle
-2. disconnect / reconnect
-3. observability / rate limit
-4. deployment
-5. COM difficulty
-6. matchmaking
-7. rematch / session flow
-8. prompt library
-9. result analytics
-10. player settings
-
-Public beta 前に優先する順序:
-
-1. abuse monitoring
-2. public lobby / random matchmaking
-3. moderation
-4. scaling with Redis
-5. persisted match history
-6. profiles / guest identity
-7. ranking / rating
-8. Japanese typing mode
-9. spectator mode
-10. feedback / notification
+実装済みの機能については「将来案」と「現在の仕様」が混ざらないように明記します。
