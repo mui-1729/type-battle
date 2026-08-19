@@ -2,164 +2,163 @@
 
 ## 目的
 
-ユーザーがオンラインで同じ文章をタイピングし、速度と正確性を競える対戦ゲームを作る。
+ユーザーがオンラインで同じ文章をタイピングし、速度・正確性・ゲームルールに応じた勝敗を競えるリアルタイム対戦ゲームを作ります。
 
-当面は友人・知人など内輪で遊ぶ用途を優先する。将来的には Web に公開し、知らない人同士でも遊べる public beta / public service に発展できる設計にする。
+当面は友人・知人へ URL を共有して遊べる Private Beta を安定させ、将来的に知らない人同士でも遊べる Public Beta へ拡張します。
 
-## MVP
+現在の実装状況は [current-implementation.md](current-implementation.md) を正本とします。
+
+## MVP 要件
 
 ### ユーザー体験
 
-- プレイヤーはニックネームを入力して参加できる。
-- プレイヤーは room code を作成できる。
-- 別プレイヤーは room code で参加できる。
-- 2 人そろったらホストが試合を開始できる。
-- 開始前に 3 秒程度のカウントダウンを表示する。
-- 試合中は自分の入力欄、課題文、相手の進捗、WPM、正確率を表示する。
-- 課題文を打ち終えたら結果画面を表示する。
-- 結果画面では順位、WPM、正確率、ミスタイプ数、所要時間を表示する。
-
-### ゲームルール
-
-- すべてのプレイヤーは同じ課題文を使う。
-- WPM は標準的に 5 文字を 1 word として計算する。
-- 正確率は `正しく入力した文字数 / 入力した文字数` を基準にする。
-- 勝者は完走時間を優先し、未完走者は進捗率、WPM、正確率の順で比較する。
-- 入力ミスは即時表示するが、次の文字へ進むには正しい文字入力を求める方式を MVP の基本とする。
+- ニックネームを設定できる
+- room を作成できる
+- room code で別プレイヤーが参加できる
+- ready 後に host が試合を開始できる
+- 1 人の場合は COM と対戦できる
+- countdown 後に同じ課題文で対戦できる
+- 相手の進捗を確認できる
+- 試合終了後に結果を確認できる
+- 同じ room で再戦できる
 
 ### リアルタイム同期
 
-- room の参加・退出を全員に通知する。
-- countdown start time はサーバーが決定する。
-- progress update はサーバーへ送信し、room 内の他プレイヤーへ配信する。
-- finish event はサーバーが検証して確定する。
-- disconnect は room state に反映する。
+- room の参加・退出・接続状態を共有する
+- countdown start time は server が決定する
+- typing input は server へ送信する
+- server が prompt に対して入力を検証し、進捗・WPM・accuracy・miss を更新する
+- match result は server が確定する
+- disconnect / reconnect を room state に反映する
 
 ### 非機能要件
 
-- MVP は 1 room 2 人対戦を安定させる。
-- レイテンシ 100-300ms 程度でも破綻しない UI にする。
-- 重要な試合状態はサーバー authoritative にする。
-- イベント payload は TypeScript 型で共有する。
-- E2E テストで 2 人対戦の基本フローを検証する。
-- 内輪向けでも、guest id、room code、nickname validation、基本ログは用意する。
+- 1 room 2 人対戦を安定して扱える
+- 重要な試合状態は server authoritative にする
+- realtime payload は TypeScript 型で共有する
+- 2 client 以上の E2E で基本フローを検証する
+- guest id、room code、nickname の最低限の validation を行う
+- 基本的な structured log を残す
+
+MVP の主要要件は実装済みです。
 
 ## Private Beta 要件
 
-内輪で URL を共有して遊べる段階の要件。
+友人・知人へ URL を共有して、継続的に遊べる段階です。
 
-- ゲスト参加だけで遊べる。
-- room code を知っている人だけが参加できる。
-- 人がいない場合は COM と遊べる。
-- 5-10 試合連続で大きな同期崩れなく遊べる。
-- デプロイ先で Web UI と Cloudflare realtime backend が動く。
-- エラー、切断、試合開始、試合終了をログで追える。
-- room 作成、join、typing event に軽い rate limit がある。
-- WebSocket message、identifier、room socket 数、未参加 socket idle に上限がある。
-- room が無制限に残り続けない。
-- reload / short disconnect から復帰できる。
-- prompt category を選べる。
-- rematch で room を作り直さずに続けられる。
-- result に finish gap を出せる。
+### 機能
 
-### 現在満たしている要件
+- guest だけで参加できる
+- room code を知っている人だけが参加できる
+- COM と遊べる
+- reload / short disconnect から復帰できる
+- long disconnect の扱いが決まっている
+- prompt category を選べる
+- rematch できる
+- practice が利用できる
+- result に WPM / accuracy / miss / finish gap などを表示できる
+- player settings が保存される
 
-- ゲスト参加だけで遊べる。
-- room code を知っている人だけが参加できる。
-- 人がいない場合は COM と遊べる。
-- COM difficulty selector を UI から変更できる。
-- reload 後に同じ room へ復帰できる。
-- waiting room は TTL cleanup される。
-- host leave 時に active human がいれば host transfer される。
-- prompt category を `short | standard | long` から選べる。
-- room code を維持して rematch できる。
-- COM は server-side で進行する。
-- practice mode の Web UI と result 表示を実装する。
-- long disconnect の forfeit 判定が server 側にある。
-- result に finish gap を保持している。
-- result analytics UI で finish gap と max streak を確認できる。
-- long disconnect の状態変化が room state に反映される。
-- player settings の modal、localStorage 保存、theme、font size、reduced motion、input guide を実装する。
-- player settings の sound / countdown sound 再生を wiring する。
-- private beta feedback issue flow を用意する。
-- Cloudflare Durable Object storage に guest session と match result を保存する。
-- guest session と match result の retention cleanup がある。
-- guest session を実装する。
-- server authoritative typing validation を実装する。
-- structured logging、軽量 rate limit、liveness `/health`、readiness `/ready`、gateway `/metrics` を実装する。
-- Cloudflare Worker の health / WebSocket flow を E2E で確認する。
-- Cloudflare Worker deploy workflow で CI 成功済み commit を deploy できる。
-- branch protection を有効化する。
+### 運用
 
-### まだ足りない要件
+- Web と Realtime backend を外部環境へデプロイできる
+- CI で lint / typecheck / test / build / E2E を実行する
+- `main` を PR + CI で保護する
+- room / match lifecycle をログで追える
+- room create / join / typing event に軽量 rate limit がある
+- room / session / result が無期限に残り続けない
+- deploy 後に health / readiness / WebSocket を確認できる
+- 問題を GitHub Issue として報告できる
+
+### 現在満たしているもの
+
+上記の機能要件とコード側の運用基盤はほぼ実装済みです。詳細は [current-implementation.md](current-implementation.md) を参照してください。
+
+### Private Beta 公開前の残件
+
+- **#167** GitHub / Cloudflare に Production deploy 用 Secrets / Variables を設定する
+- **#232** Production で 5〜10 試合を含む受け入れ確認を行う
+
+#232 完了までは「Private Beta 向け機能は実装済み」でも「Private Beta 公開確認済み」とは扱いません。
+
+### Private Beta の改善項目
+
+公開の絶対条件とは分けて追跡します。
+
+- **#168** Preview 専用 Realtime 環境
+- **#193** production dependency audit の CI 組み込み
+- **#196** CSP の接続先制限
+- **#197** Web の責務分割
+- **#198** Worker の責務分割
 
 ## Public Beta 要件
 
-知らない人にも遊んでもらう段階の要件。
+知らない人にも利用してもらう段階です。
 
-- 利用規約、プライバシー、問い合わせ先を用意する。
-- nickname の禁止語、長さ、表示 escape を強化する。
-- 通報、ブロック、退出、ミュート相当の導線を検討する。
-- ランダムマッチまたは公開ロビーを追加する。
-- サーバー負荷、エラー率、同時接続数を監視する。
-- 不正タイピングや bot 的挙動の検知を追加する。
+### 公開運用
 
-## MVP 後の拡張
+- 利用規約を用意する
+- プライバシー方針を用意する
+- 問い合わせ先を用意する
+- サービス状態や重大障害を案内できる
+- load / cost の目安を実測する
+- error rate / connection / abuse を監視する
 
-- COM 難易度 UI
-- room 自動期限切れの TTL 拡張
-- 再戦 / 連続試合の UX 拡張
-- 課題文カテゴリ・難易度の拡張
-- 一人練習 UI
-- 結果分析 UI
-- プレイヤー設定
-- 3-8 人対戦
-- ランダムマッチ
-- 公開 lobby
-- 観戦
-- invite link / friends
-- ログイン
-- レート・ランキング
-- フレンド対戦
-- 文章カテゴリ選択
-- 日本語入力モード
-- 通報 / block / moderation
-- 不正検知
-- 大会モード
-- リプレイ
-- チャットまたは定型リアクション
-- お知らせ / feedback 導線
+### Safety / moderation
+
+- nickname の長さ・禁止語・表示安全性を強化する
+- report / block flow を用意する
+- event spam や不自然な入力を検知する
+- suspicious result をランキング等から除外できる
+
+### マッチメイキング
+
+- public lobby または random / quick match を用意する
+- public / private room の境界を明確にする
+- full / playing / expired room を誤って案内しない
+
+### Identity / retention
+
+- guest identity の寿命と保存範囲を明確にする
+- 将来の authenticated user へ拡張できる
+- match history を永続化する場合は retention / privacy を決める
+
+## Public Beta 後の拡張候補
+
+- authenticated profile
+- ranking / rating
+- friend / invite flow
+- spectator mode
+- 完成版 Japanese typing mode
+- 3〜8 player rooms
+- tournaments
+- replay
+- chat / fixed reactions の拡張
+
+## 現在決まっている技術方針
+
+- Web: Next.js / React / TypeScript
+- Web hosting: Vercel
+- Realtime: Cloudflare Worker
+- room authority: room-scoped Durable Object
+- persistence: Durable Object SQLite storage
+- CI: GitHub Actions
+- E2E: Playwright
+
+Redis は必須要件ではありません。Public Beta の負荷実測後に、Durable Object の分割・Queue・D1・Redis 等を比較します。
 
 ## 未決定事項
 
-- 日本語 IME 入力を MVP に含めるか。
-- 課題文を英語、日本語、コード、記号混在のどれから始めるか。
-- 初期リリースの GitHub リポジトリを public にするか private にするか。
-- ホスティング先をどこにするか。
+Private Beta を止める未決定事項はありません。
+
+Public Beta 以降については、実利用データを見て次を決めます。
+
+- public lobby と quick match のどちらを先に出すか
+- authenticated account をいつ導入するか
+- Japanese typing mode の入力仕様
+- ranking / rating の方式
+- 観戦・大会機能の優先度
 
 ## 機能別仕様
 
-詳細は [features/README.md](features/README.md) に分けて管理する。
-
-- [機能カタログ](features/feature-catalog.md)
-- [COM 対戦](features/com-opponent.md)
-- [マッチメイキング](features/matchmaking.md)
-- [切断・再接続](features/disconnect-reconnect.md)
-- [Room lifecycle](features/room-lifecycle.md)
-- [再戦 / 連続試合](features/rematch-session.md)
-- [課題文ライブラリ](features/prompt-library.md)
-- [一人練習](features/practice-mode.md)
-- [結果分析](features/result-analytics.md)
-- [プレイヤー設定](features/player-settings.md)
-- [日本語タイピングモード](features/japanese-typing-mode.md)
-- [観戦](features/spectator-mode.md)
-- [公開 lobby](features/public-lobby.md)
-- [通報 / moderation](features/moderation-report.md)
-- [不正検知 / abuse prevention](features/anti-cheat-abuse.md)
-- [guest identity / profiles](features/profiles-guest-identity.md)
-- [ranking / rating](features/ranking-rating.md)
-- [friends / invites](features/friends-invites.md)
-- [大会](features/tournaments.md)
-- [Observability / Rate Limit](features/observability-rate-limit.md)
-- [Private Beta デプロイ](features/deployment-private-beta.md)
-- [お知らせ / feedback](features/notification-feedback.md)
+詳細は [features/README.md](features/README.md) に分けて管理します。仕様が存在していても実装済みとは限らないため、状態確認には [current-implementation.md](current-implementation.md) を使います。
