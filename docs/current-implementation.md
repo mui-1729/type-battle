@@ -1,145 +1,185 @@
-# Current Implementation
+# 現在の実装状態
 
-現在のコードに入っている機能の整理です。コード品質や責務分割の評価ではなく、「何が動くか」「何が途中か」を把握するためのメモです。
+2026-08-20 時点の `main` で「実際に何が動くか」をまとめた正本です。
+
+Open PR の変更は、merge されるまで実装済みには含めません。
 
 ## 実装済み
 
-### 基本対戦
+### 対戦の基本フロー
 
-- room code による room 作成・参加。
-- 1 room 2 人までの対戦。
-- human 対戦では全 human player の ready 後に host が match start できる。1人の場合は COM 戦として開始できる。
-- serverStartAt を使った 3 秒 countdown。
-- 同じ prompt を使った typing match。
-- client は入力差分と sequence を送り、server が prompt に対して progress、WPM、accuracy、miss count を算出する。
-- forged progress / finish payload は result 確定に使わない。
-- Result 画面で順位、WPM、accuracy、miss count を表示。
+- room code による room 作成・参加
+- 1 room 2 人までの human 対戦
+- ready 状態と host による match start
+- 1 人 room からの COM 対戦開始
+- server start time を使った countdown
+- server authoritative な進捗・結果確定
+- Result 画面で順位、WPM、accuracy、miss count、finish gap、max streak を表示
+- room code を維持した rematch
+
+### 対戦ルール
+
+現在の shared state では次の 3 ルールを扱います。
+
+- `race`: 先に完走したプレイヤーが勝つ
+- `timeAttack`: 制限時間内の進捗で競う
+- `hpBattle`: typing に応じて HP を削り合う
+
+ルールごとの画面・終了条件・結果表示が Web / Worker 側に実装されています。
+
+### タイピング入力と検証
+
+- client は入力文字列と sequence を送信する
+- server が prompt と照合し、進捗・正解数・入力数・miss・WPM・accuracy を更新する
+- client が送った forged progress / finish 値を結果確定に使用しない
+- stale / duplicate sequence を考慮した入力処理
+- `romaji` / `kana` の入力モード判定基盤
+- prompt の空文字や制御文字などの validation
+
+完全な日本語タイピングモードとしての UX・IME 仕様はまだ完成扱いにしません。
 
 ### COM 対戦
 
-- host が 1 人だけの room で `Start vs COM` できる。
-- COM difficulty selector がある。
-- selector で `easy | normal | hard` を切り替えられる。
-- `room:setBotDifficulty` event で server 側に反映する。
-- server 側で COM player を追加する。
-- COM は `isBot = true` の player として room state に含まれる。
-- COM は選択した難易度名つきで表示される。
-- COM は server timer で progress する。
-- COM の速度には簡単な揺らぎと miss chance がある。
+- `easy | normal | hard` の難易度選択
+- server 側で COM player を room state に追加
+- server timer による COM progress
+- 難易度に応じた速度と miss の揺らぎ
+- human host を維持する host migration
 
-### Room lifecycle
+### Room lifecycle / reconnect
 
-- activity 基準の TTL cleanup がある。接続中の waiting / finished room は TTL だけでは削除しない。
-- reload rejoin のため、disconnect 直後に room を即削除しない。
-- host が leave / disconnect した時、COM を host にせず human host を維持または復旧する。
-- room code を維持した rematch ができる。
-- rematch で progress、result、serverStartAt を reset する。
-- long disconnect の forfeit 判定後、room state が更新される。
-
-### Reconnect / Disconnect
-
-- guest id と room code を localStorage に保存する。
-- reload 後、同じ guest id / room code で rejoin する。
-- existing guest id は waiting / playing room に再接続できる。
-- disconnect 時に player.connected を false にする。
-- playing 中に 30 秒以上 disconnect した player を forfeit として扱う処理がある。
+- activity 基準の waiting / finished room TTL
+- disconnect 直後に room を破棄しない reload rejoin
+- guest id と room code の localStorage 保存
+- reconnect 時の同一 player identity 復元
+- disconnect 状態の room state 反映
+- playing 中の長時間 disconnect に対する server-side forfeit
+- forfeit 後の room state / result 反映
+- host leave / disconnect 時の human host 移譲
+- rematch 時の round state / progress / result / timer reset
 
 ### Prompt
 
-- prompt は shared package の static list で管理している。
-- category は `short | standard | long`。
-- waiting lobby で host が prompt category を変更できる。
-- match start 時に server が category に応じて prompt を選ぶ。
-- prompt 定義の空文字や制御文字を検証して、無効なものを弾く。
-- room の再戦では直前と同じ prompt をできるだけ避ける。
+- shared package の static prompt list
+- `short | standard | long` の category
+- lobby で host が category を選択
+- match start 時に server が category に応じて prompt を選択
+- 無効な prompt の validation
+- session 内で直前と同じ prompt をできるだけ避ける処理
 
-### Practice mode
+### 練習・デイリーチャレンジ
 
-- `practice:start` event と server 側の prompt 発行がある。
-- Web UI に practice の入口、typing UI、result UI がある。
-- practice result を client-side で表示し、`Practice again` で再実行できる。
-- daily challenge は Asia/Tokyo の日付境界で切り替わる。
-- daily challenge の結果を localStorage に保存し、今日のベストを表示する。
+- Practice の入口、typing UI、result UI
+- `practice:start` による server 側 prompt 発行
+- Practice again
+- Asia/Tokyo の日付境界で切り替わる daily challenge
+- daily challenge の当日ベストを localStorage に保存
+- miss tendency の localStorage 蓄積と可視化
 
-### Result analytics
+### UI / 設定 / カスタマイズ
 
-- ミス傾向を localStorage に蓄積し、よくミスする文字を棒グラフで表示している。
-- 期待文字ごとのミス回数と、最頻の誤入力を確認できる。
-- `PlayerResult` に `finishGap` と `maxStreak` の field がある。
-- `finishGap` は完走者同士の差分として計算される。
-- `maxStreak` は typing progress の累積から更新される。
-- Result UI で finish gap と max streak を表示している。
+- nickname、theme、input guide、font size、reduced motion、sound 設定
+- settings modal と localStorage 保存 / 復元
+- system / light / dark theme
+- sound / countdown sound の再生制御
+- quick reaction
+- 棒人間ベースの battle UI
+- head accessory / held item などの cosmetic 表示・選択基盤
+- mobile typing UI と iOS / WebKit 向け viewport 対応
 
-### Tests / CI
+### Session / persistence
 
-- GitHub Actions CI がある。
-- lint / typecheck / unit test / build / Playwright E2E を実行する。
-- E2E は room join、2 player completion、reload rejoin、COM match、practice mode、long disconnect forfeit、player settings を確認する。
-- Cloudflare Worker test は room authority 経路の room creation、join、finish、rejoin、COM、forfeit、storage persistence を確認する。
-- Cloudflare Worker runtime test は room authority の state persistence と restart 後の復元を確認する。
+- guest session
+- room-scoped `RoomAuthorityDurableObject`
+- Durable Object SQLite storage への room snapshot 保存・復元
+- guest session / match result の保存
+- retention cleanup
 
-### Player settings
+### Observability / 保護
 
-- nickname、theme、input guide、reduced motion、font size の設定ができる。
-- modal UI による設定変更。
-- localStorage への設定保存と復元。
-- theme (system/light/dark) の CSS 変数による動的切り替え。
-- reduced motion によるアニメーション停止の制御。
-- font size による課題文テキストのサイズ調整。
-- sound / countdown sound を typing / countdown の再生に wiring している。
+- structured logging
+- match terminal transition の構造化ログ
+- room create / join / typing progress の軽量 rate limit
+- IP / guest id / socket 単位の制限
+- WebSocket message size、identifier、room socket 数、未参加 socket idle timeout の上限
+- `/health`
+- `/ready`
+- `/metrics`
 
-### Feedback / Session / Persistence
+### Test / CI
 
-- private beta feedback issue flow がある。
-- Home と result 画面から feedback page に遷移できる。
-- GitHub issue template で room code / steps / expected / actual を収集できる。
-- guest session を localStorage で保存し、reload / reconnect に使っている。
-- Cloudflare Durable Object storage に guest session と match result を記録でき、retention cleanup で期限切れ record を削除する。
-
-### Observability / Rate limit
-
-- IP、guest id、socket ごとの軽量な rate limit。
-- `/health` は liveness、`/ready` は Durable Object storage readiness、`/metrics` は gateway metrics を返す。
-- WebSocket message size、identifier、room socket、未参加 socket idle timeout の上限がある。
+- GitHub Actions CI
+- lint
+- typecheck
+- unit / integration test
+- build
+- Playwright E2E
+- room join / 2 player completion / COM / reload rejoin / long disconnect / practice / settings / mobile typing などの E2E
+- Cloudflare Worker / Durable Object の integration / runtime test
 
 ### Deployment
 
-- Cloudflare Worker の `wrangler.toml`。
-- `.github/workflows/deploy-cloudflare-worker.yml` で CI 成功済み commit SHA を production environment approval 後に deploy できる。
-- `npm run test:e2e` による Cloudflare transport の browser flow 確認。
+- Web: Vercel
+- Realtime: Cloudflare Worker + Durable Objects
+- Vercel Git integration
+- Cloudflare Worker の手動 deploy workflow
+- CI 成功済み commit SHA を指定する production deploy 経路
+- deploy 後 health / WebSocket smoke の仕組み
+- `main` branch protection
 
-## 部分実装
+## 外部設定・運用確認が残っているもの
 
-### Cloudflare transport contract
+コードではなく GitHub / Cloudflare / Vercel 側の設定や Production 確認が必要です。
 
-- `packages/shared/src/cloudflare-events.ts` に Cloudflare 向けの message contract がある。
-- `apps/web/app/_lib/realtime-client.ts` で Cloudflare WebSocket transport を扱う。
-- `apps/cloudflare-worker` に Cloudflare 側の realtime backend があり、room 操作は room code ごとの `RoomAuthorityDurableObject` が唯一の authority になる。
+### P0
 
-### Deployment automation / operations
+- **#167** Cloudflare 本番デプロイ用 Secrets / Variables の設定
+- **#232** Production での Private Beta 受け入れ確認
 
-- web は Vercel Git integration 前提。
-- Worker は GitHub Actions の手動 deploy workflow で検証済み commit を deploy する。
-- production environment / Cloudflare secret / Worker URL は GitHub と Cloudflare 側の設定が必要。
+### P1
 
-## 未実装
+- **#168** Preview 専用 Realtime endpoint の実デプロイ・結合確認
+- **#193** production dependency audit の CI 組み込み
 
-- Redis scaling
-- profile / ranking / rating
-- moderation / report / block
-- Japanese typing mode
+### P2
+
+- **#196** Production CSP の接続先制限
+
+## 進行中のリファクタ
+
+現在の機能を変えず、責務分割を進めています。
+
+- **#197** Web `page.tsx` の Realtime / game state 責務分割
+  - PR #224: connection lifecycle
+  - PR #226: socket event state 適用
+- **#198** Worker `room-authority.ts` の状態遷移 / persistence 責務分割
+  - PR #227: persistence snapshot 生成
+
+## Public Beta 以降の未実装・未完成領域
+
+- public lobby / random matchmaking
+- nickname moderation
+- report / block
+- anti-cheat / suspicious result handling の本格運用
+- 完成版の日本語タイピングモード
 - spectator mode
-- invite links / friends
+- authenticated profile
+- ranking / rating
+- friend / invite flow
 - tournaments
-- notification / feedback UI
+- replay
+- terms / privacy / contact
+- public beta 向け load test
+- abuse monitoring / alerting
+- 運営からのお知らせ・障害通知 UI
 
-## 後でリファクタする候補
+## 今後リファクタ候補として残すもの
 
-現時点では機能追加を優先し、次は後で整理する。
+#197 / #198 とは別に、必要性が高くなった時点で切り出します。
 
-- shared の legacy room-engine は unit tests 用に残っている。production room 操作は room authority へ集約済み。
-- server timer と broadcast の整理。
-- practice と match の入力 UI 共通化。
-- result stats の計算と表示の責務分離。
-- E2E helper の抽出。
-- shared event type の整理。
+- practice と online match の入力 UI 共通化
+- result stats の計算と表示責務の整理
+- E2E helper の追加抽出
+- shared event type の整理
+
+「大きいファイルだから」だけでは Issue を増やさず、変更頻度・回帰リスク・テスト容易性に問題が出た時点で具体的に切り出します。
