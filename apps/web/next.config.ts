@@ -1,23 +1,18 @@
 import type { NextConfig } from "next";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildContentSecurityPolicy } from "./csp";
 
 const appDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(appDir, "../..");
 const isDevelopment = process.env.NODE_ENV === "development";
 
-const contentSecurityPolicy = `
-  default-src 'self';
-  script-src 'self' 'unsafe-inline'${isDevelopment ? " 'unsafe-eval'" : ""};
-  style-src 'self' 'unsafe-inline';
-  img-src 'self' data: blob:;
-  font-src 'self';
-  connect-src 'self' https: wss: ws:;
-  object-src 'none';
-  base-uri 'self';
-  form-action 'self';
-  frame-ancestors 'none';
-`.replace(/\s{2,}/g, " ").trim();
+// Next.js currently requires inline bootstrapping/style output for this app.
+// Keep those directives scoped as-is and tighten network destinations first.
+const contentSecurityPolicy = buildContentSecurityPolicy({
+  isDevelopment,
+  realtimeUrl: process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL
+});
 
 const securityHeaders = [
   {
