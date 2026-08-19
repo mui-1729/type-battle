@@ -53,7 +53,7 @@ Public Beta へ進む段階で、次を 1 feature / 1 acceptance criteria に近
 
 ### 公開準備
 
-- `docs/legal): add terms privacy and contact pages`
+- `docs(legal): add terms privacy and contact pages`
   - 利用規約、プライバシー、問い合わせ先
 - `test(load): define and run public beta load baseline`
   - simultaneous rooms / connections / typing events / cost を測定
