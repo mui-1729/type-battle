@@ -1,143 +1,118 @@
-# Cloudflare Migration Plan
+# Cloudflare Realtime 移行記録
 
-## 目的
+この文書は、Realtime backend を旧 Node.js / Socket.IO 構成から Cloudflare Worker / Durable Object へ移したときの設計判断と移行手順を残す**完了済みの記録**です。
 
-`type-battle` の realtime を Cloudflare 前提の構成へ段階的に移行し、外部公開時に Node.js の realtime server を別途運用しなくてもよい状態を目指す。
+現在の構成を確認するときは [architecture.md](architecture.md)、現在の実装状態は [current-implementation.md](current-implementation.md) を正として扱います。
 
-この文書は issue #7 の成果物であり、issue #21 の担当分けと merge 順を前提にした移行計画として使う。
+## 移行結果
 
-## 現状
+Cloudflare への Realtime 移行は完了しています。
 
-現時点の repo は、realtime backend を Cloudflare Worker / Durable Object へ移行済み。
-
-| 領域 | 現状 | 含意 |
-| --- | --- | --- |
-| Web UI | Next.js を Vercel 前提で運用 | web は当面そのまま維持できる |
-| Realtime backend | `apps/cloudflare-worker` の Worker + Durable Object gateway | active backend |
-| Shared contract | `packages/shared/src/cloudflare-events.ts` がある | Web 側の transport 切替は既に契約化済み |
-| Web adapter | `apps/web/app/_lib/realtime-client.ts` が Cloudflare WebSocket を扱う | UI から transport 固有処理を分離 |
-| Cloudflare worker runtime | `apps/cloudflare-worker/*` | Durable Object gateway / tests / wrangler 設定 |
-
-旧 Node realtime server は削除済みで、production / local E2E とも Cloudflare transport を使う。
-
-## 推奨目標構成
+現在の基本構成:
 
 ```txt
 Browser
   |
-  | HTTPS / WebSocket
+  | HTTPS
   v
 Next.js Web App on Vercel
   |
-  | transport config
+  | WebSocket
   v
-Cloudflare Realtime Worker
+Cloudflare Worker
   |
-  | room authority / fanout / timers
+  | room code ごとの Durable Object
   v
-Durable Object per room
+RoomAuthorityDurableObject
   |
-  | room-local state / optional SQLite
+  | Durable Object storage
   v
-Persistent storage
+room snapshot / guest session / match result
 ```
 
-### 推奨する責務分割
+旧 `apps/realtime` と Socket.IO runtime dependency は削除済みです。
 
-- Web は Vercel のまま維持する
-- Realtime の接続先だけ Cloudflare に寄せる
-- 1 room 1 Durable Object を基本単位にする
-- room state、countdown、forfeit、rematch のような強整合が必要な処理を Durable Object に集約する
-- match result や分析用の永続化は room state から切り離す
+## 移行で採用した判断
 
-## なぜこの形か
+### Web は Vercel を維持
 
-- 既存の web は Vercel 前提で安定しているため、web の hosting まで同時に動かすとリスクが大きい
-- issue #21 の分担でも、web integration と Cloudflare backend を分けている
-- 旧 Node realtime server へ Cloudflare 実装を重ねず、runtime を分けて移行した
-- 1 room 1 Durable Object なら、タイピング対戦のような強整合ゲーム状態と相性がよい
+Realtime 移行と Web hosting 移行を同時に行うと変更範囲が大きくなるため、Web は Next.js / Vercel を維持しました。
 
-## Free tier / beta リスク
+Cloudflare は Realtime backend と room authority に集中させています。
 
-Cloudflare の無料枠や beta 運用で特に意識する点は次の通り。
+### 1 room 1 Durable Object
 
-- Active room 数が増えると、Durable Object の実行回数と WebSocket 接続数がそのまま増える
-- room ごとの強整合は DO に向くが、横断集計や検索は向かない
-- 永続化を D1 や DO storage に寄せすぎると、対戦ログや分析の要求で後から詰まりやすい
-- 逆に外部 PostgreSQL を realtime のホットパスにすると、Cloudflare 移行の旨味が薄れる
-- Cloudflare で Redis 的な共有メモリを前提にすると、後で構成が複雑になる
+対戦中の次の状態は room code ごとの Durable Object が authority になります。
 
-設計上の原則は「room の局所状態は Cloudflare 内で完結、長期保存は別レイヤーに逃がす」。
+- player join / leave / reconnect
+- ready / countdown / playing / finished
+- typing input の検証
+- COM progress
+- disconnect / forfeit
+- rematch
+- result 確定
 
-具体的な request / message 見積もりは [docs/cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md) にまとめる。
+room 内で順序が重要な状態を 1 か所に集めることで、複数 runtime 間の競合を避けます。
 
-## 段階的な移行
+### client payload を信用しない
 
-### Phase 1: 仕様と契約を固定する
+現在は client が `input + sequence` を送信し、server 側が prompt に対して進捗・WPM・accuracy・mistake 等を更新します。
 
-- issue #7 で現行構成と移行後構成を文書化する
-- issue #9 で event contract を固める
-- web 側の adapter が Cloudflare message contract を扱うことを維持する
+旧設計にあった「client が計算済み progress を送る」方式は現行構成では使いません。
 
-### Phase 2: Cloudflare worker の骨格を作る
+### 永続化を hot path から分離
 
-- issue #8 で worker workspace と wrangler 設定を作る
-- local dev と deploy の最小導線を作る
-- `Env` と binding を docs と実装の両方で同期する
+room snapshot は Durable Object storage へ保存しますが、typing 1 回ごとに長期分析用データを書き込む構成にはしていません。
 
-### Phase 3: room engine と backend を移す
+guest session / match result と、将来のランキング・分析用途は同じ責務として扱わず、Public Beta で必要になった時点で再設計します。
 
-- issue #10 で runtime-neutral な room engine を切り出す
-- issue #11 〜 #15 で Durable Object room lifecycle、timer、disconnect、COM、永続化を積む
-- この段階で Node realtime server から Cloudflare backend へ authority を移した
+## 当時の移行フェーズ
 
-### Phase 4: web を Cloudflare に接続する
+移行はおおむね次の順で進めました。
 
-- issue #16 〜 #19 で web adapter、E2E、cutover を進める
-- issue #20 で旧 Node realtime server を片付ける
+1. Cloudflare 構成と制約を調査
+2. shared message contract を作成
+3. runtime-neutral な room logic を整理
+4. Worker / Durable Object の room lifecycle を実装
+5. countdown / typing / COM / disconnect / persistence を移植
+6. Web に Cloudflare WebSocket transport を接続
+7. Cloudflare transport の integration / E2E を追加
+8. Cloudflare を既定 Realtime backend に切り替え
+9. 旧 Socket.IO server を削除
 
-## 具体的な設計判断
+当時の Issue の対応関係は [cloudflare-issue-tracker.md](cloudflare-issue-tracker.md) に残しています。
 
-### Web hosting
+## 現在も有効な設計原則
 
-- 現時点では Vercel 維持を前提にする
-- Cloudflare Pages への web 移行は、この issue 群のスコープ外に置く
+- room 内の強整合状態は room authority に集約する
+- Web UI と Realtime transport の責務を分ける
+- shared message contract を Web / Worker で共有する
+- client の result / progress をそのまま最終結果として信用しない
+- storage failure と live match failure を可能な限り分離する
+- Realtime / shared contract を変更したら integration / E2E も確認する
 
-### Storage
+## 現在の残課題とは分けて考える
 
-- room state の primary source は Durable Object に置く
-- room-local な補助データが必要なら DO storage または SQLite を使う
-- 取引履歴、集計、分析が必要なデータは別の永続層に分ける
+Cloudflare への**移行自体は完了**しています。
 
-### Persistence
+現在残っている Cloudflare 関連作業は移行ではなく運用です。
 
-- 既存の外部 DB 保存は、Cloudflare backend 移行時にそのまま hot path へ持ち込まない
-- まずは realtime の authority を Cloudflare に移すことを優先し、長期保存の移植は別 issue に切る
+- #167 Production deploy 用 Secrets / Variables の設定
+- #168 Preview 用 Realtime environment の実運用確認
+- #232 Production での Private Beta 受け入れ確認
 
-### Observability
+これらは [features/deployment-private-beta.md](features/deployment-private-beta.md) と [roadmap.md](roadmap.md) で追跡します。
 
-- room lifecycle、disconnect、forfeit、timers のログをまず残す
-- free tier では、メトリクスよりも「どの room で何が起きたか」を追えることを優先する
+## Free Tier について
 
-## 失敗しやすい点
+移行時点の概算は [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md) に保存しています。
 
-- room state を module-level variable に置いてしまう
-- WebSocket の接続維持を worker ではなく外部サービスに逃がしすぎる
-- D1 / DO storage に分析用途のデータを詰め込みすぎる
-- web adapter と backend contract を別 issue で更新し、型の同期を崩す
-
-## この計画での完了条件
-
-- 現行構成と Cloudflare 目標構成の差分が説明できる
-- issue ごとの依存関係と merge 順が追える
-- free tier / beta の制約を踏まえて、どこまでを Cloudflare で完結させるか決められている
-- 現在の web / realtime 実装と矛盾しない
-- request / message の概算と follow-up issue が整理されている
+Cloudflare の料金・上限は変更される可能性があるため、今後の容量判断に過去の数値をそのまま使わず、その時点の公式仕様と実測値で再評価します。
 
 ## 関連
 
-- issue #7
-- issue #21
-- [docs/architecture.md](architecture.md)
-- [docs/current-implementation.md](current-implementation.md)
-- [docs/features/deployment-private-beta.md](features/deployment-private-beta.md)
+- [architecture.md](architecture.md)
+- [current-implementation.md](current-implementation.md)
+- [cloudflare-issue-tracker.md](cloudflare-issue-tracker.md)
+- [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md)
+- [features/deployment-private-beta.md](features/deployment-private-beta.md)
