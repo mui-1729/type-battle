@@ -54,6 +54,19 @@ describe("room protocol", () => {
     expect(parseCreateRoomPayload({ nickname: "", guestId: "guest", sessionId: "session" })).toBeNull();
   });
 
+  it("rejects moderated nicknames at the protocol boundary", () => {
+    const basePayload = { guestId: "guest_1", sessionId: "session-1" };
+
+    expect(parseCreateRoomPayload({ ...basePayload, nickname: "https://example.com" })).toBeNull();
+    expect(parseCreateRoomPayload({ ...basePayload, nickname: "Type Battle 公式" })).toBeNull();
+    expect(parseCreateRoomPayload({ ...basePayload, nickname: "Alice\u202EBob" })).toBeNull();
+    expect(parseJoinRoomPayload({
+      ...basePayload,
+      nickname: "運営",
+      roomCode: "AB23CD"
+    })).toBeNull();
+  });
+
   it("rejects invalid typing payloads before application logic", () => {
     expect(parseTypingPayload({ roomCode: "AB23CD", input: "k", sequence: 1 })).toEqual({
       roomCode: "AB23CD",
