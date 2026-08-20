@@ -19,3 +19,12 @@ new_sqlite_classes = ["RoomDurableObject"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["RoomAuthorityDurableObject"]
+
+[env.preview]
+name = "type-battle-cloudflare-worker-preview"
+
+[env.preview.durable_objects]
+bindings = [
+  { name = "GATEWAY", class_name = "RoomDurableObject" },
+  { name = "ROOMS", class_name = "RoomAuthorityDurableObject" }
+]
