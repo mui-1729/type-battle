@@ -9,6 +9,7 @@ import {
   isPlayerBlocked,
   unblockPlayer
 } from "../../lib/blocked-players";
+import styles from "./safety-controls.module.css";
 
 type PlayerSafetyActionsProps = {
   playerId: string;
@@ -44,13 +45,13 @@ export function PlayerSafetyActions({
   const reportHref = buildPlayerReportHref({ roomCode, playerId, nickname });
 
   return (
-    <div className="playerSafetyActions" aria-label={`${nickname}の安全メニュー`}>
-      <Link className="secondaryButton playerSafetyAction" href={reportHref}>
+    <div className={styles.actions} aria-label={`${nickname}の安全メニュー`}>
+      <Link className={`secondaryButton ${styles.action}`} href={reportHref}>
         <Flag size={15} aria-hidden="true" />
         報告する
       </Link>
       <button
-        className="secondaryButton playerSafetyAction"
+        className={`secondaryButton ${styles.action}`}
         type="button"
         aria-pressed={blocked}
         onClick={() => {
