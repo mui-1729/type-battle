@@ -2,6 +2,7 @@
 
 import { ExternalLink, Flag } from "lucide-react";
 import { useMemo, useState } from "react";
+import { buildPlayerReportIssueUrl } from "../../lib/player-safety";
 import styles from "./safety-controls.module.css";
 
 const REPORT_REASONS = [
@@ -64,29 +65,4 @@ export function PlayerReportForm({
       </a>
     </section>
   );
-}
-
-export function buildPlayerReportIssueUrl({
-  roomCode,
-  opponentId,
-  opponentNickname,
-  occurredAt,
-  reason
-}: PlayerReportFormProps & { reason: string }): string {
-  const title = `[Player report] ${reason}`;
-  const body = [
-    "## 報告理由",
-    reason,
-    "",
-    "## 対戦情報",
-    `- room: ${roomCode || "不明"}`,
-    `- opponent nickname: ${opponentNickname || "名前未設定"}`,
-    `- opponent id: ${opponentId || "不明"}`,
-    `- occurred at: ${occurredAt}`,
-    "",
-    "## 詳細",
-    "<!-- 何が起きたかを、個人情報や秘密情報を含めずに記入してください -->"
-  ].join("\n");
-  const params = new URLSearchParams({ title, body });
-  return `https://github.com/mui-1729/type-battle/issues/new?${params.toString()}`;
 }
