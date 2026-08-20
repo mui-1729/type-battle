@@ -12,13 +12,18 @@ test("keeps player report context and lets the user review the issue draft", asy
 
   const reviewLink = page.getByRole("link", { name: /報告内容を確認する/ });
   const initialHref = await reviewLink.getAttribute("href");
-  expect(initialHref).toContain("https://github.com/mui-1729/type-battle/issues/new?");
-  expect(decodeURIComponent(initialHref ?? "")).toContain("room: ABC234");
-  expect(decodeURIComponent(initialHref ?? "")).toContain("opponent id: guest_rival");
+  expect(initialHref).not.toBeNull();
+  const initialIssueUrl = new URL(initialHref ?? "https://example.invalid");
+  expect(initialIssueUrl.origin).toBe("https://github.com");
+  expect(initialIssueUrl.pathname).toBe("/mui-1729/type-battle/issues/new");
+  expect(initialIssueUrl.searchParams.get("body")).toContain("room: ABC234");
+  expect(initialIssueUrl.searchParams.get("body")).toContain("opponent id: guest_rival");
 
   await page.getByLabel("報告理由").selectOption("nickname");
-  const nicknameHref = await reviewLink.getAttribute("href");
-  expect(decodeURIComponent(nicknameHref ?? "")).toContain("不適切なニックネーム");
+  await expect.poll(async () => {
+    const href = await reviewLink.getAttribute("href");
+    return href ? new URL(href).searchParams.get("title") : null;
+  }).toContain("不適切なニックネーム");
 
   await expect(page.getByText(/GitHub Issue は公開されます/)).toBeVisible();
 });
