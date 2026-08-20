@@ -3,6 +3,7 @@
 import { ShieldCheck, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { loadBlockedPlayers, unblockPlayer, type BlockedPlayer } from "../../lib/blocked-players";
+import styles from "./safety-controls.module.css";
 
 export function BlockedPlayersSettings() {
   const [players, setPlayers] = useState<BlockedPlayer[]>([]);
@@ -17,15 +18,15 @@ export function BlockedPlayersSettings() {
       {players.length === 0 ? (
         <p className="modalCopy">ブロックしているプレイヤーはいません。</p>
       ) : (
-        <div className="blockedPlayersList">
+        <div className={styles.blockedList}>
           {players.map((player) => (
-            <div className="blockedPlayerRow" key={player.id}>
-              <span>
+            <div className={styles.blockedRow} key={player.id}>
+              <span className={styles.blockedIdentity}>
                 <strong>{player.nickname}</strong>
                 <small>{player.id}</small>
               </span>
               <button
-                className="secondaryButton"
+                className={`secondaryButton ${styles.unblockButton}`}
                 type="button"
                 onClick={() => setPlayers(unblockPlayer(window.localStorage, player.id))}
               >
