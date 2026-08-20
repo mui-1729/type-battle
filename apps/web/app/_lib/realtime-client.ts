@@ -56,7 +56,7 @@ const CLOUDFLARE_CLIENT_EVENT_MAP: Record<keyof ClientToServerEvents, Cloudflare
   "practice:dailyStart": "client:practice:dailyStart"
 };
 
-const CLOUDFLARE_SERVER_EVENT_TO_APP_EVENT: Record<CloudflareServerEventName, keyof ServerToClientEvents> = {
+const CLOUDFLARE_SERVER_EVENT_TO_APP_EVENT: Partial<Record<CloudflareServerEventName, keyof ServerToClientEvents>> = {
   "server:room:state": "room:state",
   "server:player:progress": "player:progress",
   "server:match:countdown": "match:countdown",

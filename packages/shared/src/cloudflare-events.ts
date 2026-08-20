@@ -20,6 +20,25 @@ import type {
   TypingProgress
 } from "./game-state.js";
 
+export type MatchmakingPlayerSummary = {
+  id: string;
+  nickname: string;
+};
+
+export type MatchmakingMatchedPayload = {
+  roomCode: string;
+  role: "host" | "guest";
+  opponent: MatchmakingPlayerSummary;
+};
+
+export type MatchmakingJoinResponse =
+  | {
+      status: "queued";
+      ticketId: string;
+      expiresAt: number;
+    }
+  | ({ status: "matched" } & MatchmakingMatchedPayload);
+
 type CloudflareClientCommandMap = {
   "client:room:create": {
     request: CreateRoomPayload;
@@ -81,6 +100,18 @@ type CloudflareClientCommandMap = {
     request: { nickname: string };
     response: PracticeSessionData;
   };
+  "client:matchmaking:join": {
+    request: {
+      guestId: string;
+      nickname: string;
+      blockedGuestIds?: string[];
+    };
+    response: MatchmakingJoinResponse;
+  };
+  "client:matchmaking:cancel": {
+    request: { guestId: string };
+    response: { cancelled: boolean };
+  };
 };
 
 type CloudflareServerEventMap = {
@@ -99,6 +130,11 @@ type CloudflareServerEventMap = {
     playerId: string;
     reaction: QuickReaction;
   };
+  "server:matchmaking:matched": MatchmakingMatchedPayload;
+  "server:matchmaking:timeout": {
+    ticketId: string;
+    fallback: "com";
+  };
 };
 
 export const CLOUDFLARE_CLIENT_MESSAGE_TYPES = [
@@ -116,7 +152,9 @@ export const CLOUDFLARE_CLIENT_MESSAGE_TYPES = [
   "client:typing:finish",
   "client:match:rematch",
   "client:practice:start",
-  "client:practice:dailyStart"
+  "client:practice:dailyStart",
+  "client:matchmaking:join",
+  "client:matchmaking:cancel"
 ] as const satisfies readonly CloudflareClientMessageType[];
 
 export const CLOUDFLARE_SERVER_EVENT_TYPES = [
@@ -126,7 +164,9 @@ export const CLOUDFLARE_SERVER_EVENT_TYPES = [
   "server:match:started",
   "server:match:result",
   "server:error",
-  "server:player:reaction"
+  "server:player:reaction",
+  "server:matchmaking:matched",
+  "server:matchmaking:timeout"
 ] as const satisfies readonly CloudflareServerEventType[];
 
 export type CloudflareClientMessageType = keyof CloudflareClientCommandMap;
