@@ -9,6 +9,7 @@ import {
   isPlayerBlocked,
   unblockPlayer
 } from "../../lib/blocked-players";
+import { buildPlayerReportHref } from "../../lib/player-safety";
 import styles from "./safety-controls.module.css";
 
 type PlayerSafetyActionsProps = {
@@ -70,22 +71,4 @@ export function PlayerSafetyActions({
       </button>
     </div>
   );
-}
-
-export function buildPlayerReportHref({
-  roomCode,
-  playerId,
-  nickname
-}: {
-  roomCode: string;
-  playerId: string;
-  nickname: string;
-}): string {
-  const params = new URLSearchParams({
-    kind: "player-report",
-    roomCode,
-    opponentId: playerId,
-    opponentNickname: nickname
-  });
-  return `/feedback?${params.toString()}`;
 }
