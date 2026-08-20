@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./visual-reference.css";
+import "./legal.css";
 import { PlayerSettingsDocumentSync } from "./_components/player-settings-document-sync";
 
 export const metadata: Metadata = {
