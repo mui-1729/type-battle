@@ -19,6 +19,7 @@ import { isReactionInputDisabled, type ReactionFeedback } from "../_lib/reaction
 import { MATCH_RULE_DETAILS, getPlayerDeviceLabel } from "../_lib/ui-labels";
 import { PlayerIdentity } from "./player-identity";
 import { DialogOverlay } from "./dialog-overlay";
+import { PlayerSafetyActions } from "./player-safety-actions";
 import { StickFigure } from "./stick-figure";
 import { Button, SurfaceCard } from "./ui";
 
@@ -170,6 +171,15 @@ export function ResultPanel({
                 <ResultStat label="MISS" value={`${player.mistakes}`} />
                 <ResultStat label={getModeStatLabel(rule)} value={getModeStatValue(player, rule)} />
               </div>
+              {!isLocal && isRoomResult ? (
+                <PlayerSafetyActions
+                  playerId={player.id}
+                  nickname={player.nickname}
+                  ownPlayerId={localPlayerId}
+                  roomCode={result.roomCode}
+                  isBot={player.isBot}
+                />
+              ) : null}
               {isLocal && onEquipmentChange && ownedHeadAccessoryIds && ownedHeldItemIds ? (
                 <div className="resultAccessoryPicker quickEquipmentPicker" aria-label="装備変更">
                   <label>
