@@ -1,0 +1,41 @@
+"use client";
+
+import { ShieldCheck, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { loadBlockedPlayers, unblockPlayer, type BlockedPlayer } from "../../lib/blocked-players";
+
+export function BlockedPlayersSettings() {
+  const [players, setPlayers] = useState<BlockedPlayer[]>([]);
+
+  useEffect(() => {
+    setPlayers(loadBlockedPlayers(window.localStorage));
+  }, []);
+
+  return (
+    <div className="fieldGroup settingsGridWide">
+      <label><ShieldCheck size={16} aria-hidden="true" /> ブロックしたプレイヤー</label>
+      {players.length === 0 ? (
+        <p className="modalCopy">ブロックしているプレイヤーはいません。</p>
+      ) : (
+        <div className="blockedPlayersList">
+          {players.map((player) => (
+            <div className="blockedPlayerRow" key={player.id}>
+              <span>
+                <strong>{player.nickname}</strong>
+                <small>{player.id}</small>
+              </span>
+              <button
+                className="secondaryButton"
+                type="button"
+                onClick={() => setPlayers(unblockPlayer(window.localStorage, player.id))}
+              >
+                <Trash2 size={15} aria-hidden="true" />
+                解除
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
