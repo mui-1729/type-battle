@@ -2,6 +2,7 @@
 
 import { ExternalLink, Flag } from "lucide-react";
 import { useMemo, useState } from "react";
+import styles from "./safety-controls.module.css";
 
 const REPORT_REASONS = [
   ["harassment", "嫌がらせ・不快な行為"],
@@ -31,14 +32,14 @@ export function PlayerReportForm({
   );
 
   return (
-    <section className="playerReportForm" aria-labelledby="player-report-heading">
-      <div>
+    <section className={styles.reportForm} aria-labelledby="player-report-heading">
+      <div className={styles.reportHeading}>
         <p className="eyebrow">PLAYER REPORT</p>
         <h2 id="player-report-heading">対戦相手を報告</h2>
         <p className="modalCopy">識別情報は下書きとしてGitHub Issueへ引き継ぎます。送信前に内容を確認してください。</p>
       </div>
 
-      <dl className="playerReportContext">
+      <dl className={styles.context}>
         <div><dt>ルーム</dt><dd>{roomCode || "不明"}</dd></div>
         <div><dt>相手</dt><dd>{opponentNickname || "名前未設定"}</dd></div>
         <div><dt>相手ID</dt><dd><code>{opponentId || "不明"}</code></dd></div>
