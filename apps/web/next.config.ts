@@ -6,12 +6,22 @@ import { buildContentSecurityPolicy } from "./csp";
 const appDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(appDir, "../..");
 const isDevelopment = process.env.NODE_ENV === "development";
+const defaultPreviewRealtimeUrl =
+  "wss://type-battle-cloudflare-worker-preview.s1f102503015.workers.dev";
+const configuredRealtimeUrl =
+  process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL?.trim() ?? "";
+const configuredPreviewRealtimeUrl =
+  process.env.NEXT_PUBLIC_CLOUDFLARE_PREVIEW_REALTIME_URL?.trim() ?? "";
+const realtimeUrl =
+  process.env.VERCEL_ENV === "preview"
+    ? configuredPreviewRealtimeUrl || defaultPreviewRealtimeUrl
+    : configuredRealtimeUrl;
 
 // Next.js currently requires inline bootstrapping/style output for this app.
 // Keep those directives scoped as-is and tighten network destinations first.
 const contentSecurityPolicy = buildContentSecurityPolicy({
   isDevelopment,
-  realtimeUrl: process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL
+  realtimeUrl
 });
 
 const securityHeaders = [
@@ -40,6 +50,9 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   outputFileTracingRoot: repoRoot,
   allowedDevOrigins: ["*.*.*.*"],
+  env: {
+    NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL: realtimeUrl,
+  },
   async headers() {
     return [
       {
