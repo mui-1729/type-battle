@@ -51,6 +51,21 @@ import {
   type PersistedPlayerTypingState,
   type PersistedRoomSnapshot
 } from "./room-persistence.js";
+import {
+  areHumanPlayersFinished,
+  finalizeRoomState,
+  markUnfinishedBots,
+  prepareRoomFinalization
+} from "./room-finalization.js";
+import {
+  disconnectPlayer,
+  ensureConnectedHost,
+  forfeitExpiredDisconnectedPlayers,
+  forfeitPlayer,
+  getExpiredDisconnectedPlayerIds,
+  removePlayerAndReassignHost
+} from "./room-player-lifecycle.js";
+import { RoomTimerCoordinator } from "./room-timer-coordinator.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
   isCloudflareClientMessageType,
@@ -144,12 +159,6 @@ type InternalRoom = {
   round: number;
 };
 
-type GatewayTimers = {
-  countdown?: ReturnType<typeof setTimeout> | undefined;
-  bot?: ReturnType<typeof setInterval> | undefined;
-  persist?: ReturnType<typeof setTimeout> | undefined;
-};
-
 type GuestSessionStorageRecord = Parameters<NonNullable<RoomEngineHooks["recordGuestSession"]>>[0] & {
   createdAt: string;
   lastSeenAt: string;
@@ -223,7 +232,7 @@ export class RoomAuthorityDurableObject {
   private readonly controlRateBuckets = new Map<string, ControlRateBucket>();
   private readonly unjoinedSocketTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly playerSessions = new Map<string, string>();
-  private readonly timers: GatewayTimers = {};
+  private readonly timers = new RoomTimerCoordinator();
   private readonly roomCreateIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
   private readonly roomCreateGuestLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 10 });
   private readonly roomJoinIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 100 });
@@ -1223,12 +1232,7 @@ export class RoomAuthorityDurableObject {
 
   private schedulePersistRoom(roomCode: string): void {
     void roomCode;
-
-    if (this.timers.persist) {
-      clearTimeout(this.timers.persist);
-    }
-
-    this.timers.persist = setTimeout(() => {
+    this.timers.schedulePersist(() => {
       this.runInBackground(
         this.persistRoom(this.room?.roomCode ?? this.roomCode ?? "UNKNOWN"),
         "persist_room_failed"
@@ -1298,7 +1302,7 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    this.timers.countdown = setTimeout(() => {
+    this.timers.scheduleCountdown(() => {
       const playingRoom = this.markPlaying(roomCode);
 
       if (!playingRoom) {
@@ -1327,11 +1331,7 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    if (this.timers.bot) {
-      clearInterval(this.timers.bot);
-    }
-
-    this.timers.bot = setInterval(() => {
+    this.timers.scheduleBot(() => {
       const outcome = this.advanceBot(roomCode);
 
       if (!outcome) {
@@ -1355,16 +1355,7 @@ export class RoomAuthorityDurableObject {
   }
 
   private clearMatchTimers(): void {
-    if (this.timers.countdown) {
-      clearTimeout(this.timers.countdown);
-    }
-
-    if (this.timers.bot) {
-      clearInterval(this.timers.bot);
-    }
-
-    this.timers.countdown = undefined;
-    this.timers.bot = undefined;
+    this.timers.clearMatch();
   }
 
   private notifyMatchFinalized(result: MatchResult): void {
@@ -1464,17 +1455,11 @@ export class RoomAuthorityDurableObject {
   }
 
   private clearRoomTimers(): void {
-    this.clearMatchTimers();
-    this.clearPersistTimer();
+    this.timers.clearAll();
   }
 
   private clearPersistTimer(): void {
-    if (!this.timers.persist) {
-      return;
-    }
-
-    clearTimeout(this.timers.persist);
-    this.timers.persist = undefined;
+    this.timers.clearPersist();
   }
 
   private async cleanupStaleRoom(): Promise<void> {
@@ -1513,19 +1498,16 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    const expiredPlayers = [...room.players.values()].filter(
-      (player) => !player.isBot && !player.connected && player.disconnectedAt !== undefined && now >= player.disconnectedAt + DISCONNECT_GRACE_MS
-    );
-    if (expiredPlayers.length === 0) {
+    const expiredPlayerIds = getExpiredDisconnectedPlayerIds(room, now, DISCONNECT_GRACE_MS);
+    if (expiredPlayerIds.length === 0) {
       return;
     }
 
-    for (const player of expiredPlayers) {
-      room.players.delete(player.id);
-      this.playerSessions.delete(player.id);
-      this.reactionTimestamps.delete(player.id);
+    for (const playerId of expiredPlayerIds) {
+      removePlayerAndReassignHost(room, playerId);
+      this.playerSessions.delete(playerId);
+      this.reactionTimestamps.delete(playerId);
     }
-    ensureConnectedHost(room);
 
     if (room.status === "finished") {
       room.status = "waiting";
@@ -1548,23 +1530,11 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    let changed = false;
-
-    for (const player of this.room.players.values()) {
-      if (!player.connected && player.disconnectedAt) {
-        const elapsed = Date.now() - player.disconnectedAt;
-        if (elapsed >= DISCONNECT_GRACE_MS && !player.forfeited) {
-          player.finishedAt = Date.now();
-          delete player.finishTimeMs;
-          player.finishStatus = "forfeited";
-          player.forfeited = true;
-          changed = true;
-        }
-      }
-    }
+    const now = Date.now();
+    const changed = forfeitExpiredDisconnectedPlayers(this.room, now, DISCONNECT_GRACE_MS);
 
     if (changed) {
-      this.finalizeUnfinishedBots(this.room);
+      markUnfinishedBots(this.room, getTypingLength, Date.now());
       const result = this.finalizeRoom(this.room);
       this.notifyMatchFinalized(result);
     }
@@ -1597,7 +1567,7 @@ export class RoomAuthorityDurableObject {
       }
     }
 
-    this.finalizeUnfinishedBots(this.room);
+    markUnfinishedBots(this.room, getTypingLength, Date.now());
     const result = this.finalizeRoom(this.room);
     this.notifyMatchFinalized(result);
     await this.scheduleMaintenanceAlarm();
@@ -2266,8 +2236,8 @@ export class RoomAuthorityDurableObject {
       return result;
     }
 
-    if (areHumansFinished(context.room)) {
-      finalizeUnfinishedBots(context.room);
+    if (areHumanPlayersFinished(context.room, getTypingLength)) {
+      markUnfinishedBots(context.room, getTypingLength, Date.now());
       return this.finalizeRoom(context.room);
     }
 
@@ -2342,9 +2312,7 @@ export class RoomAuthorityDurableObject {
 
     const countdownAborted = room.status === "countdown";
     if (player) {
-      player.connected = false;
-      player.ready = false;
-      player.disconnectedAt = Date.now();
+      disconnectPlayer(player, Date.now());
     }
 
     if (countdownAborted) {
@@ -2358,14 +2326,7 @@ export class RoomAuthorityDurableObject {
     }
 
     room.lastActivityAt = Date.now();
-
-    if (record.playerId === room.hostPlayerId) {
-      const nextHost = [...room.players.values()].find((p) => p.connected && !p.isBot)
-        ?? [...room.players.values()].find((p) => !p.isBot);
-      if (nextHost) {
-        room.hostPlayerId = nextHost.id;
-      }
-    }
+    ensureConnectedHost(room);
 
     return toPublicRoom(room);
   }
@@ -2388,24 +2349,14 @@ export class RoomAuthorityDurableObject {
     }
 
     if (room.status === "playing") {
-      player.connected = false;
-      player.ready = false;
-      player.disconnectedAt = Date.now();
-      player.finishedAt = Date.now();
-      delete player.finishTimeMs;
-      player.finishStatus = "forfeited";
-      player.forfeited = true;
+      forfeitPlayer(player, Date.now());
       room.lastActivityAt = Date.now();
 
       if (record.playerId === room.hostPlayerId) {
-        const nextHost = [...room.players.values()].find((candidate) => candidate.id !== player.id && candidate.connected && !candidate.isBot)
-          ?? [...room.players.values()].find((candidate) => candidate.id !== player.id && !candidate.isBot);
-        if (nextHost) {
-          room.hostPlayerId = nextHost.id;
-        }
+        ensureConnectedHost(room, player.id);
       }
 
-      finalizeUnfinishedBots(room);
+      markUnfinishedBots(room, getTypingLength, Date.now());
       this.finalizeRoom(room);
       return toPublicRoom(room);
     }
@@ -2414,7 +2365,7 @@ export class RoomAuthorityDurableObject {
       return this.leaveBySocket(socketId);
     }
 
-    room.players.delete(record.playerId ?? "");
+    removePlayerAndReassignHost(room, player.id);
     this.playerSessions.delete(player.id);
     this.reactionTimestamps.delete(player.id);
     room.lastActivityAt = Date.now();
@@ -2423,14 +2374,6 @@ export class RoomAuthorityDurableObject {
       this.room = null;
       this.reactionTimestamps.clear();
       return null;
-    }
-
-    if (record.playerId === room.hostPlayerId) {
-      const nextHost = [...room.players.values()].find((p) => p.connected && !p.isBot)
-        ?? [...room.players.values()].find((p) => !p.isBot);
-      if (nextHost) {
-        room.hostPlayerId = nextHost.id;
-      }
     }
 
     return toPublicRoom(room);
@@ -2488,9 +2431,12 @@ export class RoomAuthorityDurableObject {
       return { type: "result", result };
     }
 
-    if ((this.room.matchRule === "race" && bot.progressIndex >= promptLength) || areHumansFinished(this.room)) {
+    if (
+      (this.room.matchRule === "race" && bot.progressIndex >= promptLength)
+      || areHumanPlayersFinished(this.room, getTypingLength)
+    ) {
       if (bot.progressIndex < promptLength) {
-        finalizeUnfinishedBots(this.room);
+        markUnfinishedBots(this.room, getTypingLength, Date.now());
       }
       return { type: "result", result: this.finalizeRoom(this.room) };
     }
@@ -2498,34 +2444,8 @@ export class RoomAuthorityDurableObject {
     return { type: "progress", room: toPublicRoom(this.room) };
   }
 
-  private areHumansFinished(room: InternalRoom): boolean {
-    return areHumansFinished(room);
-  }
-
-  private finalizeUnfinishedBots(room: InternalRoom): void {
-    finalizeUnfinishedBots(room);
-  }
-
   private maybeFinalizeRoom(room: InternalRoom): MatchResult | null {
-    if (room.matchRule === "timeAttack") {
-      return null;
-    }
-
-    if (room.matchRule === "hpBattle") {
-      const hasElimination = [...room.players.values()].some((player) => (player.hp ?? 1) <= 0);
-
-      if (hasElimination) {
-        return this.finalizeRoom(room);
-      }
-    }
-
-    if (room.matchRule === "race" && [...room.players.values()].some((player) => player.finishStatus === "finished")) {
-      finalizeUnfinishedRacePlayers(room);
-      return this.finalizeRoom(room);
-    }
-
-    if (areHumansFinished(room)) {
-      finalizeUnfinishedBots(room);
+    if (prepareRoomFinalization(room, getTypingLength, Date.now())) {
       return this.finalizeRoom(room);
     }
 
@@ -2565,7 +2485,7 @@ export class RoomAuthorityDurableObject {
       players: summarizeMatchPlayers([...room.players.values()])
     }));
 
-    const result = finalizeRoom(room);
+    const result = finalizeRoomState(room, () => toMatchResult(room), Date.now());
 
     console.info(JSON.stringify({
       event: "match_finalize_result_created",
@@ -3076,53 +2996,6 @@ function setTimeAttackPromptSequence(room: InternalRoom, seed: number): void {
     seed
   ).map((prompt) => prompt.id);
 }
-function areHumansFinished(room: InternalRoom): boolean {
-  if (room.matchRule === "timeAttack") {
-    return false;
-  }
-
-  if (room.matchRule === "hpBattle") {
-    return [...room.players.values()]
-      .filter((p) => !p.isBot)
-      .every((p) => p.finishStatus === "forfeited" || p.finishStatus === "eliminated" || (p.hp ?? 0) <= 0);
-  }
-
-  return [...room.players.values()]
-    .filter((p) => !p.isBot)
-    .every((p) => {
-      if (p.finishStatus === "forfeited" || p.finishStatus === "eliminated") {
-        return true;
-      }
-
-      if (room.matchRule === "hpBattle" && (p.hp ?? 0) <= 0) {
-        return true;
-      }
-
-      return p.progressIndex >= getTypingLength(room, p);
-    });
-}
-
-function finalizeUnfinishedBots(room: InternalRoom): void {
-  for (const bot of [...room.players.values()].filter((p) => p.isBot)) {
-    if (bot.progressIndex < getTypingLength(room, bot)) {
-      bot.finishedAt = Date.now();
-      delete bot.finishTimeMs;
-      bot.finishStatus = "unfinished";
-    }
-  }
-}
-
-function finalizeUnfinishedRacePlayers(room: InternalRoom): void {
-  for (const player of room.players.values()) {
-    if (player.finishStatus === "finished" || player.progressIndex >= getTypingLength(room, player)) {
-      continue;
-    }
-    player.finishedAt = Date.now();
-    delete player.finishTimeMs;
-    player.finishStatus = "unfinished";
-  }
-}
-
 function applyBotProgress(
   bot: InternalPlayer,
   room: InternalRoom,
@@ -3180,21 +3053,6 @@ function applyBotProgress(
   bot.accuracy = calculateAccuracy(bot.correctCharacters, bot.totalTypedCharacters);
 }
 
-function ensureConnectedHost(room: InternalRoom): void {
-  const currentHost = room.players.get(room.hostPlayerId);
-
-  if (currentHost?.connected && !currentHost.isBot) {
-    return;
-  }
-
-  const nextHost = [...room.players.values()].find((player) => player.connected && !player.isBot)
-    ?? [...room.players.values()].find((player) => !player.isBot);
-
-  if (nextHost) {
-    room.hostPlayerId = nextHost.id;
-  }
-}
-
 function shouldExpireRoom(room: InternalRoom, now: number): boolean {
   const deadline = getRoomExpirationDeadline(room);
   return deadline !== null && now >= deadline;
@@ -3249,15 +3107,6 @@ function applyHpDamage(player: InternalPlayer, damage: number, room: InternalRoo
     delete player.finishTimeMs;
     player.finishStatus = "eliminated";
   }
-}
-
-function finalizeRoom(room: InternalRoom): MatchResult {
-  room.status = "finished";
-  room.finishedAt = Date.now();
-  const result = toMatchResult(room);
-  room.result = result;
-
-  return result;
 }
 
 function toMatchResult(room: InternalRoom): MatchResult {
