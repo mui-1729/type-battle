@@ -57,6 +57,14 @@ import {
   markUnfinishedBots,
   prepareRoomFinalization
 } from "./room-finalization.js";
+import {
+  disconnectPlayer,
+  ensureConnectedHost,
+  forfeitExpiredDisconnectedPlayers,
+  forfeitPlayer,
+  getExpiredDisconnectedPlayerIds,
+  removePlayerAndReassignHost
+} from "./room-player-lifecycle.js";
 import { RoomTimerCoordinator } from "./room-timer-coordinator.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
@@ -1490,19 +1498,16 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    const expiredPlayers = [...room.players.values()].filter(
-      (player) => !player.isBot && !player.connected && player.disconnectedAt !== undefined && now >= player.disconnectedAt + DISCONNECT_GRACE_MS
-    );
-    if (expiredPlayers.length === 0) {
+    const expiredPlayerIds = getExpiredDisconnectedPlayerIds(room, now, DISCONNECT_GRACE_MS);
+    if (expiredPlayerIds.length === 0) {
       return;
     }
 
-    for (const player of expiredPlayers) {
-      room.players.delete(player.id);
-      this.playerSessions.delete(player.id);
-      this.reactionTimestamps.delete(player.id);
+    for (const playerId of expiredPlayerIds) {
+      removePlayerAndReassignHost(room, playerId);
+      this.playerSessions.delete(playerId);
+      this.reactionTimestamps.delete(playerId);
     }
-    ensureConnectedHost(room);
 
     if (room.status === "finished") {
       room.status = "waiting";
@@ -1525,20 +1530,8 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    let changed = false;
-
-    for (const player of this.room.players.values()) {
-      if (!player.connected && player.disconnectedAt) {
-        const elapsed = Date.now() - player.disconnectedAt;
-        if (elapsed >= DISCONNECT_GRACE_MS && !player.forfeited) {
-          player.finishedAt = Date.now();
-          delete player.finishTimeMs;
-          player.finishStatus = "forfeited";
-          player.forfeited = true;
-          changed = true;
-        }
-      }
-    }
+    const now = Date.now();
+    const changed = forfeitExpiredDisconnectedPlayers(this.room, now, DISCONNECT_GRACE_MS);
 
     if (changed) {
       markUnfinishedBots(this.room, getTypingLength, Date.now());
@@ -2319,9 +2312,7 @@ export class RoomAuthorityDurableObject {
 
     const countdownAborted = room.status === "countdown";
     if (player) {
-      player.connected = false;
-      player.ready = false;
-      player.disconnectedAt = Date.now();
+      disconnectPlayer(player, Date.now());
     }
 
     if (countdownAborted) {
@@ -2335,14 +2326,7 @@ export class RoomAuthorityDurableObject {
     }
 
     room.lastActivityAt = Date.now();
-
-    if (record.playerId === room.hostPlayerId) {
-      const nextHost = [...room.players.values()].find((p) => p.connected && !p.isBot)
-        ?? [...room.players.values()].find((p) => !p.isBot);
-      if (nextHost) {
-        room.hostPlayerId = nextHost.id;
-      }
-    }
+    ensureConnectedHost(room);
 
     return toPublicRoom(room);
   }
@@ -2365,21 +2349,11 @@ export class RoomAuthorityDurableObject {
     }
 
     if (room.status === "playing") {
-      player.connected = false;
-      player.ready = false;
-      player.disconnectedAt = Date.now();
-      player.finishedAt = Date.now();
-      delete player.finishTimeMs;
-      player.finishStatus = "forfeited";
-      player.forfeited = true;
+      forfeitPlayer(player, Date.now());
       room.lastActivityAt = Date.now();
 
       if (record.playerId === room.hostPlayerId) {
-        const nextHost = [...room.players.values()].find((candidate) => candidate.id !== player.id && candidate.connected && !candidate.isBot)
-          ?? [...room.players.values()].find((candidate) => candidate.id !== player.id && !candidate.isBot);
-        if (nextHost) {
-          room.hostPlayerId = nextHost.id;
-        }
+        ensureConnectedHost(room, player.id);
       }
 
       markUnfinishedBots(room, getTypingLength, Date.now());
@@ -2391,7 +2365,7 @@ export class RoomAuthorityDurableObject {
       return this.leaveBySocket(socketId);
     }
 
-    room.players.delete(record.playerId ?? "");
+    removePlayerAndReassignHost(room, player.id);
     this.playerSessions.delete(player.id);
     this.reactionTimestamps.delete(player.id);
     room.lastActivityAt = Date.now();
@@ -2400,14 +2374,6 @@ export class RoomAuthorityDurableObject {
       this.room = null;
       this.reactionTimestamps.clear();
       return null;
-    }
-
-    if (record.playerId === room.hostPlayerId) {
-      const nextHost = [...room.players.values()].find((p) => p.connected && !p.isBot)
-        ?? [...room.players.values()].find((p) => !p.isBot);
-      if (nextHost) {
-        room.hostPlayerId = nextHost.id;
-      }
     }
 
     return toPublicRoom(room);
@@ -3085,21 +3051,6 @@ function applyBotProgress(
 
   bot.wpm = calculateWpm(bot.correctCharacters, now - startedAt);
   bot.accuracy = calculateAccuracy(bot.correctCharacters, bot.totalTypedCharacters);
-}
-
-function ensureConnectedHost(room: InternalRoom): void {
-  const currentHost = room.players.get(room.hostPlayerId);
-
-  if (currentHost?.connected && !currentHost.isBot) {
-    return;
-  }
-
-  const nextHost = [...room.players.values()].find((player) => player.connected && !player.isBot)
-    ?? [...room.players.values()].find((player) => !player.isBot);
-
-  if (nextHost) {
-    room.hostPlayerId = nextHost.id;
-  }
 }
 
 function shouldExpireRoom(room: InternalRoom, now: number): boolean {
