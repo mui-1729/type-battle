@@ -57,6 +57,7 @@ import {
   markUnfinishedBots,
   prepareRoomFinalization
 } from "./room-finalization.js";
+import { RoomTimerCoordinator } from "./room-timer-coordinator.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
   isCloudflareClientMessageType,
@@ -150,12 +151,6 @@ type InternalRoom = {
   round: number;
 };
 
-type GatewayTimers = {
-  countdown?: ReturnType<typeof setTimeout> | undefined;
-  bot?: ReturnType<typeof setInterval> | undefined;
-  persist?: ReturnType<typeof setTimeout> | undefined;
-};
-
 type GuestSessionStorageRecord = Parameters<NonNullable<RoomEngineHooks["recordGuestSession"]>>[0] & {
   createdAt: string;
   lastSeenAt: string;
@@ -229,7 +224,7 @@ export class RoomAuthorityDurableObject {
   private readonly controlRateBuckets = new Map<string, ControlRateBucket>();
   private readonly unjoinedSocketTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly playerSessions = new Map<string, string>();
-  private readonly timers: GatewayTimers = {};
+  private readonly timers = new RoomTimerCoordinator();
   private readonly roomCreateIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 30 });
   private readonly roomCreateGuestLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 10 });
   private readonly roomJoinIpLimiter = new RateLimiter({ windowMs: 10 * 60 * 1000, max: 100 });
@@ -1229,12 +1224,7 @@ export class RoomAuthorityDurableObject {
 
   private schedulePersistRoom(roomCode: string): void {
     void roomCode;
-
-    if (this.timers.persist) {
-      clearTimeout(this.timers.persist);
-    }
-
-    this.timers.persist = setTimeout(() => {
+    this.timers.schedulePersist(() => {
       this.runInBackground(
         this.persistRoom(this.room?.roomCode ?? this.roomCode ?? "UNKNOWN"),
         "persist_room_failed"
@@ -1304,7 +1294,7 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    this.timers.countdown = setTimeout(() => {
+    this.timers.scheduleCountdown(() => {
       const playingRoom = this.markPlaying(roomCode);
 
       if (!playingRoom) {
@@ -1333,11 +1323,7 @@ export class RoomAuthorityDurableObject {
       return;
     }
 
-    if (this.timers.bot) {
-      clearInterval(this.timers.bot);
-    }
-
-    this.timers.bot = setInterval(() => {
+    this.timers.scheduleBot(() => {
       const outcome = this.advanceBot(roomCode);
 
       if (!outcome) {
@@ -1361,16 +1347,7 @@ export class RoomAuthorityDurableObject {
   }
 
   private clearMatchTimers(): void {
-    if (this.timers.countdown) {
-      clearTimeout(this.timers.countdown);
-    }
-
-    if (this.timers.bot) {
-      clearInterval(this.timers.bot);
-    }
-
-    this.timers.countdown = undefined;
-    this.timers.bot = undefined;
+    this.timers.clearMatch();
   }
 
   private notifyMatchFinalized(result: MatchResult): void {
@@ -1470,17 +1447,11 @@ export class RoomAuthorityDurableObject {
   }
 
   private clearRoomTimers(): void {
-    this.clearMatchTimers();
-    this.clearPersistTimer();
+    this.timers.clearAll();
   }
 
   private clearPersistTimer(): void {
-    if (!this.timers.persist) {
-      return;
-    }
-
-    clearTimeout(this.timers.persist);
-    this.timers.persist = undefined;
+    this.timers.clearPersist();
   }
 
   private async cleanupStaleRoom(): Promise<void> {
