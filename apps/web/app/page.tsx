@@ -74,6 +74,7 @@ import {
   openRealtimeConnection
 } from "./_lib/realtime-connection-controller";
 import { bindRoomSocketHandlers } from "./_lib/room-socket-handlers";
+import { useStoredRoomRecovery } from "./_lib/use-stored-room-recovery";
 import { getScrollTopToRevealTarget } from "./_lib/scroll-visibility";
 import {
   INITIAL_REACTION_FEEDBACK,
@@ -86,11 +87,7 @@ import {
   createSentReactionFeedback,
   type ReactionFeedback
 } from "./_lib/reaction-feedback";
-import {
-  getStoredRoomJoinFailureAction,
-  getStoredRoomRejoinDelayMs,
-  type StoredRoomRecoveryState
-} from "./_lib/room-reconnect";
+import type { StoredRoomRecoveryState } from "./_lib/room-reconnect";
 import {
   DEVICE_KIND_LABELS,
   MATCH_RULE_DETAILS,
@@ -238,8 +235,6 @@ export default function HomePage() {
   const socketModeRef = useRef<"practice" | "room" | null>(null);
   const storedRoomCodeRef = useRef<string | null>(null);
   const storedRoomJoinInFlightRef = useRef(false);
-  const storedRoomJoinAttemptsRef = useRef(0);
-  const storedRoomRetryTimerRef = useRef<number | null>(null);
   const autoStartRoomRef = useRef<string | null>(null);
   const attemptStoredRoomJoinRef = useRef<(socket: ClientSocket) => void>(() => undefined);
   const realtimeUrl = CLOUDFLARE_REALTIME_URL || localRealtimeUrl;
@@ -588,134 +583,36 @@ export default function HomePage() {
     });
   }, []);
 
-  const clearStoredRoomRetryTimer = useCallback(() => {
-    if (storedRoomRetryTimerRef.current) {
-      window.clearTimeout(storedRoomRetryTimerRef.current);
-      storedRoomRetryTimerRef.current = null;
-    }
-  }, []);
-
-  const discardStoredRoom = useCallback(
-    (message: string) => {
-      clearStoredRoomRetryTimer();
-      storedRoomCodeRef.current = null;
-      storedRoomJoinAttemptsRef.current = 0;
-      storedRoomJoinInFlightRef.current = false;
-      window.localStorage.removeItem(ROOM_CODE_KEY);
-      setStoredRoomRecovery({ status: "idle", message: "" });
-      setError(message);
-      disconnectCurrentSocket();
+  const {
+    clearStoredRoomRetryTimer,
+    resetStoredRoomRecovery,
+    retryStoredRoomJoin
+  } = useStoredRoomRecovery({
+    storageKey: ROOM_CODE_KEY,
+    refs: {
+      socketRef,
+      socketModeRef,
+      guestSessionRef,
+      nicknameRef,
+      roomRef,
+      resultRef,
+      storedRoomCodeRef,
+      storedRoomJoinInFlightRef,
+      attemptStoredRoomJoinRef
     },
-    [clearStoredRoomRetryTimer, disconnectCurrentSocket]
-  );
-
-  const attemptStoredRoomJoin = useCallback(
-    (socket: ClientSocket) => {
-      const storedRoomCode = storedRoomCodeRef.current;
-      const currentSession = guestSessionRef.current;
-
-      if (!storedRoomCode || !currentSession || storedRoomJoinInFlightRef.current) {
-        return;
-      }
-
-      clearStoredRoomRetryTimer();
-      storedRoomJoinInFlightRef.current = true;
-      storedRoomJoinAttemptsRef.current += 1;
-      const attempts = storedRoomJoinAttemptsRef.current;
-      setStoredRoomRecovery({
-        status: "reconnecting",
-        message: `保存済みルームへ再接続しています（${attempts}/5）…`
-      });
-
-      socket.emit(
-        "room:join",
-        {
-          roomCode: storedRoomCode,
-          nickname: normalizeNickname(nicknameRef.current),
-          guestId: currentSession.guestId,
-          sessionId: currentSession.sessionId,
-          deviceKind: detectDeviceKind()
-        },
-        (response) => {
-          if (socketRef.current !== socket) {
-            return;
-          }
-
-          storedRoomJoinInFlightRef.current = false;
-
-          if (response.ok) {
-            storedRoomJoinAttemptsRef.current = 0;
-            storedRoomCodeRef.current = response.data.room.roomCode;
-            setStoredRoomRecovery({ status: "idle", message: "" });
-            setError("");
-            setPlayerId(response.data.playerId);
-            // Clear transient typing state before applying the stored snapshot.
-            // A finished room carries its result in the snapshot, so resetting
-            // afterwards would overwrite that result with null in the same batch.
-            resetTyping();
-            roomRef.current = response.data.room;
-            resultRef.current = response.data.room.result ?? null;
-            setRoom(response.data.room);
-            setResult(response.data.room.result ?? null);
-            updateGuestSession();
-            clearPracticeState();
-            return;
-          }
-
-          const action = getStoredRoomJoinFailureAction(response.error, attempts);
-          if (action === "discard") {
-            discardStoredRoom(response.error);
-            return;
-          }
-
-          if (action === "pause") {
-            setStoredRoomRecovery({
-              status: "failed",
-              message: "ルームへの再接続を一時停止しました。接続を確認して再試行してください。"
-            });
-            return;
-          }
-
-          const delay = getStoredRoomRejoinDelayMs(attempts);
-          setStoredRoomRecovery({
-            status: "reconnecting",
-            message: `再接続に失敗しました。約 ${Math.ceil(delay / 1000)} 秒後に再試行します。`
-          });
-          storedRoomRetryTimerRef.current = window.setTimeout(() => {
-            storedRoomRetryTimerRef.current = null;
-            if (socketRef.current !== socket) {
-              return;
-            }
-            attemptStoredRoomJoinRef.current(socket);
-          }, delay);
-        }
-      );
-    },
-    [clearPracticeState, clearStoredRoomRetryTimer, discardStoredRoom, resetTyping, updateGuestSession]
-  );
-
-  useEffect(() => {
-    attemptStoredRoomJoinRef.current = attemptStoredRoomJoin;
-  }, [attemptStoredRoomJoin]);
-
-  const retryStoredRoomJoin = useCallback(() => {
-    const storedRoomCode = storedRoomCodeRef.current;
-    if (!storedRoomCode) {
-      setStoredRoomRecovery({ status: "idle", message: "" });
-      return;
+    actions: {
+      setStoredRoomRecovery,
+      setError,
+      setPlayerId,
+      setRoom,
+      setResult,
+      resetTyping,
+      updateGuestSession,
+      clearPracticeState,
+      connectRoomSocket,
+      disconnectCurrentSocket
     }
-
-    storedRoomJoinAttemptsRef.current = 0;
-    setStoredRoomRecovery({ status: "reconnecting", message: "保存済みルームへ再接続しています…" });
-    const socket = socketRef.current;
-
-    if (socket && socketModeRef.current === "room" && socket.isConnected()) {
-      attemptStoredRoomJoinRef.current(socket);
-      return;
-    }
-
-    connectRoomSocket(storedRoomCode);
-  }, [connectRoomSocket]);
+  });
 
   const startPractice = useCallback(() => {
     const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
@@ -1665,12 +1562,7 @@ export default function HomePage() {
     if (socket && room) {
       socket.emit("room:leave", { roomCode: room.roomCode });
     }
-    clearStoredRoomRetryTimer();
-    storedRoomCodeRef.current = null;
-    storedRoomJoinAttemptsRef.current = 0;
-    storedRoomJoinInFlightRef.current = false;
-    window.localStorage.removeItem(ROOM_CODE_KEY);
-    setStoredRoomRecovery({ status: "idle", message: "" });
+    resetStoredRoomRecovery({ removeStoredCode: true });
     setHomeMode(null);
 
     disconnectCurrentSocket();
@@ -1680,7 +1572,7 @@ export default function HomePage() {
     clearPracticeState();
     resetTyping();
     setExitRequest(null);
-  }, [clearPracticeState, clearStoredRoomRetryTimer, disconnectCurrentSocket, resetTyping, room]);
+  }, [clearPracticeState, disconnectCurrentSocket, resetStoredRoomRecovery, resetTyping, room]);
 
   const setReady = () => {
     if (!realtimeConfigured || !socketRef.current || !room || !currentPlayer) {
