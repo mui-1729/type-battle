@@ -1,6 +1,6 @@
 # 現在の実装状態
 
-2026-08-20 時点の `main` で「実際に何が動くか」をまとめた正本です。
+2026-08-22 時点の `main`（`0eb93af`）で「実際に何が動くか」をまとめた正本です。
 
 Open PR の変更は、merge されるまで実装済みには含めません。
 
@@ -106,6 +106,24 @@ Open PR の変更は、merge されるまで実装済みには含めません。
 - `/ready`
 - `/metrics`
 
+### Safety / moderation / legal
+
+- nickname の長さ、危険な不可視文字、URL / 連絡先、運営詐称名、基本 NG word の validation
+- Result から対戦相手を報告する GitHub Issue 作成導線
+- browser の localStorage に最大 100 人を保存する block / unblock 導線
+- Quick Match queue engine で block list を双方向に照合する基盤
+- terms / privacy / contact pages と E2E
+
+報告のサーバー側保存・審査 console・自動制裁までを実装したものではありません。
+
+### Matchmaking foundation
+
+- **#242 の一部として queue engine を実装済み**
+- guest ID の重複 ticket 防止、oldest compatible pair、cancel、disconnect / timeout cleanup
+- block list の双方向照合と queue engine unit test
+
+Gateway protocol、RoomAuthority bootstrap、Web の Searching / Cancel / matched UI、2 browser E2E、timeout 時の COM fallback は未完成のため、**完全な Quick Match #242 は進行中**です。
+
 ### Test / CI
 
 - GitHub Actions CI
@@ -125,7 +143,12 @@ Open PR の変更は、merge されるまで実装済みには含めません。
 - Cloudflare Worker の手動 deploy workflow
 - CI 成功済み commit SHA を指定する production deploy 経路
 - deploy 後 health / WebSocket smoke の仕組み
+- Preview / Production の Realtime 設定を分離する構成
+- production dependency audit の CI gate
+- Production Realtime origin のみに絞る CSP
 - `main` branch protection
+
+2026-08-22 の運用監査では、Production Worker は `ae61854` で `main` より 34 commits 遅れており、Preview Worker は未デプロイです。これはコードの未実装ではなく、#167 / #168 / #232 で解消・確認する外部運用上の drift です。
 
 ## 外部設定・運用確認が残っているもの
 
@@ -138,12 +161,9 @@ Open PR の変更は、merge されるまで実装済みには含めません。
 
 ### P1
 
-- **#168** Preview 専用 Realtime endpoint の実デプロイ・結合確認
-- **#193** production dependency audit の CI 組み込み
+- **#168** Preview 専用 Realtime 構成は実装済み。Cloudflare credentials の設定、実デプロイ、Vercel Preview からの 2 client 結合確認が残る
 
-### P2
-
-- **#196** Production CSP の接続先制限
+#193 の production dependency audit と #196 の Production CSP 接続先制限は `main` に実装済みです。
 
 ## 進行中のリファクタ
 
@@ -157,9 +177,9 @@ Open PR の変更は、merge されるまで実装済みには含めません。
 
 ## Public Beta 以降の未実装・未完成領域
 
-- public lobby / random matchmaking
-- nickname moderation
-- report / block
+- 完全な Quick Match #242（queue engine は実装済み）と public lobby
+- nickname moderation の辞書・運用強化（基本 filter は実装済み）
+- report のサーバー側受付・審査運用（Issue 導線と local block は実装済み）
 - anti-cheat / suspicious result handling の本格運用
 - 完成版の日本語タイピングモード
 - spectator mode
@@ -168,8 +188,8 @@ Open PR の変更は、merge されるまで実装済みには含めません。
 - friend / invite flow
 - tournaments
 - replay
-- terms / privacy / contact
-- public beta 向け load test
+- legal / contact の本番公開確認と運用（pages は実装済み）
+- public beta 向け load baseline（Free tier hard cap 内）
 - abuse monitoring / alerting
 - 運営からのお知らせ・障害通知 UI
 

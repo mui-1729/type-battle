@@ -116,7 +116,7 @@ GitHub Actions の `ci` を `main` の required status check にします。
 
 ### Dependency audit
 
-#193 / PR #221 で、production dependency に high / critical vulnerability が入った場合の CI gate を追加中です。
+#193 の production dependency audit gate は `main` に実装済みです。production dependency に high / critical vulnerability が入った場合に CI で検知します。
 
 方針:
 
@@ -142,7 +142,7 @@ Web は Vercel の Git integration を使います。
 
 Production と Preview で Realtime backend を混ぜないことを原則にします。
 
-Preview 専用 Realtime endpoint は #168 で整備中です。
+Preview 専用 Realtime 構成は #168 として `main` に実装済みですが、credentials が未設定のため Preview Worker は未デプロイです。外部 deploy と 2 client 確認が残ります。
 
 ## Worker deployment
 
@@ -157,7 +157,7 @@ Worker は `.github/workflows/deploy-cloudflare-worker.yml` を使います。
 5. `/health` / WebSocket smoke を確認する
 6. `/health.commitSha` と deploy 対象 commit を照合する
 
-Production 用 Secrets / Variables の外部設定は #167 で追跡します。
+Production 用 Secrets / Variables の外部設定は #167 で追跡します。2026-08-22 時点の Production Worker は `ae61854` で `main` より 34 commits 遅れているため、#167 完了後に current `main` を deploy し、#232 で `/health.commitSha` を確認します。
 
 ## Rollback
 
@@ -201,15 +201,18 @@ storage schema を変更する場合は、前の code version が読める backw
 
 ## Public Beta 前に追加する品質ゲート
 
-- load test baseline
+- #238 load baseline（手動実行のみ。自動 stress test は禁止）
+- hard cap: 20 simultaneous rooms / 40 WebSocket connections
 - simultaneous room / connection / message rate の目安
 - cost baseline
 - abuse monitoring / alert
 - moderation flow E2E
 - public matchmaking E2E
-- terms / privacy / contact の公開確認
+- 実装済み terms / privacy / contact の公開確認
 
-Nightly / scheduled test はテスト時間と必要性を見て導入します。最初から形式的に増やすのではなく、PR CI では重すぎる検証が出た時点で分けます。
+Cloudflare Workers Free と Vercel Hobby だけを利用します。paid-only の monitoring、log drain、spend control、自動 scale-up を前提にせず、各 dashboard の usage / error を手動監視し、quota 枯渇前に新規対戦受付停止または既知の正常 deployment へ rollback します。load harness は CI、Nightly、scheduled job から自動実行しません。
+
+Nightly / scheduled test は通常の回帰テストに限り、Free tier の外部環境へ継続負荷を発生させない範囲で導入を判断します。
 
 ## Flaky test の扱い
 

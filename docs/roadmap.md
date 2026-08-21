@@ -9,7 +9,7 @@
 - Local MVP: 完了
 - 基本的な Private Beta 機能: 実装済み
 - Private Beta の Production 運用確認: **残作業あり**
-- Public Beta: 未着手の機能が多い
+- Public Beta: safety / legal / queue engine の基盤は実装済み。完全な Quick Match #242 と運用準備は進行中
 
 ## Phase 0: 準備 — 完了
 
@@ -67,12 +67,13 @@
 
 ### P1: 開発・運用品質
 
-- [ ] **#168** Preview 用 Realtime endpoint を Production から分離して実運用確認する
-- [ ] **#193** production dependency audit を CI に組み込む
+- [x] **#168（実装）** Preview 用 Realtime endpoint / Worker / Durable Object を Production から分離する
+- [ ] **#168（外部確認）** Preview Worker を実デプロイし、Vercel Preview から 2 client で確認する
+- [x] **#193** production dependency audit を CI に組み込む
 
 ### P2: Defense in depth / 保守性
 
-- [ ] **#196** Production CSP の接続先を限定する
+- [x] **#196** Production CSP の接続先を Realtime origin へ限定する
 - [ ] **#197** Web の Realtime / game state 責務を分割する
 - [ ] **#198** Worker の状態遷移 / persistence 責務を分割する
 
@@ -84,16 +85,18 @@ P2 は Private Beta の機能公開を不必要に止めない範囲で段階的
 
 ### 公開に必要
 
-- [ ] terms / privacy / contact
-- [ ] nickname moderation
-- [ ] report / block flow
+- [x] terms / privacy / contact pages
+- [x] nickname の基本 moderation
+- [x] report / local block flow
+- [ ] legal / moderation / report の本番確認と運用整備
 - [ ] anti-cheat / suspicious result handling
 - [ ] abuse monitoring / alerting
-- [ ] load test と容量目安
+- [ ] **#238** Free tier に制限した load baseline と容量目安（自動 stress test は行わない）
 
 ### 対戦相手を見つける機能
 
-- [ ] quick match
+- [x] **#242 / #243 の一部** Quick Match queue engine
+- [ ] **#242** Gateway / room bootstrap / Web UX / E2E を含む完全な Quick Match
 - [ ] public lobby または random matchmaking
 - [ ] public / private room visibility
 
@@ -120,7 +123,7 @@ P2 は Private Beta の機能公開を不必要に止めない範囲で段階的
 
 Public Beta でスケール対策が必要になっても、Redis を前提条件にはしません。
 
-まず Cloudflare Durable Objects の room 分割、gateway sharding、実測した load / cost を確認し、必要性が出た時点で Queue / D1 / Redis 等を比較します。
+Cloudflare Workers Free と Vercel Hobby の範囲だけを使います。まず 20 rooms / 40 sockets 以下の手動 load harness で room 分割、gateway、load / quota を確認し、上限到達前の監視・受付停止・rollback を整えます。paid-only feature、従量課金への自動移行、Redis 等を前提にしません。
 
 ## 優先順位のルール
 

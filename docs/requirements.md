@@ -85,9 +85,9 @@ MVP の主要要件は実装済みです。
 
 公開の絶対条件とは分けて追跡します。
 
-- **#168** Preview 専用 Realtime 環境
-- **#193** production dependency audit の CI 組み込み
-- **#196** CSP の接続先制限
+- **#168** Preview 専用 Realtime 構成は実装済み。外部 deploy / 2 client 確認が残る
+- **#193** production dependency audit の CI 組み込みは実装済み
+- **#196** CSP の接続先制限は実装済み
 - **#197** Web の責務分割
 - **#198** Worker の責務分割
 
@@ -97,23 +97,26 @@ MVP の主要要件は実装済みです。
 
 ### 公開運用
 
-- 利用規約を用意する
-- プライバシー方針を用意する
-- 問い合わせ先を用意する
+- [x] 利用規約を用意する
+- [x] プライバシー方針を用意する
+- [x] 問い合わせ先を用意する
 - サービス状態や重大障害を案内できる
 - load / cost の目安を実測する
 - error rate / connection / abuse を監視する
 
 ### Safety / moderation
 
-- nickname の長さ・禁止語・表示安全性を強化する
-- report / block flow を用意する
+- [x] nickname の長さ・禁止語・表示安全性の基本 filter を用意する
+- [x] report / local block flow を用意する
+- report のサーバー側保存・審査・制裁運用を整える
 - event spam や不自然な入力を検知する
 - suspicious result をランキング等から除外できる
 
 ### マッチメイキング
 
-- public lobby または random / quick match を用意する
+- [x] Quick Match queue engine を用意する
+- Gateway / room bootstrap / Web UX / E2E を含む完全な Quick Match #242 を用意する
+- public lobby を用意する場合は Quick Match と役割を分ける
 - public / private room の境界を明確にする
 - full / playing / expired room を誤って案内しない
 
@@ -145,7 +148,7 @@ MVP の主要要件は実装済みです。
 - CI: GitHub Actions
 - E2E: Playwright
 
-Redis は必須要件ではありません。Public Beta の負荷実測後に、Durable Object の分割・Queue・D1・Redis 等を比較します。
+Cloudflare Workers Free と Vercel Hobby のみを使用し、paid-only feature や従量課金を前提にしません。負荷確認は自動 stress test にせず、手動 harness を最大 20 rooms / 40 sockets に制限します。quota 枯渇前の監視・受付停止・rollback を先に定義し、外部サービス追加は無課金条件を満たす場合だけ別途判断します。
 
 ## 未決定事項
 
@@ -153,7 +156,7 @@ Private Beta を止める未決定事項はありません。
 
 Public Beta 以降については、実利用データを見て次を決めます。
 
-- public lobby と quick match のどちらを先に出すか
+- Quick Match #242 完了後に public lobby も必要か
 - authenticated account をいつ導入するか
 - Japanese typing mode の入力仕様
 - ranking / rating の方式

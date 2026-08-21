@@ -16,15 +16,12 @@
 ### P1 / 開発・運用品質
 
 - **#168 `chore(vercel): Preview用Realtime endpointを分離する`**
-  - PR #220 で実装中
-  - Preview Worker の実デプロイと 2 client 確認が残る
-- **#193 `security(deps): 本番ビルドのhigh脆弱性を分類・解消し再発防止する`**
-  - PR #221 で production dependency audit の CI 化を進める
+  - Preview Worker / Durable Object / Vercel 接続分離は `main` に実装済み
+  - credentials 設定、Preview Worker の実デプロイ、2 client 確認が残る
 
 ### P2 / Security・保守性
 
-- **#196 `security(web): ProductionのCSPを必要な接続先へ絞り込む`**
-  - PR #219 で対応中
+- **#196** は Production CSP を Realtime origin へ限定する実装が `main` に merge 済み
 - **#197 `refactor(web): page.tsxのRealtime・ゲーム状態管理を責務ごとに分割する`**
   - PR #224 / #226 で段階的に進行中
 - **#198 `refactor(worker): room-authority.tsの対戦状態遷移と永続化責務を分割する`**
@@ -44,6 +41,12 @@
 - guest session
 - structured logging / basic monitoring
 - Worker deploy workflow
+- #193 production dependency audit gate
+- #196 Production CSP restriction
+- nickname の基本 moderation
+- report / local block flow
+- terms / privacy / contact pages
+- Quick Match queue engine（完全な #242 は進行中）
 
 同じ目的の Issue を重複して作らないようにします。
 
@@ -53,17 +56,18 @@ Public Beta へ進む段階で、次を 1 feature / 1 acceptance criteria に近
 
 ### 公開準備
 
-- `docs(legal): add terms privacy and contact pages`
-  - 利用規約、プライバシー、問い合わせ先
-- `test(load): define and run public beta load baseline`
-  - simultaneous rooms / connections / typing events / cost を測定
+- `test(legal): validate terms privacy and contact in production`
+  - 実装済み pages の本番表示、リンク、問い合わせ運用を確認
+- **#238** `test(load): define and run public beta load baseline`
+  - Cloudflare Workers Free / Vercel Hobby のみを対象に、最大 20 rooms / 40 sockets で手動実行する
+  - 自動 stress test は行わず、quota 監視、受付停止、rollback 条件を記録する
 - `feat(monitoring): add abuse and service alerts`
   - error / connection / abuse の運用アラート
 
 ### Matchmaking / lobby
 
-- `feat(matchmaking): add quick match queue`
-  - waiting player をマッチし、必要なら COM fallback
+- **#242** `feat(matchmaking): complete quick match`
+  - queue engine は実装済み。Gateway protocol、room bootstrap、Web UX、COM fallback、E2E が残る
 - `feat(lobby): add public room list`
   - public room のみ表示し、full / playing / expired を除外
 - `feat(lobby): add room visibility setting`
@@ -71,12 +75,10 @@ Public Beta へ進む段階で、次を 1 feature / 1 acceptance criteria に近
 
 ### Moderation / abuse
 
-- `feat(moderation): add nickname filtering`
-  - 長さ、禁止文字、NG word、表示安全性
-- `feat(report): add report opponent flow`
-  - reason と room context を保存
-- `feat(block): avoid rematching blocked players`
-  - block した相手を再マッチ対象から外す
+基本 nickname filter、GitHub Issue への report 導線、local block、queue engine の block 照合は実装済みです。今後は辞書更新・審査・保存・制裁を運用要件として切り出します。
+
+- `feat(moderation-ops): operate nickname and player reports`
+  - report のサーバー側受付、retention、審査、解除、監査を定義
 - `feat(anti-cheat): flag suspicious results`
   - 異常 WPM / automated input 等を suspicious として扱う
 

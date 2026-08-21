@@ -22,10 +22,9 @@ Private Beta を「機能がある状態」から「本番環境で公開確認�
 
 1. **#167** Cloudflare 本番デプロイ用 Secrets / Variables を設定する
 2. **#232** Production で 5〜10 試合を含む Private Beta 受け入れ確認を行う
-3. **#168** Preview 用 Realtime 環境を Production から分離して実運用確認する
-4. **#193** 本番依存の脆弱性監査を CI に組み込む
+3. **#168** `main` に実装済みの Preview 用 Realtime 分離を外部環境へ deploy して確認する
 
-Security / 保守性の改善として、#196、#197、#198 も進行中です。
+#193 の本番依存監査と #196 の Production CSP 制限は `main` に実装済みです。#197 / #198 の責務分割は段階的に進行中です。
 
 ## ドキュメントの役割分担
 
@@ -70,11 +69,11 @@ Security / 保守性の改善として、#196、#197、#198 も進行中です�
 
 ## Cloudflare 関連資料
 
-次は Cloudflare 移行時の設計・監査記録です。**現在の構成や現在の料金・上限を判断する資料ではありません。** 現在の構成は [architecture.md](architecture.md) を優先してください。
+次は Cloudflare 移行時の設計・監査記録です。現在の構成は [architecture.md](architecture.md)、2026-08-22 時点で再監査した Free plan の上限と運用制約は [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md) を優先してください。
 
 - [cloudflare-migration-plan.md](cloudflare-migration-plan.md): 完了済みの Realtime 移行記録
 - [cloudflare-issue-tracker.md](cloudflare-issue-tracker.md): 移行 Issue の分担・依存関係の履歴
-- [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md): 移行時点の容量 / Free Tier 監査記録
+- [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md): Free plan の容量監査と無課金運用の hard cap
 
 ## 更新ルール
 

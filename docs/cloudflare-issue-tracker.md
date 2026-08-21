@@ -76,6 +76,8 @@ Cloudflare Realtime 移行は完了しています。
 - #168 Preview Realtime environment の実デプロイ・確認
 - #232 Production での Private Beta 受け入れ確認
 
+2026-08-22 時点では Production Worker が `ae61854`（`main` より 34 commits 遅れ）、Preview Worker は未デプロイです。#167 / #232 は Production 運用の blocker で、#168 は分離実装後の外部 deploy / 確認待ちです。
+
 ## 関連
 
 - [cloudflare-migration-plan.md](cloudflare-migration-plan.md): 移行時の設計判断と結果

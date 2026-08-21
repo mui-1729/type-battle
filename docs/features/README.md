@@ -67,8 +67,9 @@
 
 1. #167 Production deploy Secrets / Variables
 2. #232 Production acceptance
-3. #168 Preview Realtime environment
-4. #193 dependency audit gate
+3. #168 実装済み Preview Realtime environment の実デプロイ・2 client 確認
+
+#193 dependency audit gate と #196 CSP restriction は `main` に実装済みです。
 
 ### Private Beta 中
 
@@ -78,11 +79,10 @@ Security / refactor は #196 / #197 / #198 を段階的に進めます。
 
 ### Public Beta 前
 
-1. terms / privacy / contact
-2. moderation / report / block
-3. anti-cheat / abuse monitoring
-4. load / cost baseline
-5. public lobby / quick match
+1. 実装済み terms / privacy / contact と moderation / report / local block の本番確認・運用整備
+2. anti-cheat / abuse monitoring
+3. Free tier hard cap 内の load / cost baseline
+4. 完全な Quick Match #242（queue engine は実装済み）/ public lobby
 6. identity / match history
 7. ranking / rating
 

@@ -22,7 +22,7 @@ Persistence: Durable Object SQLite storage
 CI: GitHub Actions
 ```
 
-Redis は Private Beta の必須要件ではありません。
+Cloudflare Workers Free と Vercel Hobby のみを使用します。Redis、paid-only monitoring / log drain / spend control、自動 scale-up、従量課金への移行を前提にしません。
 
 ## 環境変数 / Secrets
 
@@ -35,7 +35,7 @@ NEXT_PUBLIC_FEEDBACK_ISSUE_URL=...
 
 Production では Production Worker、Preview では Preview 専用 Worker を使い、環境を混在させません。
 
-Preview の分離は #168 で追跡しています。
+Preview の構成分離は #168 として `main` に実装済みです。2026-08-22 時点では Preview Worker が存在せず、credentials 設定後の実デプロイと 2 client 確認が残ります。
 
 ### Worker
 
@@ -56,6 +56,16 @@ CLOUDFLARE_WORKER_URL
 実値は Issue、PR、repository file、workflow log に書きません。
 
 この外部設定は #167 で追跡します。
+
+## 2026-08-22 deployment audit
+
+- Production Worker の `/health.commitSha`: `ae61854`
+- current `main`: `0eb93af`
+- drift: Production Worker は `main` より 34 commits 遅れ
+- Preview Worker: 未デプロイ
+- operational blockers: #167（Production credentials / variables）→ #232（Production acceptance）
+
+#193 dependency audit、#196 CSP 制限、#168 Preview 分離のコードは `main` にあります。外部環境へ反映・検証済みとは扱いません。
 
 ## Production deploy flow
 
@@ -121,6 +131,17 @@ npm run test:e2e
 - Production secret が repository / log に露出していない
 - Worker deploy が必要な変更では deploy 済み commit を確認する
 
+## Free tier guardrails
+
+- 外部 load harness は明示 URL と confirmation を必須にし、**最大 20 rooms / 40 WebSocket connections** を拒否不能な hard cap とする
+- load harness を CI / cron / Nightly から自動実行せず、無制限 stress test を行わない
+- 実行前後に Cloudflare / Vercel dashboard の usage、Worker errors、接続失敗を記録する
+- quota の警告・異常増加・error 増加を確認したら、枯渇を待たず新規実行と新規対戦受付を停止する
+- rollback 対象 commit / deployment と連絡手順を実行前に決める
+- Free / Hobby の枠を超える機能は「使えるはず」と仮定せず、設計を縮退する
+
+公式上限と出典は [../cloudflare-free-tier-audit.md](../cloudflare-free-tier-audit.md) を参照し、検証前に更新日を再確認します。
+
 ## Rollback
 
 ### Web
@@ -141,7 +162,7 @@ rollback 後の code が保存済み state を読めない変更を入れる場�
 
 Production Worker を Preview へ流用しません。
 
-#168 で:
+#168 でコード上は次を分離済みです。
 
 - Preview 用 Worker
 - Preview 用 Durable Object storage
@@ -180,11 +201,8 @@ Public Beta 前には URL の秘匿性に依存せず、利用規約・プライ
 
 ### P1
 
-- #168 Preview Realtime environment
-- #193 production dependency audit gate
+- #168 Preview Realtime environment の実デプロイ・2 client 確認（構成は実装済み）
 
-### P2
-
-- #196 CSP hardening
+#193 production dependency audit gate と #196 CSP hardening は実装済みです。
 
 機能開発とは別に、#197 / #198 の責務分割も進行しています。

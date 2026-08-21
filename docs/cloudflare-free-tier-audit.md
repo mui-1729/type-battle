@@ -1,122 +1,84 @@
-# Cloudflare Free Tier 監査記録
+# Free Tier 容量・運用監査
 
-この文書は Issue #22 で実施した、Cloudflare Realtime 移行時点の容量・コスト観点の監査記録です。
+**監査日時:** 2026-08-22 JST
+**対象:** Cloudflare Workers Free / Durable Objects Free、Vercel Hobby
+**方針:** このプロジェクトは **Cloudflare Workers Free と Vercel Hobby/free tier のみ**を使用し、paid-only feature や超過課金を前提にしません。
 
-**重要:** Cloudflare の料金・無料枠・上限値は変更される可能性があります。この文書に残る数値を現在の上限として扱わず、Public Beta や負荷試験の前には公式ドキュメントと実測値で再確認してください。
+料金・上限は変更され得ます。以下は監査日時点で取得した公式文書に基づく値であり、load baseline や公開判定の直前にリンク先を再確認します。
 
-## 監査の目的
+## 公式 hard limits
 
-Cloudflare Worker / Durable Object を Realtime backend にした場合に、Private Beta の小規模利用でどこがボトルネックになりやすいかを整理しました。
+| Service / dimension | Free tier limit verified on 2026-08-22 | Exhaustion behavior / note | Official source |
+| --- | ---: | --- | --- |
+| Cloudflare Workers requests | 100,000 requests/day | 00:00 UTC reset。超過時は Error 1027 | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/#request-limits) |
+| Workers CPU per HTTP request | 10 ms | 継続的超過は実行終了、Error 1102 | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/#cpu-time) |
+| Workers memory | 128 MB/isolate | 超過時に request cancellation / Error 1102 の可能性 | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/#memory) |
+| Workers subrequests | 50/invocation | Free plan hard limit | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/#subrequests) |
+| Durable Objects requests | 100,000/day | HTTP、RPC session、WebSocket message、alarm を含む。超過した種類の操作は失敗し、00:00 UTC reset | [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/#durable-objects) |
+| Durable Objects duration | 13,000 GB-s/day | Free allocation。超過した種類の操作は失敗 | [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/#durable-objects) |
+| Durable Objects SQLite reads | 5,000,000 rows/day | Free plan は SQLite-backed Durable Objects のみ | [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/#sqlite-storage-backend) |
+| Durable Objects SQLite writes | 100,000 rows/day | alarm と delete も write として数える | [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/#sqlite-storage-backend) |
+| Durable Objects SQLite stored data | 5 GB/account、1 GB/object | object 上限到達後は write が `SQLITE_FULL`、read / delete は継続可能 | [DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/#sqlite-storage-backend) / [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/#sqlite-storage-backend) |
+| Vercel Hobby Edge Requests | 1,000,000/month | Hobby は included usage 超過時に pause | [Vercel Hobby](https://vercel.com/docs/plans/hobby) / [Account plans](https://vercel.com/docs/plans#managing-plan-usage) |
+| Vercel Hobby Fast Data Transfer | 100 GB | Hobby included resource | [Account plans](https://vercel.com/docs/plans#hobby) |
+| Vercel Hobby deployments | 100/day | Hobby plan limit | [Vercel Hobby](https://vercel.com/docs/plans/hobby) |
 
-当時の主な監査対象:
+Vercel Hobby は公式に **non-commercial, personal use only** とされています。超過時は通常、その機能を再利用できるまで 30 日待つ必要があり、Hobby plan は free-tier usage 超過時に pause されます。商用利用や継続可用性が必要になった場合、無料枠のまま可能とは判断せず、公開範囲を縮小または停止して方針を再検討します。
 
-- Workers Free plan
-- Durable Objects
-- Durable Object storage
-- typing input の message 数
-- COM timer
-- persistence write
+Durable Objects の WebSocket は接続作成に request が必要です。incoming message は compute request の計算で 20:1、outgoing message と protocol ping は request 課金対象外ですが、この比率だけから容量を保証しません。application message、接続時間、hibernation、storage write を dashboard の実測で確認します。
 
-## 現在も有効な前提
+## Project hard caps
 
-実装の詳細は変わっても、次の考え方は現在も有効です。
+公式上限より十分低い段階で停止するため、#238 の load harness に次の **project hard cap** を適用します。
 
-- 2 人対戦では入力イベントが短時間に多く発生する
-- room gameplay は room code ごとの Durable Object に分散する
-- client command には ack / room update が伴う
-- COM 戦では人間の入力以外に server timer の処理が発生する
-- typing hot path に長期保存処理を入れない
-- room 横断のランキング・検索は room authority と別責務にする
+| Item | Project cap |
+| --- | ---: |
+| Simultaneous rooms | 20 |
+| WebSocket connections | 40 |
+| Execution | 明示 URL + confirmation を指定した手動実行のみ |
+| Automation | CI / cron / Nightly からの実行禁止 |
+| Test type | baseline のみ。自動 stress / soak / unbounded test 禁止 |
 
-## 1 試合あたりの概算モデル
+この 20 rooms / 40 sockets は Free tier の安全容量を保証する数値ではなく、誤実行の被害を限定するための上限です。1 match 当たりの requests、messages、duration、rows read / written が未計測なので、この cap 内でも quota を使い切る可能性があります。
 
-移行時の簡易モデルでは、Human-only の Race を次のように見積もりました。
+## Monitoring and rollback before exhaustion
 
-- 2 人対戦
-- 1 人あたり約 150 keydown
-- typing command は合計約 300 件
-- start / countdown / result / rematch などを加えて約 310〜340 command
+1. 実行前に Cloudflare / Vercel dashboard の当日・当月 usage と error を記録します。
+2. 対象 URL、commit SHA、rooms、sockets、試合数、開始・終了時刻を結果へ保存します。
+3. request、DO duration、rows written、Edge Requests、Fast Data Transfer、error rate の異常増加を確認したら追加実行を止めます。
+4. quota 枯渇を待たず、新規対戦受付を停止するか公開範囲を縮小します。
+5. Worker は直前の既知 commit、Web は既知の正常 deployment へ rollback し、health / WebSocket smoke を再確認します。
+6. paid-only alerting、Log Drains、Spend Management、自動 scale-up は利用可能と仮定しません。Free dashboard / email notification と手動 runbook で運用します。
 
-これは容量を比較するための**粗いモデル**であり、Cloudflare の課金 request 数と 1:1 で一致すると保証するものではありません。
+## Current deployment risk
 
-実際の判断では Worker / Durable Object の metrics と billing dashboard を優先します。
+2026-08-22 時点で Production Worker は `ae61854`、current `main` は `0eb93af` で、**34 commits の drift** があります。Preview Worker は未デプロイです。
 
-## COM 戦
+したがって現時点では容量試験より先に次を完了します。
 
-COM 戦では bot timer が追加されるため、Human-only より処理回数が増えます。
+1. #167 Production deploy credentials / variables
+2. current `main` の deploy と `/health.commitSha` 照合
+3. #232 Production acceptance
+4. #168 Preview Worker deploy / 2 client validation
 
-移行時には 500 ms tick を前提としていましたが、現在の実装値や Cloudflare の課金単位を固定前提にしません。
+Production / Preview の外部状態は repository 内のコードだけでは更新できません。credential 値は docs、Issue、PR、log に記録しません。
 
-Public Beta 前に確認すること:
+## Workload model to measure
 
-- 1 試合あたりの bot tick 数
-- bot tick 中に state change がない場合の無駄な処理
-- room 数が増えたときの timer コスト
-- tick 間隔を変更したときのゲーム体験
+- 1 match 当たりの Worker / Durable Object requests
+- incoming WebSocket messages と connection churn
+- Durable Object duration と hibernation
+- room snapshot / result / guest session の rows read / written
+- COM timer の invocation / duration
+- singleton Gateway の queue latency
+- Vercel Edge Requests / Fast Data Transfer
 
-## Persistence
+過去の「2 人 × 約 150 keydown、約 310〜340 command」という値は粗い設計モデルにすぎず、Cloudflare の課金 request と 1:1 ではありません。容量判断には dashboard の実測を使います。
 
-永続化では次を原則にします。
+## Related documents
 
-### Hot path に入れないもの
-
-- typing 1 回ごとの長期ログ保存
-- typing 1 回ごとの分析 DB write
-- progress event の無制限な履歴保存
-
-### 低頻度で保存するもの
-
-- room snapshot
-- guest session
-- match result
-
-room snapshot の保存頻度は Realtime の正しさと storage write の両方を見ながら調整します。
-
-## 当時の結論
-
-移行時点では、Private Beta の小規模利用なら Cloudflare Free で検証する余地があると判断しました。
-
-一方、Public Beta では次を推測だけで決めず実測する必要があります。
-
-- 1 試合あたりの Worker / Durable Object 使用量
-- 同時 room 数
-- 同時 WebSocket 接続数
-- typing command / broadcast 数
-- COM timer の使用量
-- storage read / write
-- 1 日・1 か月あたりの費用
-
-## 最適化候補
-
-実測で必要性が確認された場合に検討します。
-
-- progress update / broadcast の coalescing
-- 同じ state を送る不要な broadcast の削減
-- bot timer 間隔の調整
-- persistence debounce の調整
-- gateway に集中する処理の分散
-
-これらは「昔の監査で候補に挙がった」という理由だけで先に実装しません。ユーザー体験・負荷・コストの実測を Issue 化の根拠にします。
-
-## Public Beta 前の再監査
-
-Public Beta へ進む前に、別途 load / cost baseline を作ります。
-
-再監査では最低限次を記録します。
-
-1. 監査日
-2. 使用 plan
-3. Cloudflare 公式の当日時点の上限 / 料金
-4. 対象 commit
-5. 1 match の実測使用量
-6. 同時接続試験の条件
-7. 想定 Daily / Monthly usage
-8. 最適化が必要になる閾値
-
-## 関連
-
-- [architecture.md](architecture.md): 現在の構成
-- [current-implementation.md](current-implementation.md): 現在の実装
-- [cloudflare-migration-plan.md](cloudflare-migration-plan.md): 移行記録
-- [features/feature-backlog.md](features/feature-backlog.md): 今後の Issue 候補
-- Issue #22（完了済み）
+- [architecture.md](architecture.md): current architecture
+- [current-implementation.md](current-implementation.md): current `main` implementation
+- [features/deployment-private-beta.md](features/deployment-private-beta.md): deploy / rollback runbook
+- [quality-ci-cd.md](quality-ci-cd.md): test and release gates
+- [roadmap.md](roadmap.md): #167 / #168 / #232 / #238 / #242 status

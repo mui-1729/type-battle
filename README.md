@@ -14,10 +14,9 @@ MVP と Private Beta 向けの主要機能は `main` に実装済みです。
 
 1. **#167** Cloudflare 本番デプロイ用 Secrets / Variables を設定する
 2. **#232** Production で Private Beta 受け入れ確認を行う
-3. **#168** Preview 用 Realtime endpoint の実運用確認
-4. **#193** production dependency audit の CI 組み込み
+3. **#168** 実装済みの Preview 専用 Realtime 構成を外部環境へ deploy し、2 client で確認する
 
-Security / 保守性の改善として #196 / #197 / #198 も進行中です。
+#193 の production dependency audit と #196 の Production CSP 制限は `main` に実装済みです。保守性改善の #197 / #198 は段階的に進行中です。
 
 ## 主な実装済み機能
 
@@ -53,6 +52,13 @@ Security / 保守性の改善として #196 / #197 / #198 も進行中です。
 - finish gap / max streak
 - theme / font size / reduced motion / input guide / sound
 - cosmetic customization 基盤
+
+### Safety / Public Beta foundation
+
+- nickname の基本 moderation
+- 対戦相手の report / local block 導線
+- terms / privacy / contact pages
+- Quick Match queue engine（完全な Quick Match #242 は進行中）
 
 ### Backend / operations
 
@@ -155,10 +161,9 @@ Worker の Production deploy / rollback は [docs/features/deployment-private-be
 
 Private Beta の公開確認後、Public Beta へ進む前に次を優先します。
 
-- terms / privacy / contact
-- moderation / report / block
+- 実装済みの terms / privacy / contact と moderation / report / block の本番確認・運用整備
 - anti-cheat / abuse monitoring
-- load / cost baseline
-- public lobby / quick match
+- Free tier の範囲に制限した load / cost baseline
+- 完全な Quick Match #242 と public lobby
 
 ranking、friends、spectator、完成版 Japanese typing、tournament などはその後の拡張として扱います。

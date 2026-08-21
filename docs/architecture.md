@@ -190,11 +190,13 @@ CI         -> GitHub Actions
 
 Worker は CI 成功済み commit SHA を指定する deploy workflow を持ちます。
 
-現時点の運用上の残件:
+2026-08-22 時点の運用上の残件:
 
 - #167 Production 用 Cloudflare Secrets / Variables
 - #232 Production 受け入れ確認
-- #168 Preview 専用 Realtime 環境の実運用確認
+- #168 実装済み Preview 専用 Realtime 環境の実デプロイ・確認
+- Production Worker は `ae61854` で `main` より 34 commits 遅れている
+- Preview Worker は未デプロイ
 
 ## Security
 
@@ -210,13 +212,12 @@ Worker は CI 成功済み commit SHA を指定する deploy workflow を持ち�
 
 ### Public Beta 前に強化するもの
 
-- nickname moderation
-- report / block
+- nickname 基本 moderation、report / local block、terms / privacy / contact は実装済み
+- report のサーバー側受付・審査運用
 - suspicious result / automated input 対応
 - load / abuse monitoring
-- terms / privacy / contact
 
-CSP の接続先制限は #196 で改善中です。
+Production CSP の Realtime origin 制限（#196）は実装済みです。
 
 ## Scaling
 
@@ -230,7 +231,7 @@ Redis を前提にはしません。
 - Durable Object request / storage cost
 - gateway bottleneck
 
-必要になった時点で、room sharding、Queue、D1、Redis などを比較します。
+Cloudflare Workers Free / Vercel Hobby のみを使い、paid-only feature は前提にしません。load harness は手動実行・最大 20 rooms / 40 sockets とし、quota 監視、受付停止、rollback を枯渇前に行います。別の storage / queue を検討する場合も、無課金条件と公式上限を再確認します。
 
 ## テスト戦略
 
@@ -239,7 +240,7 @@ Redis を前提にはしません。
 - Runtime: persistence / restart recovery
 - E2E: Playwright による 2 client、COM、reconnect、practice、mobile 等
 - Production acceptance: #232
-- Load: Public Beta 前に追加
+- Load: #238 で手動 harness を追加（自動 stress test なし、最大 20 rooms / 40 sockets）
 
 ## 保守上の課題
 
