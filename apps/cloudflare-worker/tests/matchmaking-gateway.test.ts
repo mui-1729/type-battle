@@ -52,13 +52,40 @@ class TestSocket {
 
 function createGateway() {
   const pending: Promise<unknown>[] = [];
+  const rooms = new Map<string, { room: Record<string, unknown> }>();
   const state = {
     blockConcurrencyWhile: async (callback: () => Promise<unknown>) => await callback(),
     waitUntil: (promise: Promise<unknown>) => {
       pending.push(promise);
     }
   } as unknown as DurableObjectState;
-  const gateway = new RealtimeGatewayDurableObject(state);
+  const namespace = {
+    getByName: (roomCode: string) => ({
+      fetch: async (request: Request) => {
+        const url = new URL(request.url);
+        if (url.pathname === "/__internal/matchmaking-bootstrap") {
+          const input = await request.json() as {
+            host: { guestId: string; nickname: string };
+            guest: { guestId: string; nickname: string };
+          };
+          rooms.set(roomCode, {
+            room: {
+              roomCode,
+              hostPlayerId: input.host.guestId,
+              status: "waiting",
+              players: [
+                { id: input.host.guestId, nickname: input.host.nickname, connected: true, isHost: true, isBot: false },
+                { id: input.guest.guestId, nickname: input.guest.nickname, connected: false, isHost: false, isBot: false }
+              ]
+            }
+          });
+          return Response.json({ ok: true }, { status: 201 });
+        }
+        return Response.json(rooms.get(roomCode) ?? { room: null });
+      }
+    })
+  } as unknown as DurableObjectNamespace;
+  const gateway = new RealtimeGatewayDurableObject(state, { ROOMS: namespace });
 
   return {
     gateway,
@@ -75,15 +102,21 @@ function matchmakingJoin(id: string, guestId: string, nickname: string, blockedG
   return {
     id,
     type: "client:matchmaking:join",
-    payload: { guestId, nickname, blockedGuestIds }
+    payload: {
+      guestId,
+      sessionId: `${guestId}-session`,
+      nickname,
+      deviceKind: "desktop",
+      blockedGuestIds
+    }
   };
 }
 
-function matchmakingCancel(id: string, guestId: string) {
+function matchmakingCancel(id: string, guestId: string, ticketId: string, sessionId = `${guestId}-session`) {
   return {
     id,
     type: "client:matchmaking:cancel",
-    payload: { guestId }
+    payload: { guestId, sessionId, ticketId }
   };
 }
 
@@ -96,7 +129,7 @@ afterEach(() => {
 });
 
 describe("RealtimeGatewayDurableObject matchmaking", () => {
-  it("matches two sockets into the same room with host and guest roles", async () => {
+  it("releases the guest only after the assigned host is verified connected", async () => {
     const { gateway, flush } = createGateway();
     const first = new TestSocket();
     const second = new TestSocket();
@@ -115,24 +148,38 @@ describe("RealtimeGatewayDurableObject matchmaking", () => {
     second.emitMessage(matchmakingJoin("join-b", "guest_b", "Bob"));
     await flush();
 
-    const firstMatched = findMessage(first, "server:matchmaking:matched");
-    const secondMatched = findMessage(second, "server:matchmaking:matched");
+    const assignedHost = findMessage(first, "server:matchmaking:assignedHost");
     const secondAck = second
       .messages()
       .find((message) => message.type === "server:ack" && message.replyTo === "join-b");
 
-    expect(firstMatched).toMatchObject({
+    expect(assignedHost).toMatchObject({
       payload: { role: "host", opponent: { id: "guest_b", nickname: "Bob" } }
     });
-    expect(secondMatched).toMatchObject({
-      payload: { role: "guest", opponent: { id: "guest_a", nickname: "Alice" } }
-    });
+    expect(findMessage(second, "server:matchmaking:matched")).toBeUndefined();
     expect(secondAck).toMatchObject({
-      payload: { ok: true, data: { status: "matched", role: "guest" } }
+      payload: { ok: true, data: { status: "waitingHost", role: "guest" } }
     });
-    expect((firstMatched?.payload as { roomCode: string }).roomCode).toBe(
-      (secondMatched?.payload as { roomCode: string }).roomCode
-    );
+
+    const hostPayload = assignedHost?.payload as { ticketId: string; matchId: string; roomCode: string };
+    first.emitMessage({
+      id: "host-ready",
+      type: "client:matchmaking:hostReady",
+      payload: { ticketId: hostPayload.ticketId, matchId: hostPayload.matchId }
+    });
+    await flush();
+
+    expect(findMessage(second, "server:matchmaking:matched")).toMatchObject({
+      payload: {
+        roomCode: hostPayload.roomCode,
+        role: "guest",
+        matchId: hostPayload.matchId,
+        opponent: { id: "guest_a", nickname: "Alice" }
+      }
+    });
+    expect(first.messages().find((message) => message.replyTo === "host-ready")).toMatchObject({
+      payload: { ok: true, data: { accepted: true } }
+    });
   });
 
   it("does not let another socket replace or cancel an existing guest ticket", async () => {
@@ -144,6 +191,8 @@ describe("RealtimeGatewayDurableObject matchmaking", () => {
 
     owner.emitMessage(matchmakingJoin("owner-join", "guest_shared", "Owner"));
     await flush();
+    const ownerAck = owner.messages().find((message) => message.replyTo === "owner-join");
+    const ownerTicketId = (ownerAck?.payload as { data: { ticketId: string } }).data.ticketId;
 
     attacker.emitMessage(matchmakingJoin("attacker-join", "guest_shared", "Attacker"));
     await flush();
@@ -151,13 +200,18 @@ describe("RealtimeGatewayDurableObject matchmaking", () => {
       attacker.messages().find((message) => message.replyTo === "attacker-join")
     ).toMatchObject({ payload: { ok: false } });
 
-    attacker.emitMessage(matchmakingCancel("attacker-cancel", "guest_shared"));
+    attacker.emitMessage(matchmakingCancel(
+      "attacker-cancel",
+      "guest_shared",
+      ownerTicketId,
+      "attacker-session"
+    ));
     await flush();
     expect(
       attacker.messages().find((message) => message.replyTo === "attacker-cancel")
     ).toMatchObject({ payload: { ok: true, data: { cancelled: false } } });
 
-    owner.emitMessage(matchmakingCancel("owner-cancel", "guest_shared"));
+    owner.emitMessage(matchmakingCancel("owner-cancel", "guest_shared", ownerTicketId));
     await flush();
     expect(owner.messages().find((message) => message.replyTo === "owner-cancel")).toMatchObject({
       payload: { ok: true, data: { cancelled: true } }

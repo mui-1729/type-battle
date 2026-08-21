@@ -45,6 +45,11 @@ import {
   summarizeMatchPlayers,
   type MatchFinalizeReason
 } from "./match-observability.js";
+import {
+  createMatchmakingRoomBootstrapSnapshot,
+  MATCHMAKING_ROOM_BOOTSTRAP_PATH,
+  MATCHMAKING_ROOM_CLEANUP_PATH
+} from "./matchmaking-room-bootstrap.js";
 import { normalizeRoomCode, resolveRoomRoute } from "./room-routing.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
@@ -278,6 +283,14 @@ export class RoomAuthorityDurableObject {
     await this.ready;
 
     const url = new URL(request.url);
+
+    if (url.pathname === MATCHMAKING_ROOM_BOOTSTRAP_PATH) {
+      return this.handleMatchmakingBootstrapRequest(request);
+    }
+    if (url.pathname === MATCHMAKING_ROOM_CLEANUP_PATH) {
+      return this.handleMatchmakingCleanupRequest(request);
+    }
+
     const route = resolveRoomRoute(url.pathname);
 
     if (route?.roomCode) {
@@ -303,6 +316,99 @@ export class RoomAuthorityDurableObject {
     }
 
     return new Response("Not found", { status: 404 });
+  }
+
+  private async handleMatchmakingBootstrapRequest(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    let input: unknown;
+    try {
+      input = await request.json();
+    } catch {
+      return new Response("Invalid matchmaking bootstrap", { status: 400 });
+    }
+
+    let response = new Response("Matchmaking bootstrap failed", { status: 500 });
+    await this.enqueueRoomOperation("matchmaking-bootstrap", async () => {
+      if (this.room) {
+        response = new Response("Room already exists", { status: 409 });
+        return;
+      }
+
+      try {
+        const snapshot = createMatchmakingRoomBootstrapSnapshot(input as Parameters<
+          typeof createMatchmakingRoomBootstrapSnapshot
+        >[0]);
+        this.applyPersistedRoomSnapshot(snapshot);
+        const room = this.room as InternalRoom | null;
+        if (!room) {
+          response = new Response("Invalid matchmaking bootstrap", { status: 400 });
+          return;
+        }
+
+        await this.persistRoom(room.roomCode);
+        await this.scheduleMaintenanceAlarm();
+        response = Response.json({ ok: true, room: toPublicRoom(room) }, { status: 201 });
+      } catch {
+        response = new Response("Invalid matchmaking bootstrap", { status: 400 });
+      }
+    });
+
+    return response;
+  }
+
+  private async handleMatchmakingCleanupRequest(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return new Response("Method not allowed", { status: 405 });
+    }
+    let input: unknown;
+    try {
+      input = await request.json();
+    } catch {
+      return new Response("Invalid matchmaking cleanup", { status: 400 });
+    }
+    if (!input || typeof input !== "object") {
+      return new Response("Invalid matchmaking cleanup", { status: 400 });
+    }
+    const candidate = input as { roomCode?: unknown; hostGuestId?: unknown; guestGuestId?: unknown };
+    if (
+      typeof candidate.roomCode !== "string" ||
+      typeof candidate.hostGuestId !== "string" ||
+      typeof candidate.guestGuestId !== "string"
+    ) {
+      return new Response("Invalid matchmaking cleanup", { status: 400 });
+    }
+
+    let response = new Response(null, { status: 204 });
+    await this.enqueueRoomOperation("matchmaking-cleanup", async () => {
+      const room = this.room as InternalRoom | null;
+      if (!room) return;
+      const expectedIds = new Set([candidate.hostGuestId as string, candidate.guestGuestId as string]);
+      const actualIds = new Set([...room.players.keys()]);
+      if (
+        normalizeRoomCode(room.roomCode) !== normalizeRoomCode(candidate.roomCode as string) ||
+        room.status !== "waiting" ||
+        actualIds.size !== expectedIds.size ||
+        [...expectedIds].some((id) => !actualIds.has(id))
+      ) {
+        response = new Response("Room ownership mismatch", { status: 409 });
+        return;
+      }
+
+      for (const [socketId, socket] of [...this.sockets.entries()]) {
+        socket.close(1012, "Matchmaking handoff expired.");
+        this.detachSocket(socketId);
+      }
+      this.room = null;
+      this.playerSessions.clear();
+      this.reactionTimestamps.clear();
+      this.clearRoomTimers();
+      await this.state.storage.delete(ROOM_STORAGE_KEY);
+      await this.scheduleMaintenanceAlarm();
+    });
+    return response;
   }
 
   async alarm(): Promise<void> {

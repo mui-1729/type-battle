@@ -20,6 +20,9 @@ import {
 } from "@type-battle/shared";
 import type {
   EquipmentSelection,
+  MatchmakingAssignedHostPayload,
+  MatchmakingMatchedPayload,
+  MatchmakingTimeoutPayload,
   MatchRule,
   MatchResult,
   PlayerResult,
@@ -27,6 +30,7 @@ import type {
   QuickReaction,
   RoomState
 } from "@type-battle/shared";
+import { loadBlockedPlayers } from "../lib/blocked-players";
 import { GameHeader } from "./_components/game-header";
 import { HomeModeMenu } from "./_components/home-mode-menu";
 import { SoloModeMenu } from "./_components/solo-mode-menu";
@@ -151,6 +155,12 @@ const DAILY_CHALLENGE_RESET_TIME_FORMATTER = new Intl.DateTimeFormat("ja-JP", {
 type SoloSetupView = "menu" | "practice" | "daily" | "mistakes";
 type ExitRequest = "room" | "practice";
 type CustomizationView = "shop" | "equipment";
+type QuickMatchPhase = "idle" | "searching" | "waitingHost" | "joiningRoom" | "timeout" | "error";
+type QuickMatchHandoff = {
+  role: "host" | "guest";
+  ticketId: string;
+  matchId: string;
+};
 
 const REALTIME_TRANSPORT: RealtimeTransport = "cloudflare";
 const CLOUDFLARE_REALTIME_URL = process.env.NEXT_PUBLIC_CLOUDFLARE_REALTIME_URL?.trim() ?? "";
@@ -159,6 +169,8 @@ const ROOM_CODE_KEY = "type-battle:room-code";
 
 export default function HomePage() {
   const socketRef = useRef<ClientSocket | null>(null);
+  const matchmakingSocketRef = useRef<ClientSocket | null>(null);
+  const quickMatchHandoffRef = useRef<QuickMatchHandoff | null>(null);
   const [socketMode, setSocketMode] = useState<"practice" | "room" | null>(null);
   const settingsRef = useRef(DEFAULT_PLAYER_SETTINGS);
   const nicknameRef = useRef(DEFAULT_PLAYER_SETTINGS.nickname);
@@ -176,6 +188,11 @@ export default function HomePage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [joinPending, setJoinPending] = useState(false);
   const [createPending, setCreatePending] = useState(false);
+  const [quickMatchPhase, setQuickMatchPhase] = useState<QuickMatchPhase>("idle");
+  const [quickMatchStartedAt, setQuickMatchStartedAt] = useState<number | null>(null);
+  const [quickMatchElapsedMs, setQuickMatchElapsedMs] = useState(0);
+  const [quickMatchTicketId, setQuickMatchTicketId] = useState("");
+  const [quickMatchMatchId, setQuickMatchMatchId] = useState("");
   const [tutorialStep, setTutorialStep] = useState<number | null>(null);
   const [matchSettingsOpen, setMatchSettingsOpen] = useState(false);
   const [exitRequest, setExitRequest] = useState<ExitRequest | null>(null);
@@ -515,6 +532,16 @@ export default function HomePage() {
     }
   }, [clearRemoteReaction, settings.reactionsEnabled]);
 
+  useEffect(() => {
+    if (!quickMatchStartedAt || !["searching", "waitingHost", "joiningRoom"].includes(quickMatchPhase)) {
+      return;
+    }
+    const update = () => setQuickMatchElapsedMs(Date.now() - quickMatchStartedAt);
+    update();
+    const timer = window.setInterval(update, 1_000);
+    return () => window.clearInterval(timer);
+  }, [quickMatchPhase, quickMatchStartedAt]);
+
   const attachSocketHandlers = useCallback((socket: ClientSocket, kind: "practice" | "room") => {
     const isCurrentSocket = () => socketRef.current === socket;
     const applyRoomSnapshot = (nextRoom: RoomState, beforeApply?: () => void) => {
@@ -811,6 +838,32 @@ export default function HomePage() {
             setResult(response.data.room.result ?? null);
             updateGuestSession();
             clearPracticeState();
+            const handoff = quickMatchHandoffRef.current;
+            const gatewaySocket = matchmakingSocketRef.current;
+            if (handoff?.role === "host" && gatewaySocket) {
+              gatewaySocket.emit(
+                "matchmaking:hostReady",
+                { ticketId: handoff.ticketId, matchId: handoff.matchId },
+                (hostReadyResponse) => {
+                  if (!hostReadyResponse.ok || !hostReadyResponse.data.accepted) {
+                    setQuickMatchPhase("error");
+                    setError(hostReadyResponse.ok
+                      ? "ホスト接続を確認できませんでした。もう一度お試しください。"
+                      : hostReadyResponse.error);
+                    return;
+                  }
+                  gatewaySocket.disconnect();
+                  matchmakingSocketRef.current = null;
+                  quickMatchHandoffRef.current = null;
+                  setQuickMatchPhase("idle");
+                }
+              );
+            } else if (handoff?.role === "guest" && gatewaySocket) {
+              gatewaySocket.disconnect();
+              matchmakingSocketRef.current = null;
+              quickMatchHandoffRef.current = null;
+              setQuickMatchPhase("idle");
+            }
             return;
           }
 
@@ -868,6 +921,134 @@ export default function HomePage() {
 
     connectRoomSocket(storedRoomCode);
   }, [connectRoomSocket]);
+
+  const beginQuickMatchRoomJoin = useCallback((
+    assignment: MatchmakingAssignedHostPayload | MatchmakingMatchedPayload,
+    role: "host" | "guest"
+  ) => {
+    quickMatchHandoffRef.current = {
+      role,
+      ticketId: assignment.ticketId,
+      matchId: assignment.matchId
+    };
+    setQuickMatchTicketId(assignment.ticketId);
+    setQuickMatchMatchId(assignment.matchId);
+    setQuickMatchPhase("joiningRoom");
+    storedRoomCodeRef.current = assignment.roomCode;
+    window.localStorage.setItem(ROOM_CODE_KEY, assignment.roomCode);
+    connectRoomSocket(assignment.roomCode);
+  }, [connectRoomSocket]);
+
+  const cancelQuickMatch = useCallback(() => {
+    const socket = matchmakingSocketRef.current;
+    const currentSession = guestSessionRef.current;
+    if (socket && currentSession && quickMatchTicketId) {
+      socket.emit(
+        "matchmaking:cancel",
+        {
+          guestId: currentSession.guestId,
+          sessionId: currentSession.sessionId,
+          ticketId: quickMatchTicketId,
+          ...(quickMatchMatchId ? { matchId: quickMatchMatchId } : {})
+        },
+        () => {}
+      );
+    }
+    socket?.disconnect();
+    matchmakingSocketRef.current = null;
+    quickMatchHandoffRef.current = null;
+    setQuickMatchPhase("idle");
+    setQuickMatchStartedAt(null);
+    setQuickMatchElapsedMs(0);
+    setQuickMatchTicketId("");
+    setQuickMatchMatchId("");
+  }, [quickMatchMatchId, quickMatchTicketId]);
+
+  const startQuickMatch = useCallback(() => {
+    if (quickMatchPhase !== "idle" && quickMatchPhase !== "error" && quickMatchPhase !== "timeout") {
+      return;
+    }
+    const currentSession = guestSessionRef.current;
+    const currentNickname = nicknameRef.current;
+    const validationError = validateNickname(currentNickname);
+    if (!realtimeConfigured || !currentSession || validationError) {
+      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
+      return;
+    }
+
+    matchmakingSocketRef.current?.disconnect();
+    const socket = createRealtimeSocket({ transport: REALTIME_TRANSPORT, url: realtimeUrl });
+    matchmakingSocketRef.current = socket;
+    quickMatchHandoffRef.current = null;
+    setError("");
+    setQuickMatchPhase("searching");
+    setQuickMatchStartedAt(Date.now());
+    setQuickMatchElapsedMs(0);
+    setQuickMatchTicketId("");
+    setQuickMatchMatchId("");
+
+    socket.on("connect", () => {
+      if (matchmakingSocketRef.current !== socket) return;
+      socket.emit(
+        "matchmaking:join",
+        {
+          guestId: currentSession.guestId,
+          sessionId: currentSession.sessionId,
+          nickname: normalizeNickname(currentNickname),
+          deviceKind: detectDeviceKind(),
+          blockedGuestIds: loadBlockedPlayers(window.localStorage).map((player) => player.id)
+        },
+        (response) => {
+          if (matchmakingSocketRef.current !== socket) return;
+          if (!response.ok) {
+            setQuickMatchPhase("error");
+            setError(response.error);
+            return;
+          }
+          setQuickMatchTicketId(response.data.ticketId);
+          if (response.data.status === "waitingHost") {
+            setQuickMatchMatchId(response.data.matchId);
+            setQuickMatchPhase("waitingHost");
+          } else if (response.data.status === "assignedHost") {
+            beginQuickMatchRoomJoin(response.data, "host");
+          } else {
+            setQuickMatchPhase("searching");
+          }
+        }
+      );
+    });
+    socket.on("matchmaking:assignedHost", (assignment) => {
+      if (matchmakingSocketRef.current === socket) {
+        beginQuickMatchRoomJoin(assignment, "host");
+      }
+    });
+    socket.on("matchmaking:waitingHost", (waiting) => {
+      if (matchmakingSocketRef.current !== socket) return;
+      setQuickMatchTicketId(waiting.ticketId);
+      setQuickMatchMatchId(waiting.matchId);
+      setQuickMatchPhase("waitingHost");
+    });
+    socket.on("matchmaking:matched", (assignment) => {
+      if (matchmakingSocketRef.current === socket) {
+        beginQuickMatchRoomJoin(assignment, "guest");
+      }
+    });
+    socket.on("matchmaking:timeout", (timeout: MatchmakingTimeoutPayload) => {
+      if (matchmakingSocketRef.current !== socket) return;
+      setQuickMatchTicketId(timeout.ticketId);
+      setQuickMatchMatchId(timeout.matchId ?? "");
+      setQuickMatchPhase("timeout");
+      socket.disconnect();
+      matchmakingSocketRef.current = null;
+    });
+    socket.on("matchmaking:failed", (failure) => {
+      if (matchmakingSocketRef.current !== socket) return;
+      setQuickMatchPhase("error");
+      setError(failure.retryable
+        ? "マッチングを完了できませんでした。もう一度お試しください。"
+        : "マッチングを続行できませんでした。");
+    });
+  }, [beginQuickMatchRoomJoin, quickMatchPhase, realtimeConfigured, realtimeUrl]);
 
   const startPractice = useCallback(() => {
     const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
@@ -1098,6 +1279,8 @@ export default function HomePage() {
       clearStoredRoomRetryTimer();
       socketRef.current?.disconnect();
       socketRef.current = null;
+      matchmakingSocketRef.current?.disconnect();
+      matchmakingSocketRef.current = null;
       socketModeRef.current = null;
       setSocketMode(null);
     };
@@ -2216,6 +2399,43 @@ export default function HomePage() {
 
           {!room && homeMode === "battle" ? (
             <div className="roomActions">
+              <button
+                className="primaryButton"
+                type="button"
+                onClick={startQuickMatch}
+                disabled={!realtimeConfigured || ["searching", "waitingHost", "joiningRoom"].includes(quickMatchPhase)}
+                aria-busy={["searching", "waitingHost", "joiningRoom"].includes(quickMatchPhase)}
+              >
+                <Users size={18} />
+                {quickMatchPhase === "searching"
+                  ? "対戦相手を検索中…"
+                  : quickMatchPhase === "waitingHost"
+                    ? "ホスト接続待ち…"
+                    : quickMatchPhase === "joiningRoom"
+                      ? "ルームへ参加中…"
+                      : "Quick Match"}
+              </button>
+              {["searching", "waitingHost", "joiningRoom"].includes(quickMatchPhase) ? (
+                <div role="status" aria-live="polite" className="infoText">
+                  <p>検索経過: {Math.floor(quickMatchElapsedMs / 1000)}秒</p>
+                  <button type="button" onClick={cancelQuickMatch}>検索をキャンセル</button>
+                </div>
+              ) : null}
+              {quickMatchPhase === "timeout" ? (
+                <div role="status" aria-live="polite" className="infoText">
+                  <p>対戦相手が見つかりませんでした。</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      cancelQuickMatch();
+                      createRoom();
+                    }}
+                  >
+                    COM対戦へ
+                  </button>
+                  <button type="button" onClick={cancelQuickMatch}>ホームに戻る</button>
+                </div>
+              ) : null}
               <button
                 className="primaryButton"
                 type="button"

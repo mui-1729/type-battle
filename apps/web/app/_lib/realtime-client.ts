@@ -53,7 +53,10 @@ const CLOUDFLARE_CLIENT_EVENT_MAP: Record<keyof ClientToServerEvents, Cloudflare
   "typing:finish": "client:typing:finish",
   "match:rematch": "client:match:rematch",
   "practice:start": "client:practice:start",
-  "practice:dailyStart": "client:practice:dailyStart"
+  "practice:dailyStart": "client:practice:dailyStart",
+  "matchmaking:join": "client:matchmaking:join",
+  "matchmaking:cancel": "client:matchmaking:cancel",
+  "matchmaking:hostReady": "client:matchmaking:hostReady"
 };
 
 const CLOUDFLARE_SERVER_EVENT_TO_APP_EVENT: Partial<Record<CloudflareServerEventName, keyof ServerToClientEvents>> = {
@@ -63,7 +66,12 @@ const CLOUDFLARE_SERVER_EVENT_TO_APP_EVENT: Partial<Record<CloudflareServerEvent
   "server:match:started": "match:started",
   "server:match:result": "match:result",
   "server:error": "match:error",
-  "server:player:reaction": "player:reaction"
+  "server:player:reaction": "player:reaction",
+  "server:matchmaking:assignedHost": "matchmaking:assignedHost",
+  "server:matchmaking:waitingHost": "matchmaking:waitingHost",
+  "server:matchmaking:matched": "matchmaking:matched",
+  "server:matchmaking:timeout": "matchmaking:timeout",
+  "server:matchmaking:failed": "matchmaking:failed"
 };
 
 const RECONNECT_DELAY_MS = 1_000;
@@ -401,6 +409,7 @@ function isReplayableWhenDisconnected(event: CloudflareClientEventName): boolean
     event === "client:room:create" ||
     event === "client:room:join" ||
     event === "client:practice:start" ||
-    event === "client:practice:dailyStart"
+    event === "client:practice:dailyStart" ||
+    event === "client:matchmaking:join"
   );
 }

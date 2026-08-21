@@ -3,6 +3,8 @@ import { isValidRoomCode, normalizeNickname, validateNickname } from "@type-batt
 import { normalizeRoomCode } from "./room-routing.js";
 
 const MAX_IDENTIFIER_LENGTH = 96;
+export const MATCHMAKING_ROOM_BOOTSTRAP_PATH = "/__internal/matchmaking-bootstrap";
+export const MATCHMAKING_ROOM_CLEANUP_PATH = "/__internal/matchmaking-cleanup";
 
 export type MatchmakingBootstrapPlayer = {
   guestId: string;

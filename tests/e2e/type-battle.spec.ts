@@ -531,6 +531,48 @@ test("plays a complete two player typing match", async ({ browser }) => {
   await guestContext.close();
 });
 
+test("quick match pairs two browsers and joins the reserved room", async ({ browser }) => {
+  const firstContext = await browser.newContext();
+  const secondContext = await browser.newContext();
+  const first = await firstContext.newPage();
+  const second = await secondContext.newPage();
+
+  await Promise.all([first.goto("/"), second.goto("/")]);
+  await Promise.all([selectBattleMode(first), selectBattleMode(second)]);
+  await Promise.all([setNickname(first, "QuickAlice"), setNickname(second, "QuickBob")]);
+  await Promise.all([
+    first.getByRole("button", { name: "Quick Match" }).click(),
+    second.getByRole("button", { name: "Quick Match" }).click()
+  ]);
+
+  await expect(first.getByTestId("lobby-prep").getByText("QuickBob")).toBeVisible({ timeout: 15_000 });
+  await expect(second.getByTestId("lobby-prep").getByText("QuickAlice")).toBeVisible({ timeout: 15_000 });
+  const [firstRoomCode, secondRoomCode] = await Promise.all([
+    first.locator(".roomMeta strong").innerText(),
+    second.locator(".roomMeta strong").innerText()
+  ]);
+  expect(firstRoomCode).toBe(secondRoomCode);
+
+  await firstContext.close();
+  await secondContext.close();
+});
+
+test("quick match timeout offers an explicit COM fallback", async ({ page }) => {
+  test.setTimeout(45_000);
+  await page.goto("/");
+  await selectBattleMode(page);
+  await setNickname(page, "QuickSolo");
+  await page.getByRole("button", { name: "Quick Match" }).click();
+
+  await expect(page.getByRole("button", { name: "対戦相手を検索中…" })).toBeDisabled();
+  await expect(page.getByText("対戦相手が見つかりませんでした。")).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "COM対戦へ" }).click();
+  await expect(page.getByRole("button", { name: "READYにする" })).toBeEnabled({ timeout: 10_000 });
+  await page.getByRole("button", { name: "READYにする" }).click();
+  await expect(page.getByLabel("ルーム操作").getByText("COM (Normal)", { exact: true })).toBeVisible();
+  await expect(page.locator(".status-playing")).toBeVisible({ timeout: 7_000 });
+});
+
 test("shows acknowledged reactions, filters disabled incoming reactions, and supports mobile keyboard input", async ({ browser }) => {
   const hostContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const guestContext = await browser.newContext({ viewport: { width: 320, height: 568 } });
