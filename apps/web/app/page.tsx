@@ -9,19 +9,11 @@ import {
   type RealtimeTransport,
   type RealtimeSocket
 } from "./_lib/realtime-client";
-import {
-  calculateAccuracy,
-  calculateWpm,
-  createRoomCode,
-  normalizeNickname,
-  resolveTypingInputMode,
-  validateNickname
-} from "@type-battle/shared";
+import { validateNickname } from "@type-battle/shared";
 import type {
   EquipmentSelection,
   MatchRule,
   MatchResult,
-  PlayerResult,
   PromptCategory,
   QuickReaction,
   RoomState
@@ -51,19 +43,9 @@ import {
   type ProgressState
 } from "./_lib/typing-progress";
 import {
-  buildRomajiTypingPlan
-} from "./_lib/romaji-typing";
-import {
-  getCanonicalProgressIndex
-} from "./_lib/looping-typing";
-import {
   getHomePageViewModel,
   type PracticeSession
 } from "./_lib/home-page-view-model";
-import { detectDeviceKind } from "./_lib/device-kind";
-import { advanceTypingProgress } from "./_lib/typing-input-strategy";
-import { createTypingMessageBatch } from "./_lib/typing-message-batch";
-import { shouldHandleDesktopTypingKey } from "./_lib/desktop-typing-input";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
 import { copyText } from "./_lib/clipboard";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
@@ -74,6 +56,10 @@ import {
   openRealtimeConnection
 } from "./_lib/realtime-connection-controller";
 import { bindRoomSocketHandlers } from "./_lib/room-socket-handlers";
+import { usePracticeSession } from "./_lib/use-practice-session";
+import { useRoomLifecycle } from "./_lib/use-room-lifecycle";
+import { useStoredRoomRecovery } from "./_lib/use-stored-room-recovery";
+import { useTypingSession } from "./_lib/use-typing-session";
 import { getScrollTopToRevealTarget } from "./_lib/scroll-visibility";
 import {
   INITIAL_REACTION_FEEDBACK,
@@ -86,11 +72,7 @@ import {
   createSentReactionFeedback,
   type ReactionFeedback
 } from "./_lib/reaction-feedback";
-import {
-  getStoredRoomJoinFailureAction,
-  getStoredRoomRejoinDelayMs,
-  type StoredRoomRecoveryState
-} from "./_lib/room-reconnect";
+import type { StoredRoomRecoveryState } from "./_lib/room-reconnect";
 import {
   DEVICE_KIND_LABELS,
   MATCH_RULE_DETAILS,
@@ -112,13 +94,10 @@ import {
   touchGuestSession,
   type GuestSession
 } from "../lib/guest-session";
-import { playCountdownSound, playTypingSound, primeSoundPlayback } from "../lib/sound";
+import { playCountdownSound, primeSoundPlayback } from "../lib/sound";
 import {
   DAILY_CHALLENGE_MAX_ATTEMPTS,
-  consumeDailyChallengeAttempt,
-  getVisibleDailyChallengeRecord,
   loadDailyChallengeRecord,
-  recordDailyChallengeAttempt,
   type DailyChallengeRecord
 } from "../lib/daily-challenge";
 import {
@@ -238,8 +217,6 @@ export default function HomePage() {
   const socketModeRef = useRef<"practice" | "room" | null>(null);
   const storedRoomCodeRef = useRef<string | null>(null);
   const storedRoomJoinInFlightRef = useRef(false);
-  const storedRoomJoinAttemptsRef = useRef(0);
-  const storedRoomRetryTimerRef = useRef<number | null>(null);
   const autoStartRoomRef = useRef<string | null>(null);
   const attemptStoredRoomJoinRef = useRef<(socket: ClientSocket) => void>(() => undefined);
   const realtimeUrl = CLOUDFLARE_REALTIME_URL || localRealtimeUrl;
@@ -588,321 +565,74 @@ export default function HomePage() {
     });
   }, []);
 
-  const clearStoredRoomRetryTimer = useCallback(() => {
-    if (storedRoomRetryTimerRef.current) {
-      window.clearTimeout(storedRoomRetryTimerRef.current);
-      storedRoomRetryTimerRef.current = null;
-    }
-  }, []);
-
-  const discardStoredRoom = useCallback(
-    (message: string) => {
-      clearStoredRoomRetryTimer();
-      storedRoomCodeRef.current = null;
-      storedRoomJoinAttemptsRef.current = 0;
-      storedRoomJoinInFlightRef.current = false;
-      window.localStorage.removeItem(ROOM_CODE_KEY);
-      setStoredRoomRecovery({ status: "idle", message: "" });
-      setError(message);
-      disconnectCurrentSocket();
+  const {
+    clearStoredRoomRetryTimer,
+    resetStoredRoomRecovery,
+    retryStoredRoomJoin
+  } = useStoredRoomRecovery({
+    storageKey: ROOM_CODE_KEY,
+    refs: {
+      socketRef,
+      socketModeRef,
+      guestSessionRef,
+      nicknameRef,
+      roomRef,
+      resultRef,
+      storedRoomCodeRef,
+      storedRoomJoinInFlightRef,
+      attemptStoredRoomJoinRef
     },
-    [clearStoredRoomRetryTimer, disconnectCurrentSocket]
-  );
+    actions: {
+      setStoredRoomRecovery,
+      setError,
+      setPlayerId,
+      setRoom,
+      setResult,
+      resetTyping,
+      updateGuestSession,
+      clearPracticeState,
+      connectRoomSocket,
+      disconnectCurrentSocket
+    }
+  });
 
-  const attemptStoredRoomJoin = useCallback(
-    (socket: ClientSocket) => {
-      const storedRoomCode = storedRoomCodeRef.current;
-      const currentSession = guestSessionRef.current;
-
-      if (!storedRoomCode || !currentSession || storedRoomJoinInFlightRef.current) {
-        return;
-      }
-
-      clearStoredRoomRetryTimer();
-      storedRoomJoinInFlightRef.current = true;
-      storedRoomJoinAttemptsRef.current += 1;
-      const attempts = storedRoomJoinAttemptsRef.current;
-      setStoredRoomRecovery({
-        status: "reconnecting",
-        message: `保存済みルームへ再接続しています（${attempts}/5）…`
-      });
-
-      socket.emit(
-        "room:join",
-        {
-          roomCode: storedRoomCode,
-          nickname: normalizeNickname(nicknameRef.current),
-          guestId: currentSession.guestId,
-          sessionId: currentSession.sessionId,
-          deviceKind: detectDeviceKind()
-        },
-        (response) => {
-          if (socketRef.current !== socket) {
-            return;
-          }
-
-          storedRoomJoinInFlightRef.current = false;
-
-          if (response.ok) {
-            storedRoomJoinAttemptsRef.current = 0;
-            storedRoomCodeRef.current = response.data.room.roomCode;
-            setStoredRoomRecovery({ status: "idle", message: "" });
-            setError("");
-            setPlayerId(response.data.playerId);
-            // Clear transient typing state before applying the stored snapshot.
-            // A finished room carries its result in the snapshot, so resetting
-            // afterwards would overwrite that result with null in the same batch.
-            resetTyping();
-            roomRef.current = response.data.room;
-            resultRef.current = response.data.room.result ?? null;
-            setRoom(response.data.room);
-            setResult(response.data.room.result ?? null);
-            updateGuestSession();
-            clearPracticeState();
-            return;
-          }
-
-          const action = getStoredRoomJoinFailureAction(response.error, attempts);
-          if (action === "discard") {
-            discardStoredRoom(response.error);
-            return;
-          }
-
-          if (action === "pause") {
-            setStoredRoomRecovery({
-              status: "failed",
-              message: "ルームへの再接続を一時停止しました。接続を確認して再試行してください。"
-            });
-            return;
-          }
-
-          const delay = getStoredRoomRejoinDelayMs(attempts);
-          setStoredRoomRecovery({
-            status: "reconnecting",
-            message: `再接続に失敗しました。約 ${Math.ceil(delay / 1000)} 秒後に再試行します。`
-          });
-          storedRoomRetryTimerRef.current = window.setTimeout(() => {
-            storedRoomRetryTimerRef.current = null;
-            if (socketRef.current !== socket) {
-              return;
-            }
-            attemptStoredRoomJoinRef.current(socket);
-          }, delay);
-        }
-      );
+  const {
+    consumeDailyAttempt,
+    finishPractice,
+    startDailyChallenge,
+    startPractice
+  } = usePracticeSession({
+    refs: {
+      socketRef,
+      nicknameInputRef,
+      nicknameRef,
+      inputModeRef,
+      dailyAttemptConsumedRef
     },
-    [clearPracticeState, clearStoredRoomRetryTimer, discardStoredRoom, resetTyping, updateGuestSession]
-  );
-
-  useEffect(() => {
-    attemptStoredRoomJoinRef.current = attemptStoredRoomJoin;
-  }, [attemptStoredRoomJoin]);
-
-  const retryStoredRoomJoin = useCallback(() => {
-    const storedRoomCode = storedRoomCodeRef.current;
-    if (!storedRoomCode) {
-      setStoredRoomRecovery({ status: "idle", message: "" });
-      return;
-    }
-
-    storedRoomJoinAttemptsRef.current = 0;
-    setStoredRoomRecovery({ status: "reconnecting", message: "保存済みルームへ再接続しています…" });
-    const socket = socketRef.current;
-
-    if (socket && socketModeRef.current === "room" && socket.isConnected()) {
-      attemptStoredRoomJoinRef.current(socket);
-      return;
-    }
-
-    connectRoomSocket(storedRoomCode);
-  }, [connectRoomSocket]);
-
-  const startPractice = useCallback(() => {
-    const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
-    const validationError = validateNickname(currentNickname);
-    const deviceKind = detectDeviceKind();
-
-    if (!realtimeConfigured || validationError || !guestId) {
-      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
-      return;
-    }
-
-    const socket = connectPracticeSocket();
-    prepareTypingInput();
-    setHomeMode(null);
-    void primeSoundPlayback();
-    socket.emit(
-      "practice:start",
-      { nickname: normalizeNickname(currentNickname), category: practiceCategory },
-      (response) => {
-        if (socketRef.current !== socket) {
-          return;
-        }
-
-        if (!response.ok) {
-          setError(response.error);
-          disconnectPracticeSocket();
-          return;
-        }
-
-        disconnectPracticeSocket();
-        setError("");
-        setPracticeSession({
-          ...response.data,
-          category: practiceCategory,
-          deviceKind,
-          mode: "practice"
-        });
-        setPracticeResult(null);
-        setPracticeProgress(createEmptyProgress());
-        resetTyping();
-      }
-    );
-  }, [connectPracticeSocket, disconnectPracticeSocket, guestId, practiceCategory, prepareTypingInput, realtimeConfigured, resetTyping]);
-
-  const consumeDailyAttempt = useCallback(() => {
-    if (!practiceSession || practiceSession.mode !== "daily" || dailyAttemptConsumedRef.current) {
-      return;
-    }
-
-    const record = consumeDailyChallengeAttempt(
-      window.localStorage,
-      practiceSession.challengeKey ?? dailyChallengeInfo.challengeKey,
-      practiceSession.prompt.id,
-      Date.now()
-    );
-    if (!record) {
-      return;
-    }
-    dailyAttemptConsumedRef.current = true;
-    setDailyAttemptConsumed(true);
-    setDailyChallengeRecord(getVisibleDailyChallengeRecord(record, dailyChallengeInfo.challengeKey));
-  }, [dailyChallengeInfo.challengeKey, practiceSession]);
-
-  const startDailyChallenge = useCallback(() => {
-    const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
-    const validationError = validateNickname(currentNickname);
-    const deviceKind = detectDeviceKind();
-
-    if (!realtimeConfigured || validationError || !guestId) {
-      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
-      return;
-    }
-
-    const currentRecord = loadDailyChallengeRecord(window.localStorage, dailyChallengeInfo.challengeKey);
-    if ((currentRecord?.attempts ?? 0) >= DAILY_CHALLENGE_MAX_ATTEMPTS) {
-      setError("今日のデイリー挑戦回数を使い切りました。次の日付まで待ってください。");
-      return;
-    }
-
-    const socket = connectPracticeSocket();
-    prepareTypingInput();
-    setHomeMode(null);
-    void primeSoundPlayback();
-    socket.emit("practice:dailyStart", { nickname: normalizeNickname(currentNickname) }, (response) => {
-      if (socketRef.current !== socket) {
-        return;
-      }
-
-      if (!response.ok) {
-        setError(response.error);
-        disconnectPracticeSocket();
-        return;
-      }
-
-      disconnectPracticeSocket();
-      setError("");
-      setPracticeSession({
-        ...response.data,
-        category: "standard",
-        deviceKind,
-        mode: "daily",
-        ...(response.data.challengeKey ? { challengeKey: response.data.challengeKey } : {})
-      });
-        setPracticeResult(null);
-        setPracticeProgress(createEmptyProgress());
-        dailyAttemptConsumedRef.current = false;
-        setDailyAttemptConsumed(false);
-        resetTyping();
-    });
-  }, [connectPracticeSocket, dailyChallengeInfo.challengeKey, disconnectPracticeSocket, guestId, prepareTypingInput, realtimeConfigured, resetTyping]);
-
-  const finishPractice = useCallback(
-    (finalProgress: ProgressState) => {
-      if (!practiceSession) {
-        return;
-      }
-
-      if (practiceSession.mode === "daily") {
-        consumeDailyAttempt();
-      }
-
-      const finishTimeMs = Date.now() - practiceSession.startedAt;
-      const canonicalProgressIndex =
-        inputModeRef.current === "kana"
-          ? finalProgress.progressIndex
-          : getCanonicalProgressIndex(
-              buildRomajiTypingPlan(practiceSession.prompt.typing.hiragana),
-              finalProgress.progressIndex
-            );
-      const player: PlayerResult = {
-        id: practiceSession.practiceId,
-        nickname: normalizeNickname(nicknameRef.current),
-        connected: true,
-        ready: true,
-        isHost: true,
-        isBot: false,
-        progressIndex: canonicalProgressIndex,
-        correctCharacters: finalProgress.correctCharacters,
-        totalTypedCharacters: finalProgress.totalTypedCharacters,
-        mistakes: finalProgress.mistakes,
-        headAccessoryId: cosmeticProgress.headAccessoryId,
-        heldItemId: cosmeticProgress.heldItemId,
-        maxStreak: finalProgress.maxStreak,
-        currentStreak: finalProgress.currentStreak,
-        wpm: calculateWpm(finalProgress.correctCharacters, finishTimeMs),
-        accuracy: calculateAccuracy(finalProgress.correctCharacters, finalProgress.totalTypedCharacters),
-        finishedAt: Date.now(),
-        finishTimeMs,
-        rank: 1,
-        finishGap: undefined
-      };
-
-      setPracticeResult({
-        roomCode: practiceSession.practiceId,
-        prompt: practiceSession.prompt,
-        players: [player]
-      });
-
-      if (practiceSession.mode === "daily" && practiceSession.challengeKey) {
-        const { visibleRecord } = recordDailyChallengeAttempt(
-          window.localStorage,
-          {
-            challengeKey: practiceSession.challengeKey,
-            promptId: practiceSession.prompt.id,
-            wpm: player.wpm,
-            accuracy: player.accuracy,
-            mistakes: player.mistakes,
-            finishTimeMs,
-            completedAt: player.finishedAt ?? Date.now(),
-            attemptConsumed: dailyAttemptConsumedRef.current
-          },
-          dailyChallengeInfo.challengeKey
-        );
-        setDailyChallengeRecord(visibleRecord);
-      }
-
-      disconnectPracticeSocket();
-    },
-    [
-      consumeDailyAttempt,
-      cosmeticProgress.headAccessoryId,
-      cosmeticProgress.heldItemId,
-      dailyChallengeInfo.challengeKey,
-      disconnectPracticeSocket,
+    state: {
       practiceSession,
-    ]
-  );
+      practiceCategory,
+      dailyChallengeKey: dailyChallengeInfo.challengeKey,
+      guestId,
+      realtimeConfigured,
+      headAccessoryId: cosmeticProgress.headAccessoryId,
+      heldItemId: cosmeticProgress.heldItemId
+    },
+    actions: {
+      connectPracticeSocket,
+      disconnectPracticeSocket,
+      prepareTypingInput,
+      setHomeMode,
+      setError,
+      setPracticeSession,
+      setPracticeResult,
+      setPracticeProgress,
+      setDailyAttemptConsumed,
+      setDailyChallengeRecord,
+      resetTyping
+    },
+    realtimeUnavailableMessage: REALTIME_UNAVAILABLE_MESSAGE
+  });
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1273,446 +1003,93 @@ export default function HomePage() {
     };
   }, [acceptingTextInput, activeTypingText, visualViewportHeight]);
 
-  const emitProgress = useCallback(
-    (input: string, finish: boolean) => {
-      const socket = socketRef.current;
-      const currentRoom = roomRef.current;
-
-      if (!socket || !currentRoom || !socket.isConnected()) {
-        return;
-      }
-
-      const messages = createTypingMessageBatch({
-        roomCode: currentRoom.roomCode,
-        text: input,
-        finish,
-        previousSequence: inputSequenceRef.current
-      });
-      inputSequenceRef.current = messages.at(-1)!.payload.sequence;
-      setLastProgressSentAt(Date.now());
-      setSyncClock(Date.now());
-
-      if (finish) {
-        if (currentRoom.matchRule === "race") {
-          roomFinishPendingRef.current = true;
-          setRoomFinishPending(true);
-          typingInputRef.current?.blur();
-        }
-      }
-
-      for (const message of messages) {
-        socket.emit(message.event, message.payload);
-      }
+  const { handleTypedText } = useTypingSession({
+    refs: {
+      socketRef,
+      roomRef,
+      resultRef,
+      inputSequenceRef,
+      roomFinishPendingRef,
+      typingInputRef,
+      localProgressRef,
+      practiceProgressRef,
+      inputModeRef,
+      settingsRef
     },
-    []
-  );
-
-  const handleTypedText = useCallback(
-    (typedText: string) => {
-      if (!typedText) {
-        return;
-      }
-
-      if (roomFinishPendingRef.current) {
-        return;
-      }
-
-      const currentRoom = roomRef.current;
-
-      if (currentRoom?.status === "playing" && currentRoom.prompt && !resultRef.current) {
-        const previous = localProgressRef.current;
-        const next = advanceTypingProgress({
-          previous,
-          typedText,
-          deviceKind: activeInputDeviceKind,
-          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
-          displayText: activeTypingText,
-          romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
-          progressBase: activeProgressBase,
-          progressBaseByMode: {
-            kana: activeCanonicalProgressBase,
-            romaji: activeRomajiProgressBase
-          },
-          inputMode: inputModeRef.current
-        });
-        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedText);
-        inputModeRef.current = nextInputMode;
-        setInputMode(nextInputMode);
-        const correct = next.progress.correctCharacters > previous.correctCharacters;
-
-        setLocalProgress(next.progress);
-        localProgressRef.current = next.progress;
-        recordMistakeSamples(next.mistakeSamples);
-        void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
-        emitProgress(
-          typedText,
-          !isLoopingMatchPlaying &&
-            (inputModeRef.current === "kana"
-              ? next.progress.progressIndex
-              : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
-              Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
-        );
-        return;
-      }
-
-      if (practiceSession && !practiceResult && !room) {
-        const previous = practiceProgressRef.current;
-        const next = advanceTypingProgress({
-          previous,
-          typedText,
-          deviceKind: activeInputDeviceKind,
-          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
-          displayText: activeTypingText,
-          romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
-          progressBase: activeProgressBase,
-          progressBaseByMode: {
-            kana: activeCanonicalProgressBase,
-            romaji: activeRomajiProgressBase
-          },
-          inputMode: inputModeRef.current
-        });
-        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedText);
-        inputModeRef.current = nextInputMode;
-        setInputMode(nextInputMode);
-        const correct = next.progress.correctCharacters > previous.correctCharacters;
-
-        setPracticeProgress(next.progress);
-        practiceProgressRef.current = next.progress;
-        recordMistakeSamples(next.mistakeSamples);
-
-        if (practiceSession.mode === "daily" && correct) {
-          consumeDailyAttempt();
-        }
-
-        if (
-          (inputModeRef.current === "kana"
-            ? next.progress.progressIndex
-            : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
-          Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
-        ) {
-          finishPractice(next.progress);
-        }
-
-        void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
-      }
-    },
-    [
-      activeTypingText,
-      emitProgress,
-      isLoopingMatchPlaying,
-      finishPractice,
-      practiceResult,
-      practiceSession,
-      consumeDailyAttempt,
-      recordMistakeSamples,
+    state: {
       activeInputDeviceKind,
-      activeProgressBase,
+      activeTypingText,
       activePrompt,
       activeRomajiTypingPlan,
+      activeProgressBase,
+      activeCanonicalProgressBase,
+      activeRomajiProgressBase,
+      isLoopingMatchPlaying,
       usesTimeAttackPromptSequence,
-      room
-    ]
-  );
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const practiceActive = Boolean(practiceSession && !practiceResult && !room);
-      const roomPlaying = room?.status === "playing";
-
-      if (!shouldHandleDesktopTypingKey({
-        roomPlaying,
-        practiceActive,
-        acceptingTextInput,
-        roomFinishPending: roomFinishPendingRef.current,
-        exitRequested: exitRequest !== null,
-        defaultPrevented: event.defaultPrevented,
-        isComposing: event.isComposing,
-        keyCode: event.keyCode,
-        ctrlKey: event.ctrlKey,
-        metaKey: event.metaKey,
-        altKey: event.altKey,
-        editableTarget: isEditableTarget(event.target),
-        key: event.key
-      })) {
-        return;
-      }
-
-      event.preventDefault();
-      const typedKey = event.key.toLowerCase();
-
-      if (room?.status === "playing" && room?.prompt) {
-        const previous = localProgressRef.current;
-        const next = advanceTypingProgress({
-          previous,
-          typedText: typedKey,
-          deviceKind: activeInputDeviceKind,
-          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
-          displayText: activeTypingText,
-          romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
-          progressBase: activeProgressBase,
-          progressBaseByMode: {
-            kana: activeCanonicalProgressBase,
-            romaji: activeRomajiProgressBase
-          },
-          inputMode: inputModeRef.current
-        });
-        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedKey);
-        inputModeRef.current = nextInputMode;
-        setInputMode(nextInputMode);
-        const correct = next.progress.correctCharacters > previous.correctCharacters;
-        const soundOptions = settingsRef.current;
-
-        setLocalProgress(next.progress);
-        localProgressRef.current = next.progress;
-        recordMistakeSamples(next.mistakeSamples);
-        void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
-        emitProgress(
-          typedKey,
-          !isLoopingMatchPlaying &&
-            (inputModeRef.current === "kana"
-              ? next.progress.progressIndex
-              : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
-              Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
-        );
-        return;
-      }
-
-      if (practiceActive && practiceSession) {
-        const previous = practiceProgressRef.current;
-        const next = advanceTypingProgress({
-          previous,
-          typedText: typedKey,
-          deviceKind: activeInputDeviceKind,
-          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
-          displayText: activeTypingText,
-          romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
-          progressBase: activeProgressBase,
-          progressBaseByMode: {
-            kana: activeCanonicalProgressBase,
-            romaji: activeRomajiProgressBase
-          },
-          inputMode: inputModeRef.current
-        });
-        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedKey);
-        inputModeRef.current = nextInputMode;
-        setInputMode(nextInputMode);
-        const correct = next.progress.correctCharacters > previous.correctCharacters;
-        const soundOptions = settingsRef.current;
-
-        setPracticeProgress(next.progress);
-        practiceProgressRef.current = next.progress;
-        recordMistakeSamples(next.mistakeSamples);
-
-        if (practiceSession.mode === "daily" && correct) {
-          consumeDailyAttempt();
-        }
-
-        if (
-          (inputModeRef.current === "kana"
-            ? next.progress.progressIndex
-            : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
-          Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
-        ) {
-          finishPractice(next.progress);
-        }
-
-        void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    activeInputDeviceKind,
-    activeProgressBase,
-    activeTypingText,
-    acceptingTextInput,
-    emitProgress,
-    finishPractice,
-    consumeDailyAttempt,
-    isLoopingMatchPlaying,
-    practiceResult,
-    practiceSession,
-    recordMistakeSamples,
-    activePrompt,
-    activeRomajiTypingPlan,
-    exitRequest,
-    usesTimeAttackPromptSequence,
-    room
-  ]);
-
-  const createRoom = () => {
-    const currentNickname = nicknameRef.current;
-    const roomCode = createRoomCode();
-    const validationError = validateNickname(currentNickname);
-
-    if (createPendingRef.current) {
-      return;
+      practiceSession,
+      practiceResult,
+      room,
+      acceptingTextInput,
+      exitRequested: exitRequest !== null
+    },
+    actions: {
+      setLastProgressSentAt,
+      setSyncClock,
+      setRoomFinishPending,
+      setInputMode,
+      setLocalProgress,
+      setPracticeProgress,
+      recordMistakeSamples,
+      consumeDailyAttempt,
+      finishPractice
     }
+  });
 
-    setError("");
-
-    if (!realtimeConfigured || validationError || !guestId) {
-      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
-      return;
+  const {
+    createRoom,
+    joinRoom,
+    leaveRoom,
+    setReady,
+    startMatch
+  } = useRoomLifecycle({
+    storageKey: ROOM_CODE_KEY,
+    realtimeUnavailableMessage: REALTIME_UNAVAILABLE_MESSAGE,
+    refs: {
+      socketRef,
+      nicknameRef,
+      createPendingRef,
+      storedRoomCodeRef,
+      autoStartRoomRef
+    },
+    state: {
+      realtimeConfigured,
+      guestId,
+      sessionId,
+      joinCode,
+      room,
+      currentPlayer
+    },
+    actions: {
+      connectRoomSocket,
+      disconnectCurrentSocket,
+      failPendingRoomCreate,
+      prepareTypingInput,
+      updateGuestSession,
+      clearPracticeState,
+      resetTyping,
+      resetStoredRoomRecovery,
+      setCreatePending,
+      setJoinPending,
+      setError,
+      setCopyFeedback,
+      setPlayerId,
+      setRoom,
+      setResult,
+      setPracticeSession,
+      setHomeMode,
+      setExitRequest
     }
-
-    createPendingRef.current = true;
-    setCreatePending(true);
-    setError("");
-    void primeSoundPlayback();
-    const socket = connectRoomSocket(roomCode);
-    socket.emit(
-      "room:create",
-      {
-        roomCode,
-        nickname: normalizeNickname(currentNickname),
-        guestId,
-        sessionId,
-        deviceKind: detectDeviceKind()
-      },
-      (response) => {
-        if (socketRef.current !== socket) {
-          return;
-        }
-
-        if (!response.ok) {
-          failPendingRoomCreate(
-            response.error === "Realtime request timed out."
-              ? "ルーム作成の応答がありませんでした。接続を確認して、もう一度お試しください。"
-              : response.error
-          );
-          disconnectCurrentSocket();
-          return;
-        }
-
-        createPendingRef.current = false;
-        setCreatePending(false);
-        setError("");
-        setCopyFeedback({ kind: "idle", message: "" });
-        setPlayerId(response.data.playerId);
-        storedRoomCodeRef.current = response.data.roomCode;
-        setRoom(response.data.room);
-        window.localStorage.setItem(ROOM_CODE_KEY, response.data.roomCode);
-        updateGuestSession();
-        clearPracticeState();
-        resetTyping();
-      }
-    );
-  };
-
-  const joinRoom = () => {
-    const currentNickname = nicknameRef.current;
-    const roomCode = joinCode.trim().toUpperCase();
-    const validationError = validateNickname(currentNickname);
-
-    setError("");
-
-    if (!roomCode) {
-      setError("ルームコードを入力してください。");
-      return;
-    }
-
-    if (!realtimeConfigured || validationError || !guestId) {
-      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
-    setHomeMode(null);
-      return;
-    }
-
-    void primeSoundPlayback();
-    const socket = connectRoomSocket(roomCode);
-    setJoinPending(true);
-    socket.emit(
-      "room:join",
-      {
-        roomCode,
-        nickname: normalizeNickname(currentNickname),
-        guestId,
-        sessionId,
-        deviceKind: detectDeviceKind()
-      },
-      (response) => {
-        setJoinPending(false);
-        if (socketRef.current !== socket) {
-          return;
-        }
-
-        if (!response.ok) {
-          setError(response.error);
-          disconnectCurrentSocket();
-          return;
-        }
-
-        setError("");
-        setPlayerId(response.data.playerId);
-        storedRoomCodeRef.current = response.data.room.roomCode;
-        setRoom(response.data.room);
-        window.localStorage.setItem(ROOM_CODE_KEY, response.data.room.roomCode);
-        updateGuestSession();
-        clearPracticeState();
-        resetTyping();
-      }
-    );
-  };
-
-  const leaveRoom = useCallback(() => {
-    const socket = socketRef.current;
-
-    if (socket && room) {
-      socket.emit("room:leave", { roomCode: room.roomCode });
-    }
-    clearStoredRoomRetryTimer();
-    storedRoomCodeRef.current = null;
-    storedRoomJoinAttemptsRef.current = 0;
-    storedRoomJoinInFlightRef.current = false;
-    window.localStorage.removeItem(ROOM_CODE_KEY);
-    setStoredRoomRecovery({ status: "idle", message: "" });
-    setHomeMode(null);
-
-    disconnectCurrentSocket();
-    setRoom(null);
-    setResult(null);
-    setPlayerId("");
-    clearPracticeState();
-    resetTyping();
-    setExitRequest(null);
-  }, [clearPracticeState, clearStoredRoomRetryTimer, disconnectCurrentSocket, resetTyping, room]);
-
-  const setReady = () => {
-    if (!realtimeConfigured || !socketRef.current || !room || !currentPlayer) {
-      return;
-    }
-
-    prepareTypingInput();
-    socketRef.current.emit("player:ready", {
-      roomCode: room.roomCode,
-      ready: !currentPlayer.ready
-    });
-  };
-
-  const startMatch = useCallback(() => {
-    const socket = socketRef.current;
-    if (!realtimeConfigured || !socket || !room) {
-      return false;
-    }
-
-    prepareTypingInput();
-    void primeSoundPlayback();
-    socket.emit("match:start", { roomCode: room.roomCode }, (response) => {
-      if (socketRef.current !== socket) {
-        return;
-      }
-      if (!response.ok) {
-        setError(response.error);
-        autoStartRoomRef.current = null;
-      }
-    });
-    return true;
-  }, [prepareTypingInput, primeSoundPlayback, realtimeConfigured, room]);
+  });
 
   const sendReaction = useCallback((reaction: QuickReaction) => {
     const socket = socketRef.current;
@@ -2548,7 +1925,8 @@ export default function HomePage() {
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && target.matches("input, textarea, select, button, a, [role='button'], [contenteditable='true']");
+  return target instanceof HTMLElement
+    && target.matches("input, textarea, select, button, a, [role='button'], [contenteditable='true']");
 }
 
 function getMatchupLabel(players: RoomState["players"]): string {
