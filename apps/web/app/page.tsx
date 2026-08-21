@@ -10,8 +10,6 @@ import {
   type RealtimeSocket
 } from "./_lib/realtime-client";
 import {
-  createRoomCode,
-  normalizeNickname,
   resolveTypingInputMode,
   validateNickname
 } from "@type-battle/shared";
@@ -54,7 +52,6 @@ import {
   getHomePageViewModel,
   type PracticeSession
 } from "./_lib/home-page-view-model";
-import { detectDeviceKind } from "./_lib/device-kind";
 import { advanceTypingProgress } from "./_lib/typing-input-strategy";
 import { createTypingMessageBatch } from "./_lib/typing-message-batch";
 import { shouldHandleDesktopTypingKey } from "./_lib/desktop-typing-input";
@@ -69,6 +66,7 @@ import {
 } from "./_lib/realtime-connection-controller";
 import { bindRoomSocketHandlers } from "./_lib/room-socket-handlers";
 import { usePracticeSession } from "./_lib/use-practice-session";
+import { useRoomLifecycle } from "./_lib/use-room-lifecycle";
 import { useStoredRoomRecovery } from "./_lib/use-stored-room-recovery";
 import { getScrollTopToRevealTarget } from "./_lib/scroll-visibility";
 import {
@@ -1285,169 +1283,51 @@ export default function HomePage() {
     room
   ]);
 
-  const createRoom = () => {
-    const currentNickname = nicknameRef.current;
-    const roomCode = createRoomCode();
-    const validationError = validateNickname(currentNickname);
-
-    if (createPendingRef.current) {
-      return;
+  const {
+    createRoom,
+    joinRoom,
+    leaveRoom,
+    setReady,
+    startMatch
+  } = useRoomLifecycle({
+    storageKey: ROOM_CODE_KEY,
+    realtimeUnavailableMessage: REALTIME_UNAVAILABLE_MESSAGE,
+    refs: {
+      socketRef,
+      nicknameRef,
+      createPendingRef,
+      storedRoomCodeRef,
+      autoStartRoomRef
+    },
+    state: {
+      realtimeConfigured,
+      guestId,
+      sessionId,
+      joinCode,
+      room,
+      currentPlayer
+    },
+    actions: {
+      connectRoomSocket,
+      disconnectCurrentSocket,
+      failPendingRoomCreate,
+      prepareTypingInput,
+      updateGuestSession,
+      clearPracticeState,
+      resetTyping,
+      resetStoredRoomRecovery,
+      setCreatePending,
+      setJoinPending,
+      setError,
+      setCopyFeedback,
+      setPlayerId,
+      setRoom,
+      setResult,
+      setPracticeSession,
+      setHomeMode,
+      setExitRequest
     }
-
-    setError("");
-
-    if (!realtimeConfigured || validationError || !guestId) {
-      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
-      return;
-    }
-
-    createPendingRef.current = true;
-    setCreatePending(true);
-    setError("");
-    void primeSoundPlayback();
-    const socket = connectRoomSocket(roomCode);
-    socket.emit(
-      "room:create",
-      {
-        roomCode,
-        nickname: normalizeNickname(currentNickname),
-        guestId,
-        sessionId,
-        deviceKind: detectDeviceKind()
-      },
-      (response) => {
-        if (socketRef.current !== socket) {
-          return;
-        }
-
-        if (!response.ok) {
-          failPendingRoomCreate(
-            response.error === "Realtime request timed out."
-              ? "ルーム作成の応答がありませんでした。接続を確認して、もう一度お試しください。"
-              : response.error
-          );
-          disconnectCurrentSocket();
-          return;
-        }
-
-        createPendingRef.current = false;
-        setCreatePending(false);
-        setError("");
-        setCopyFeedback({ kind: "idle", message: "" });
-        setPlayerId(response.data.playerId);
-        storedRoomCodeRef.current = response.data.roomCode;
-        setRoom(response.data.room);
-        window.localStorage.setItem(ROOM_CODE_KEY, response.data.roomCode);
-        updateGuestSession();
-        clearPracticeState();
-        resetTyping();
-      }
-    );
-  };
-
-  const joinRoom = () => {
-    const currentNickname = nicknameRef.current;
-    const roomCode = joinCode.trim().toUpperCase();
-    const validationError = validateNickname(currentNickname);
-
-    setError("");
-
-    if (!roomCode) {
-      setError("ルームコードを入力してください。");
-      return;
-    }
-
-    if (!realtimeConfigured || validationError || !guestId) {
-      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
-    setHomeMode(null);
-      return;
-    }
-
-    void primeSoundPlayback();
-    const socket = connectRoomSocket(roomCode);
-    setJoinPending(true);
-    socket.emit(
-      "room:join",
-      {
-        roomCode,
-        nickname: normalizeNickname(currentNickname),
-        guestId,
-        sessionId,
-        deviceKind: detectDeviceKind()
-      },
-      (response) => {
-        setJoinPending(false);
-        if (socketRef.current !== socket) {
-          return;
-        }
-
-        if (!response.ok) {
-          setError(response.error);
-          disconnectCurrentSocket();
-          return;
-        }
-
-        setError("");
-        setPlayerId(response.data.playerId);
-        storedRoomCodeRef.current = response.data.room.roomCode;
-        setRoom(response.data.room);
-        window.localStorage.setItem(ROOM_CODE_KEY, response.data.room.roomCode);
-        updateGuestSession();
-        clearPracticeState();
-        resetTyping();
-      }
-    );
-  };
-
-  const leaveRoom = useCallback(() => {
-    const socket = socketRef.current;
-
-    if (socket && room) {
-      socket.emit("room:leave", { roomCode: room.roomCode });
-    }
-    resetStoredRoomRecovery({ removeStoredCode: true });
-    setHomeMode(null);
-
-    disconnectCurrentSocket();
-    setRoom(null);
-    setResult(null);
-    setPlayerId("");
-    clearPracticeState();
-    resetTyping();
-    setExitRequest(null);
-  }, [clearPracticeState, disconnectCurrentSocket, resetStoredRoomRecovery, resetTyping, room]);
-
-  const setReady = () => {
-    if (!realtimeConfigured || !socketRef.current || !room || !currentPlayer) {
-      return;
-    }
-
-    prepareTypingInput();
-    socketRef.current.emit("player:ready", {
-      roomCode: room.roomCode,
-      ready: !currentPlayer.ready
-    });
-  };
-
-  const startMatch = useCallback(() => {
-    const socket = socketRef.current;
-    if (!realtimeConfigured || !socket || !room) {
-      return false;
-    }
-
-    prepareTypingInput();
-    void primeSoundPlayback();
-    socket.emit("match:start", { roomCode: room.roomCode }, (response) => {
-      if (socketRef.current !== socket) {
-        return;
-      }
-      if (!response.ok) {
-        setError(response.error);
-        autoStartRoomRef.current = null;
-      }
-    });
-    return true;
-  }, [prepareTypingInput, primeSoundPlayback, realtimeConfigured, room]);
+  });
 
   const sendReaction = useCallback((reaction: QuickReaction) => {
     const socket = socketRef.current;
