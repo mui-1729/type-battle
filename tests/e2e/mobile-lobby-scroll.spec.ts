@@ -7,7 +7,7 @@ test("keeps every lobby control reachable on a short mobile viewport", async ({ 
   await dismissTutorial(page);
   await setNickname(page, "MobileLobby");
   await selectBattleMode(page);
-  await page.locator(".roomActions .primaryButton:not(.joinButton)").click();
+  await page.getByRole("button", { name: "ルームを作成" }).click();
 
   const shell = page.locator(".appShell.isLobby");
   const roomCode = page.locator(".lobbyRoomCode");

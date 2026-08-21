@@ -1,10 +1,12 @@
-import { createRoomCode } from "@type-battle/shared";
+import { createRoomCode, type DeviceKind } from "@type-battle/shared";
 
 export type MatchmakingTicket = {
   ticketId: string;
   guestId: string;
+  sessionId: string;
   socketId: string;
   nickname: string;
+  deviceKind: DeviceKind;
   blockedGuestIds: readonly string[];
   createdAt: number;
   expiresAt: number;
@@ -28,8 +30,10 @@ export type MatchmakingQueueOptions = {
 
 type JoinInput = {
   guestId: string;
+  sessionId?: string;
   socketId: string;
   nickname: string;
+  deviceKind?: DeviceKind;
   blockedGuestIds?: readonly string[];
 };
 
@@ -56,12 +60,15 @@ export class MatchmakingQueue {
     this.expire(now);
 
     const guestId = input.guestId.trim();
+    // Gateway protocol validation always supplies a real session/device. The
+    // fallback keeps the pure queue API compatible with older internal tests.
+    const sessionId = input.sessionId?.trim() || guestId;
     const socketId = input.socketId.trim();
     const nickname = input.nickname.trim();
     const blockedGuestIds = normalizeBlockedGuestIds(input.blockedGuestIds, guestId);
 
-    if (!guestId || !socketId || !nickname) {
-      throw new Error("guestId, socketId and nickname are required.");
+    if (!guestId || !sessionId || !socketId || !nickname) {
+      throw new Error("guestId, sessionId, socketId and nickname are required.");
     }
 
     // Rejoining with the same guest ID refreshes the existing ticket instead
@@ -71,8 +78,10 @@ export class MatchmakingQueue {
     const incomingTicket: MatchmakingTicket = {
       ticketId: this.createTicketId(),
       guestId,
+      sessionId,
       socketId,
       nickname,
+      deviceKind: input.deviceKind ?? "desktop",
       blockedGuestIds,
       createdAt: now,
       expiresAt: now + this.ticketTtlMs

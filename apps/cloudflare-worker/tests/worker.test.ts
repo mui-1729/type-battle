@@ -8,6 +8,10 @@ import { resetRoomEngineState } from "@type-battle/shared/room-engine";
 import type { Env } from "../src/worker.js";
 import worker, { RoomAuthorityDurableObject, RoomDurableObject } from "../src/worker.js";
 import { GATEWAY_ROOM_RATE_LIMIT_PATH } from "../src/realtime-gateway.js";
+import {
+  MATCHMAKING_ROOM_BOOTSTRAP_PATH,
+  MATCHMAKING_ROOM_CLEANUP_PATH
+} from "../src/matchmaking-room-bootstrap.js";
 import { readCloudflareClientIp } from "../src/client-ip.js";
 
 class FakeStorage {
@@ -3237,5 +3241,77 @@ describe("worker handler", () => {
     expect(env.ROOMS.stub.fetchCalls).toBe(1);
     expect(env.ROOMS.stub.lastRequest?.url).toBe("https://example.com/rooms/xy987z/socket");
     expect(env.GATEWAY.getByNameCalls).toEqual([]);
+  });
+});
+
+
+describe("matchmaking room bootstrap internal API", () => {
+  it("conditionally creates, restores, and cleans an owned reserved room without exposing sessions", async () => {
+    const storage = new FakeStorage();
+    const state = new FakeDurableObjectState(storage);
+    const authority = new RoomAuthorityDurableObject(state as unknown as DurableObjectState);
+    await authority.ready;
+
+    const input = {
+      roomCode: "QM23AB",
+      host: {
+        guestId: "guest-host",
+        sessionId: "secret-host-session",
+        nickname: "Host",
+        deviceKind: "desktop"
+      },
+      guest: {
+        guestId: "guest-guest",
+        sessionId: "secret-guest-session",
+        nickname: "Guest",
+        deviceKind: "mobile"
+      },
+      now: 1234
+    };
+    const request = () => new Request(`https://internal${MATCHMAKING_ROOM_BOOTSTRAP_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input)
+    });
+
+    const created = await authority.fetch(request());
+    expect(created.status).toBe(201);
+    const createdBody = await created.json() as { room: RoomState };
+    expect(createdBody.room).toMatchObject({
+      roomCode: "QM23AB",
+      hostPlayerId: "guest-host",
+      status: "waiting",
+      players: [
+        { id: "guest-host", connected: false, isHost: true, deviceKind: "desktop" },
+        { id: "guest-guest", connected: false, isHost: false, deviceKind: "mobile" }
+      ]
+    });
+    expect(JSON.stringify(createdBody)).not.toContain("secret-host-session");
+    expect(JSON.stringify(createdBody)).not.toContain("secret-guest-session");
+
+    expect((await authority.fetch(request())).status).toBe(409);
+
+    const restarted = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    await restarted.ready;
+    const health = await restarted.fetch(new Request("https://internal/health"));
+    const healthBody = await health.json() as { room: RoomState };
+    expect(healthBody.room.hostPlayerId).toBe("guest-host");
+    expect(healthBody.room.players.map((player) => player.id)).toEqual(["guest-host", "guest-guest"]);
+
+    const cleanup = await restarted.fetch(new Request(`https://internal${MATCHMAKING_ROOM_CLEANUP_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        roomCode: "QM23AB",
+        hostGuestId: "guest-host",
+        guestGuestId: "guest-guest"
+      })
+    }));
+    expect(cleanup.status).toBe(204);
+    expect(storage.values.has("room")).toBe(false);
+    const afterCleanup = await restarted.fetch(new Request("https://internal/health"));
+    expect(await afterCleanup.json()).toMatchObject({ room: null });
   });
 });

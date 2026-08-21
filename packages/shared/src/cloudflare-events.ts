@@ -20,6 +20,30 @@ import type {
   TypingProgress
 } from "./game-state.js";
 
+import type {
+  MatchmakingFailurePayload,
+  MatchmakingJoinResponse,
+  MatchmakingMatchedPayload,
+  MatchmakingTimeoutPayload,
+  MatchmakingAssignedHostPayload,
+  MatchmakingWaitingHostPayload,
+  QuickMatchCancelPayload,
+  QuickMatchHostReadyPayload,
+  QuickMatchJoinPayload
+} from "./matchmaking.js";
+
+export type {
+  MatchmakingFailurePayload,
+  MatchmakingJoinResponse,
+  MatchmakingMatchedPayload,
+  MatchmakingTimeoutPayload,
+  MatchmakingAssignedHostPayload,
+  MatchmakingWaitingHostPayload,
+  QuickMatchCancelPayload,
+  QuickMatchHostReadyPayload,
+  QuickMatchJoinPayload
+} from "./matchmaking.js";
+
 type CloudflareClientCommandMap = {
   "client:room:create": {
     request: CreateRoomPayload;
@@ -81,6 +105,18 @@ type CloudflareClientCommandMap = {
     request: { nickname: string };
     response: PracticeSessionData;
   };
+  "client:matchmaking:join": {
+    request: QuickMatchJoinPayload;
+    response: MatchmakingJoinResponse;
+  };
+  "client:matchmaking:cancel": {
+    request: QuickMatchCancelPayload;
+    response: { cancelled: boolean };
+  };
+  "client:matchmaking:hostReady": {
+    request: QuickMatchHostReadyPayload;
+    response: { accepted: boolean };
+  };
 };
 
 type CloudflareServerEventMap = {
@@ -99,6 +135,11 @@ type CloudflareServerEventMap = {
     playerId: string;
     reaction: QuickReaction;
   };
+  "server:matchmaking:assignedHost": MatchmakingAssignedHostPayload;
+  "server:matchmaking:waitingHost": MatchmakingWaitingHostPayload;
+  "server:matchmaking:matched": MatchmakingMatchedPayload;
+  "server:matchmaking:timeout": MatchmakingTimeoutPayload;
+  "server:matchmaking:failed": MatchmakingFailurePayload;
 };
 
 export const CLOUDFLARE_CLIENT_MESSAGE_TYPES = [
@@ -116,7 +157,10 @@ export const CLOUDFLARE_CLIENT_MESSAGE_TYPES = [
   "client:typing:finish",
   "client:match:rematch",
   "client:practice:start",
-  "client:practice:dailyStart"
+  "client:practice:dailyStart",
+  "client:matchmaking:join",
+  "client:matchmaking:cancel",
+  "client:matchmaking:hostReady"
 ] as const satisfies readonly CloudflareClientMessageType[];
 
 export const CLOUDFLARE_SERVER_EVENT_TYPES = [
@@ -126,7 +170,12 @@ export const CLOUDFLARE_SERVER_EVENT_TYPES = [
   "server:match:started",
   "server:match:result",
   "server:error",
-  "server:player:reaction"
+  "server:player:reaction",
+  "server:matchmaking:assignedHost",
+  "server:matchmaking:waitingHost",
+  "server:matchmaking:matched",
+  "server:matchmaking:timeout",
+  "server:matchmaking:failed"
 ] as const satisfies readonly CloudflareServerEventType[];
 
 export type CloudflareClientMessageType = keyof CloudflareClientCommandMap;

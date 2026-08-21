@@ -1,11 +1,25 @@
-import type { AckResponse, PromptCategory } from "@type-battle/shared";
+import type { AckResponse, DeviceKind, PromptCategory, RoomState } from "@type-battle/shared";
+import { createRoomCode, validateNickname } from "@type-battle/shared";
 import { startDailyPractice, startPractice } from "@type-battle/shared/room-engine";
 import type {
   CloudflareClientMessageType,
-  CloudflareServerMessage
+  CloudflareServerMessage,
+  MatchmakingJoinResponse,
+  MatchmakingMatchedPayload,
+  QuickMatchHostReadyPayload
 } from "@type-battle/shared/cloudflare-events";
 import { CLOUDFLARE_CLIENT_MESSAGE_TYPES } from "@type-battle/shared/cloudflare-events";
 import { readCloudflareClientIp } from "./client-ip.js";
+import {
+  MatchmakingQueue,
+  type MatchmakingMatch,
+  type MatchmakingTicket
+} from "./matchmaking-queue.js";
+import {
+  isAssignedMatchmakingHostConnected,
+  MATCHMAKING_ROOM_BOOTSTRAP_PATH,
+  MATCHMAKING_ROOM_CLEANUP_PATH
+} from "./matchmaking-room-bootstrap.js";
 import { resolveRoomRoute } from "./room-routing.js";
 
 type CloudflareSocketLike = {
@@ -42,6 +56,38 @@ type DailyPracticePayload = {
   nickname: string;
 };
 
+type MatchmakingJoinPayload = {
+  guestId: string;
+  sessionId: string;
+  nickname: string;
+  deviceKind: DeviceKind;
+  blockedGuestIds: string[];
+};
+
+type MatchmakingCancelPayload = {
+  guestId: string;
+  sessionId: string;
+  ticketId: string;
+  matchId?: string;
+};
+
+type ParsedMatchmakingJoinPayload =
+  | { ok: true; value: MatchmakingJoinPayload }
+  | { ok: false; error: string };
+
+type RealtimeGatewayEnv = {
+  ROOMS?: DurableObjectNamespace;
+};
+
+type PendingMatch = {
+  matchId: string;
+  roomCode: string;
+  host: MatchmakingTicket;
+  guest: MatchmakingTicket;
+  hostReadyDeadlineAt: number;
+  timer: ReturnType<typeof setTimeout>;
+};
+
 export type RoomRateLimitAction = "create" | "join";
 
 export type RoomRateLimitInput = {
@@ -69,6 +115,12 @@ const INVALID_MESSAGE_ERROR = "リクエストの形式が正しくありませ�
 const MAX_WEB_SOCKET_MESSAGE_BYTES = 16 * 1024;
 const MAX_MESSAGE_ID_LENGTH = 80;
 const MAX_GATEWAY_SOCKETS = 256;
+const MAX_MATCHMAKING_GUEST_ID_LENGTH = 80;
+const MAX_MATCHMAKING_BLOCKED_GUEST_IDS = 100;
+const MAX_MATCHMAKING_SESSION_ID_LENGTH = 96;
+const MAX_PENDING_MATCHES = 64;
+const MATCHMAKING_HOST_READY_MS = 10_000;
+const MATCHMAKING_ROOM_CODE_ATTEMPTS = 5;
 // Leave enough headroom for classrooms and offices sharing one public IP while
 // preventing one address from occupying the Durable Object's entire capacity.
 const MAX_GATEWAY_SOCKETS_PER_CLIENT_IP = 32;
@@ -118,10 +170,16 @@ const ROOM_COMMANDS_WITH_ACK = new Set<CloudflareClientMessageType>([
 export class RealtimeGatewayDurableObject {
   private readonly sockets = new Map<string, CloudflareSocketLike>();
   private readonly socketStates = new Map<string, SocketState>();
+  private readonly matchmakingQueue = new MatchmakingQueue();
+  private readonly matchmakingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly pendingMatches = new Map<string, PendingMatch>();
   private socketEventChain: Promise<void> = Promise.resolve();
   readonly ready: Promise<void>;
 
-  constructor(private readonly state: DurableObjectState) {
+  constructor(
+    private readonly state: DurableObjectState,
+    private readonly env: RealtimeGatewayEnv = {}
+  ) {
     this.ready = this.state.blockConcurrencyWhile(async () => {});
   }
 
@@ -152,7 +210,9 @@ export class RealtimeGatewayDurableObject {
         ok: true,
         service: "type-battle-cloudflare-gateway",
         sockets: this.sockets.size,
-        socketStates: this.socketStates.size
+        socketStates: this.socketStates.size,
+        matchmakingTickets: this.matchmakingQueue.size,
+        matchmakingPendingMatches: this.pendingMatches.size
       });
     }
 
@@ -417,6 +477,15 @@ export class RealtimeGatewayDurableObject {
       case "client:practice:dailyStart":
         await this.handleDailyPracticeStart(socketId, message.id, message.payload);
         return;
+      case "client:matchmaking:join":
+        await this.handleMatchmakingJoin(socketId, message.id, message.payload);
+        return;
+      case "client:matchmaking:cancel":
+        this.handleMatchmakingCancel(socketId, message.id, message.payload);
+        return;
+      case "client:matchmaking:hostReady":
+        await this.handleMatchmakingHostReady(socketId, message.id, message.payload);
+        return;
       default:
         return;
     }
@@ -452,6 +521,350 @@ export class RealtimeGatewayDurableObject {
 
     const practice = startDailyPractice(parsedPayload.nickname);
     this.sendAck(socketId, messageId, "client:practice:dailyStart", { ok: true, data: practice });
+  }
+
+  private async handleMatchmakingJoin(socketId: string, messageId: string, payload: unknown): Promise<void> {
+    const parsedPayload = parseMatchmakingJoinPayload(payload);
+    if (!parsedPayload.ok) {
+      this.sendAck(socketId, messageId, "client:matchmaking:join", {
+        ok: false,
+        error: parsedPayload.error
+      });
+      return;
+    }
+
+    if (this.pendingMatches.size >= MAX_PENDING_MATCHES) {
+      this.sendAck(socketId, messageId, "client:matchmaking:join", {
+        ok: false,
+        error: "マッチング処理が混雑しています。しばらくしてから再試行してください。"
+      });
+      return;
+    }
+
+    const { guestId, sessionId, nickname, deviceKind, blockedGuestIds } = parsedPayload.value;
+    const existingTicket = this.matchmakingQueue
+      .snapshot()
+      .find((ticket) => ticket.guestId === guestId);
+
+    if (
+      existingTicket &&
+      (existingTicket.socketId !== socketId || existingTicket.sessionId !== sessionId)
+    ) {
+      this.sendAck(socketId, messageId, "client:matchmaking:join", {
+        ok: false,
+        error: "このゲストは別の接続ですでに検索中です。"
+      });
+      return;
+    }
+
+    this.clearMatchmakingTimeout(guestId);
+    const result = this.matchmakingQueue.join({
+      guestId,
+      sessionId,
+      socketId,
+      nickname,
+      deviceKind,
+      blockedGuestIds
+    });
+
+    if (result.kind === "queued") {
+      this.scheduleMatchmakingTimeout(result.ticket);
+      const response: MatchmakingJoinResponse = {
+        status: "queued",
+        ticketId: result.ticket.ticketId,
+        expiresAt: result.ticket.expiresAt
+      };
+      this.sendAck(socketId, messageId, "client:matchmaking:join", { ok: true, data: response });
+      return;
+    }
+
+    this.clearMatchmakingTimeout(result.match.host.guestId);
+    this.clearMatchmakingTimeout(result.match.guest.guestId);
+    const pending = await this.bootstrapMatch(result.match);
+    if (!pending) {
+      this.sendAck(socketId, messageId, "client:matchmaking:join", {
+        ok: false,
+        error: "対戦ルームを準備できませんでした。もう一度お試しください。"
+      });
+      this.sendMatchmakingFailure(result.match.host, "bootstrap", true);
+      return;
+    }
+
+    const hostPayload = {
+      ...createMatchedPayload(pending, "host"),
+      role: "host" as const,
+      hostReadyDeadlineAt: pending.hostReadyDeadlineAt
+    };
+    this.sendMessage(pending.host.socketId, {
+      id: crypto.randomUUID(),
+      type: "server:matchmaking:assignedHost",
+      payload: hostPayload
+    });
+    this.sendAck(socketId, messageId, "client:matchmaking:join", {
+      ok: true,
+      data: {
+        status: "waitingHost",
+        role: "guest",
+        ticketId: pending.guest.ticketId,
+        matchId: pending.matchId,
+        hostReadyDeadlineAt: pending.hostReadyDeadlineAt,
+        opponent: {
+          id: pending.host.guestId,
+          nickname: pending.host.nickname
+        }
+      }
+    });
+  }
+
+  private handleMatchmakingCancel(socketId: string, messageId: string, payload: unknown): void {
+    const parsedPayload = parseMatchmakingCancelPayload(payload);
+    if (!parsedPayload) {
+      this.sendAck(socketId, messageId, "client:matchmaking:cancel", {
+        ok: false,
+        error: INVALID_MESSAGE_ERROR
+      });
+      return;
+    }
+
+    const ticket = this.matchmakingQueue
+      .snapshot()
+      .find((candidate) => candidate.guestId === parsedPayload.guestId);
+    if (
+      ticket &&
+      ticket.socketId === socketId &&
+      ticket.sessionId === parsedPayload.sessionId &&
+      ticket.ticketId === parsedPayload.ticketId
+    ) {
+      this.matchmakingQueue.cancelGuest(parsedPayload.guestId);
+      this.clearMatchmakingTimeout(parsedPayload.guestId);
+      this.sendAck(socketId, messageId, "client:matchmaking:cancel", {
+        ok: true,
+        data: { cancelled: true }
+      });
+      return;
+    }
+
+    const pending = [...this.pendingMatches.values()].find((candidate) =>
+      (!parsedPayload.matchId || candidate.matchId === parsedPayload.matchId) &&
+      [candidate.host, candidate.guest].some((party) =>
+        party.socketId === socketId &&
+        party.guestId === parsedPayload.guestId &&
+        party.sessionId === parsedPayload.sessionId &&
+        party.ticketId === parsedPayload.ticketId
+      )
+    );
+    if (!pending) {
+      this.sendAck(socketId, messageId, "client:matchmaking:cancel", {
+        ok: true,
+        data: { cancelled: false }
+      });
+      return;
+    }
+
+    this.clearPendingMatch(pending.matchId);
+    this.cleanupPendingRoom(pending);
+    const other = pending.host.socketId === socketId ? pending.guest : pending.host;
+    this.sendMatchmakingFailure(other, "cancelled", true, pending.matchId);
+    this.sendAck(socketId, messageId, "client:matchmaking:cancel", {
+      ok: true,
+      data: { cancelled: true }
+    });
+  }
+
+  private async handleMatchmakingHostReady(
+    socketId: string,
+    messageId: string,
+    payload: unknown
+  ): Promise<void> {
+    const parsed = parseMatchmakingHostReadyPayload(payload);
+    const pending = parsed ? this.pendingMatches.get(parsed.matchId) : undefined;
+    if (
+      !parsed ||
+      !pending ||
+      pending.host.socketId !== socketId ||
+      pending.host.ticketId !== parsed.ticketId ||
+      !this.env.ROOMS
+    ) {
+      this.sendAck(socketId, messageId, "client:matchmaking:hostReady", {
+        ok: true,
+        data: { accepted: false }
+      });
+      return;
+    }
+
+    try {
+      const response = await this.env.ROOMS.getByName(pending.roomCode).fetch(
+        new Request("https://type-battle.internal/health")
+      );
+      const state = await response.json() as { room?: RoomState | null };
+      if (!isAssignedMatchmakingHostConnected(state.room, pending.host.guestId)) {
+        this.sendAck(socketId, messageId, "client:matchmaking:hostReady", {
+          ok: true,
+          data: { accepted: false }
+        });
+        return;
+      }
+    } catch {
+      this.sendAck(socketId, messageId, "client:matchmaking:hostReady", {
+        ok: true,
+        data: { accepted: false }
+      });
+      return;
+    }
+
+    this.clearPendingMatch(pending.matchId);
+    this.sendMessage(pending.guest.socketId, {
+      id: crypto.randomUUID(),
+      type: "server:matchmaking:matched",
+      payload: createMatchedPayload(pending, "guest")
+    });
+    this.sendAck(socketId, messageId, "client:matchmaking:hostReady", {
+      ok: true,
+      data: { accepted: true }
+    });
+  }
+
+  private async bootstrapMatch(match: MatchmakingMatch): Promise<PendingMatch | null> {
+    if (!this.env.ROOMS) {
+      return null;
+    }
+
+    for (let attempt = 0; attempt < MATCHMAKING_ROOM_CODE_ATTEMPTS; attempt += 1) {
+      const roomCode = attempt === 0 ? match.roomCode : createRoomCode();
+      try {
+        const response = await this.env.ROOMS.getByName(roomCode).fetch(new Request(
+          `https://type-battle.internal${MATCHMAKING_ROOM_BOOTSTRAP_PATH}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              roomCode,
+              host: toBootstrapPlayer(match.host),
+              guest: toBootstrapPlayer(match.guest)
+            })
+          }
+        ));
+        if (response.status === 409) {
+          continue;
+        }
+        if (!response.ok) {
+          return null;
+        }
+
+        const matchId = crypto.randomUUID();
+        const hostReadyDeadlineAt = Date.now() + MATCHMAKING_HOST_READY_MS;
+        const timer = setTimeout(() => {
+          const current = this.pendingMatches.get(matchId);
+          if (!current) return;
+          this.pendingMatches.delete(matchId);
+          this.cleanupPendingRoom(current);
+          for (const party of [current.host, current.guest]) {
+            this.sendMessage(party.socketId, {
+              id: crypto.randomUUID(),
+              type: "server:matchmaking:timeout",
+              payload: {
+                ticketId: party.ticketId,
+                matchId,
+                phase: "host",
+                fallback: "com"
+              }
+            });
+          }
+        }, MATCHMAKING_HOST_READY_MS);
+        const pending: PendingMatch = {
+          matchId,
+          roomCode,
+          host: match.host,
+          guest: match.guest,
+          hostReadyDeadlineAt,
+          timer
+        };
+        this.pendingMatches.set(matchId, pending);
+        return pending;
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  private clearPendingMatch(matchId: string): PendingMatch | null {
+    const pending = this.pendingMatches.get(matchId) ?? null;
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.pendingMatches.delete(matchId);
+    }
+    return pending;
+  }
+
+  private cleanupPendingRoom(pending: PendingMatch): void {
+    if (!this.env.ROOMS) return;
+    const operation = this.env.ROOMS.getByName(pending.roomCode).fetch(new Request(
+      `https://type-battle.internal${MATCHMAKING_ROOM_CLEANUP_PATH}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomCode: pending.roomCode,
+          hostGuestId: pending.host.guestId,
+          guestGuestId: pending.guest.guestId
+        })
+      }
+    ));
+    this.state.waitUntil(operation.catch(() => undefined));
+  }
+
+  private sendMatchmakingFailure(
+    ticket: MatchmakingTicket,
+    reason: "bootstrap" | "cancelled" | "disconnected" | "capacity",
+    retryable: boolean,
+    matchId?: string
+  ): void {
+    this.sendMessage(ticket.socketId, {
+      id: crypto.randomUUID(),
+      type: "server:matchmaking:failed",
+      payload: {
+        ticketId: ticket.ticketId,
+        ...(matchId ? { matchId } : {}),
+        reason,
+        retryable
+      }
+    });
+  }
+
+  private scheduleMatchmakingTimeout(ticket: MatchmakingTicket): void {
+    this.clearMatchmakingTimeout(ticket.guestId);
+    const delay = Math.max(0, ticket.expiresAt - Date.now());
+    const timer = setTimeout(() => {
+      this.matchmakingTimeouts.delete(ticket.guestId);
+      const currentTicket = this.matchmakingQueue
+        .snapshot()
+        .find((candidate) => candidate.guestId === ticket.guestId);
+      if (!currentTicket || currentTicket.ticketId !== ticket.ticketId) {
+        return;
+      }
+
+      this.matchmakingQueue.cancelGuest(ticket.guestId);
+      this.sendMessage(ticket.socketId, {
+        id: crypto.randomUUID(),
+        type: "server:matchmaking:timeout",
+        payload: {
+          ticketId: ticket.ticketId,
+          phase: "queue",
+          fallback: "com"
+        }
+      });
+    }, delay);
+    this.matchmakingTimeouts.set(ticket.guestId, timer);
+  }
+
+  private clearMatchmakingTimeout(guestId: string): void {
+    const timer = this.matchmakingTimeouts.get(guestId);
+    if (timer) {
+      clearTimeout(timer);
+      this.matchmakingTimeouts.delete(guestId);
+    }
   }
 
   private sendAck(
@@ -497,6 +910,18 @@ export class RealtimeGatewayDurableObject {
     if (socketState?.idleTimer) {
       clearTimeout(socketState.idleTimer);
     }
+    for (const ticket of this.matchmakingQueue.removeSocket(socketId)) {
+      this.clearMatchmakingTimeout(ticket.guestId);
+    }
+    for (const pending of [...this.pendingMatches.values()]) {
+      if (pending.host.socketId !== socketId && pending.guest.socketId !== socketId) {
+        continue;
+      }
+      this.clearPendingMatch(pending.matchId);
+      this.cleanupPendingRoom(pending);
+      const other = pending.host.socketId === socketId ? pending.guest : pending.host;
+      this.sendMatchmakingFailure(other, "disconnected", true, pending.matchId);
+    }
     this.sockets.delete(socketId);
     this.socketStates.delete(socketId);
   }
@@ -519,6 +944,30 @@ export class RealtimeGatewayDurableObject {
     }, GATEWAY_SOCKET_IDLE_MS);
     this.socketStates.set(socketId, socketState);
   }
+}
+
+function createMatchedPayload(match: PendingMatch, role: "host" | "guest"): MatchmakingMatchedPayload {
+  const player = role === "host" ? match.host : match.guest;
+  const opponent = role === "host" ? match.guest : match.host;
+  return {
+    roomCode: match.roomCode,
+    role,
+    ticketId: player.ticketId,
+    matchId: match.matchId,
+    opponent: {
+      id: opponent.guestId,
+      nickname: opponent.nickname
+    }
+  };
+}
+
+function toBootstrapPlayer(ticket: MatchmakingTicket) {
+  return {
+    guestId: ticket.guestId,
+    sessionId: ticket.sessionId,
+    nickname: ticket.nickname,
+    deviceKind: ticket.deviceKind
+  };
 }
 
 function isWebSocketUpgrade(request: Request): boolean {
@@ -610,6 +1059,85 @@ function parseDailyPracticePayload(payload: unknown): DailyPracticePayload | nul
   return { nickname };
 }
 
+function parseMatchmakingJoinPayload(payload: unknown): ParsedMatchmakingJoinPayload {
+  if (!isRecord(payload)) {
+    return { ok: false, error: INVALID_MESSAGE_ERROR };
+  }
+
+  const guestId = readBoundedString(payload.guestId, MAX_MATCHMAKING_GUEST_ID_LENGTH);
+  const sessionId = readBoundedString(payload.sessionId, MAX_MATCHMAKING_SESSION_ID_LENGTH);
+  const nickname = readString(payload.nickname);
+  const deviceKind = readDeviceKind(payload.deviceKind);
+  if (!guestId || !sessionId || !nickname || !deviceKind) {
+    return { ok: false, error: INVALID_MESSAGE_ERROR };
+  }
+
+  const nicknameError = validateNickname(nickname);
+  if (nicknameError) {
+    return { ok: false, error: nicknameError };
+  }
+
+  const blockedGuestIds = readBlockedGuestIds(payload.blockedGuestIds);
+  if (!blockedGuestIds) {
+    return { ok: false, error: INVALID_MESSAGE_ERROR };
+  }
+
+  return {
+    ok: true,
+    value: {
+      guestId,
+      sessionId,
+      nickname,
+      deviceKind,
+      blockedGuestIds
+    }
+  };
+}
+
+function parseMatchmakingCancelPayload(payload: unknown): MatchmakingCancelPayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+
+  const guestId = readBoundedString(payload.guestId, MAX_MATCHMAKING_GUEST_ID_LENGTH);
+  const sessionId = readBoundedString(payload.sessionId, MAX_MATCHMAKING_SESSION_ID_LENGTH);
+  const ticketId = readBoundedString(payload.ticketId, MAX_MATCHMAKING_SESSION_ID_LENGTH);
+  const matchId = payload.matchId === undefined
+    ? undefined
+    : readBoundedString(payload.matchId, MAX_MATCHMAKING_SESSION_ID_LENGTH);
+  return guestId && sessionId && ticketId && (payload.matchId === undefined || matchId)
+    ? { guestId, sessionId, ticketId, ...(matchId ? { matchId } : {}) }
+    : null;
+}
+
+function parseMatchmakingHostReadyPayload(payload: unknown): QuickMatchHostReadyPayload | null {
+  if (!isRecord(payload)) {
+    return null;
+  }
+  const ticketId = readBoundedString(payload.ticketId, MAX_MATCHMAKING_SESSION_ID_LENGTH);
+  const matchId = readBoundedString(payload.matchId, MAX_MATCHMAKING_SESSION_ID_LENGTH);
+  return ticketId && matchId ? { ticketId, matchId } : null;
+}
+
+function readBlockedGuestIds(value: unknown): string[] | null {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const guestIds: string[] = [];
+  for (const candidate of value.slice(0, MAX_MATCHMAKING_BLOCKED_GUEST_IDS)) {
+    const guestId = readBoundedString(candidate, MAX_MATCHMAKING_GUEST_ID_LENGTH);
+    if (!guestId) {
+      return null;
+    }
+    guestIds.push(guestId);
+  }
+  return guestIds;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -622,8 +1150,20 @@ function readString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function readBoundedString(value: unknown, maxLength: number): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= maxLength ? trimmed : null;
+}
+
 function readPromptCategory(value: unknown): PromptCategory | null {
   return value === "short" || value === "standard" || value === "long" ? value : null;
+}
+
+function readDeviceKind(value: unknown): DeviceKind | null {
+  return value === "mobile" || value === "desktop" ? value : null;
 }
 
 function normalizeClientIp(clientIp: string | undefined): string {

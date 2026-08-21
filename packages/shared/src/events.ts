@@ -12,6 +12,17 @@ import type {
   TypingFinish,
   TypingProgress
 } from "./game-state.js";
+import type {
+  MatchmakingAssignedHostPayload,
+  MatchmakingFailurePayload,
+  MatchmakingJoinResponse,
+  MatchmakingMatchedPayload,
+  MatchmakingTimeoutPayload,
+  MatchmakingWaitingHostPayload,
+  QuickMatchCancelPayload,
+  QuickMatchHostReadyPayload,
+  QuickMatchJoinPayload
+} from "./matchmaking.js";
 
 export type JoinRoomPayload = {
   roomCode: string;
@@ -101,6 +112,18 @@ export type ClientToServerEvents = {
     payload: { nickname: string },
     ack: (response: AckResponse<PracticeSessionData>) => void
   ) => void;
+  "matchmaking:join": (
+    payload: QuickMatchJoinPayload,
+    ack: (response: AckResponse<MatchmakingJoinResponse>) => void
+  ) => void;
+  "matchmaking:cancel": (
+    payload: QuickMatchCancelPayload,
+    ack: (response: AckResponse<{ cancelled: boolean }>) => void
+  ) => void;
+  "matchmaking:hostReady": (
+    payload: QuickMatchHostReadyPayload,
+    ack: (response: AckResponse<{ accepted: boolean }>) => void
+  ) => void;
 };
 
 export type ServerToClientEvents = {
@@ -111,4 +134,9 @@ export type ServerToClientEvents = {
   "match:result": (result: MatchResult) => void;
   "match:error": (payload: { message: string }) => void;
   "player:reaction": (payload: { playerId: string; reaction: QuickReaction }) => void;
+  "matchmaking:assignedHost": (payload: MatchmakingAssignedHostPayload) => void;
+  "matchmaking:waitingHost": (payload: MatchmakingWaitingHostPayload) => void;
+  "matchmaking:matched": (payload: MatchmakingMatchedPayload) => void;
+  "matchmaking:timeout": (payload: MatchmakingTimeoutPayload) => void;
+  "matchmaking:failed": (payload: MatchmakingFailurePayload) => void;
 };

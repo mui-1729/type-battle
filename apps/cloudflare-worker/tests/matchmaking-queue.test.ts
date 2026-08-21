@@ -127,8 +127,10 @@ describe("MatchmakingQueue", () => {
 describe("ticketsCanMatch", () => {
   const base = {
     ticketId: "ticket",
+    sessionId: "session",
     socketId: "socket",
     nickname: "Player",
+    deviceKind: "desktop" as const,
     createdAt: 0,
     expiresAt: 1_000,
     blockedGuestIds: [] as string[]
