@@ -5,7 +5,6 @@ import { Clipboard, Swords, Users } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import {
-  createRealtimeSocket,
   getDefaultRealtimeUrl,
   type RealtimeTransport,
   type RealtimeSocket
@@ -69,7 +68,12 @@ import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
 import { resolveRoomSnapshot } from "./_lib/room-state-order";
 import { copyText } from "./_lib/clipboard";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
-import { getPracticeSocketToRelease } from "./_lib/practice-socket-lifecycle";
+import {
+  disconnectPracticeRealtimeConnection,
+  disconnectRealtimeConnection,
+  getRoomRealtimeUrl,
+  openRealtimeConnection
+} from "./_lib/realtime-connection-controller";
 import { getScrollTopToRevealTarget } from "./_lib/scroll-visibility";
 import {
   INITIAL_REACTION_FEEDBACK,
@@ -693,51 +697,39 @@ export default function HomePage() {
   }, [failPendingRoomCreate, resetTyping]);
 
   const connectSocket = useCallback(
-    (url: string, kind: "practice" | "room") => {
-    const previousSocket = socketRef.current;
-    socketRef.current = null;
-    storedRoomJoinInFlightRef.current = false;
-    previousSocket?.disconnect();
-    const socket = createRealtimeSocket({ transport: REALTIME_TRANSPORT, url });
-    socketRef.current = socket;
-    socketModeRef.current = kind;
-    setSocketMode(kind);
-    attachSocketHandlers(socket, kind);
-    return socket;
-    },
+    (url: string, kind: "practice" | "room") =>
+      openRealtimeConnection({
+        refs: { socketRef, socketModeRef, storedRoomJoinInFlightRef },
+        setters: { setSocketMode, setConnected },
+        transport: REALTIME_TRANSPORT,
+        url,
+        mode: kind,
+        attachHandlers: attachSocketHandlers
+      }),
     [attachSocketHandlers]
   );
 
-  const connectPracticeSocket = useCallback(() => connectSocket(realtimeUrl, "practice"), [connectSocket, realtimeUrl]);
+  const connectPracticeSocket = useCallback(
+    () => connectSocket(realtimeUrl, "practice"),
+    [connectSocket, realtimeUrl]
+  );
   const connectRoomSocket = useCallback(
-    (roomCode: string) => {
-    const roomUrl = new URL(`/rooms/${roomCode}/socket`, realtimeUrl).toString();
-    return connectSocket(roomUrl, "room");
-    },
+    (roomCode: string) => connectSocket(getRoomRealtimeUrl(realtimeUrl, roomCode), "room"),
     [connectSocket, realtimeUrl]
   );
 
   const disconnectCurrentSocket = useCallback(() => {
-    const socket = socketRef.current;
-    socketRef.current = null;
-    socketModeRef.current = null;
-    storedRoomJoinInFlightRef.current = false;
-    socket?.disconnect();
-    setSocketMode(null);
-    setConnected(false);
+    disconnectRealtimeConnection({
+      refs: { socketRef, socketModeRef, storedRoomJoinInFlightRef },
+      setters: { setSocketMode, setConnected }
+    });
   }, []);
 
   const disconnectPracticeSocket = useCallback(() => {
-    const socket = getPracticeSocketToRelease(socketRef.current, socketModeRef.current);
-    if (!socket) {
-      return;
-    }
-
-    socketRef.current = null;
-    socketModeRef.current = null;
-    socket.disconnect();
-    setSocketMode(null);
-    setConnected(false);
+    disconnectPracticeRealtimeConnection({
+      refs: { socketRef, socketModeRef, storedRoomJoinInFlightRef },
+      setters: { setSocketMode, setConnected }
+    });
   }, []);
 
   const clearStoredRoomRetryTimer = useCallback(() => {
