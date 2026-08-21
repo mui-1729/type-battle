@@ -14,7 +14,8 @@ test("serves the application with defensive security headers", async ({ request 
 
   const contentSecurityPolicy = response.headers()["content-security-policy"];
   expect(contentSecurityPolicy).toContain("default-src 'self'");
-  expect(contentSecurityPolicy).toContain("connect-src 'self' https: wss: ws:");
+  expect(contentSecurityPolicy).toContain("connect-src 'self' ws://127.0.0.1:8787");
+  expect(contentSecurityPolicy).not.toContain("connect-src 'self' https: wss: ws:");
   expect(contentSecurityPolicy).toContain("object-src 'none'");
   expect(contentSecurityPolicy).toContain("frame-ancestors 'none'");
 });

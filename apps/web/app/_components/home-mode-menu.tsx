@@ -2,6 +2,7 @@ import Link from "next/link";
 import { BookOpen, ChevronRight, Coins, ShoppingBag, Sparkles, Swords } from "lucide-react";
 import type { EquipmentSelection } from "@type-battle/shared";
 import { GameLogo } from "./game-logo";
+import { PublicInfoLinks } from "./public-info-links";
 import { StickFigure } from "./stick-figure";
 
 type HomeModeMenuProps = {
@@ -86,7 +87,10 @@ export function HomeModeMenu({
         遊び方を見る
         <ChevronRight size={18} aria-hidden="true" />
       </Link>
-      <p className="homeNicknameNote">ⓘ ニックネーム未設定でも、対戦前に設定できます。</p>
+      <div className="homePublicInfoFooter">
+        <p className="homeNicknameNote">ⓘ ニックネーム未設定でも、対戦前に設定できます。</p>
+        <PublicInfoLinks className="homePublicInfoLinks" />
+      </div>
     </section>
   );
 }

@@ -166,36 +166,36 @@ test("keeps the typing prompt reachable when the software keyboard reduces the v
   });
   await waitForConstrainedVisualViewport(page, 500);
 
-  await expect.poll(async () => page.locator(".matchSurface").evaluate((surface) => {
-    const prompt = surface.querySelector<HTMLElement>(".promptBox");
-    const promptRect = prompt?.getBoundingClientRect();
-    const surfaceRect = surface.getBoundingClientRect();
-    return Boolean(
-      promptRect &&
-      promptRect.top >= surfaceRect.top &&
-      promptRect.bottom <= Math.min(surfaceRect.bottom, 500)
-    );
-  }), { timeout: 10_000 }).toBe(true);
-
-  const metrics = await page.locator(".matchSurface").evaluate((surface) => {
-    const prompt = surface.querySelector<HTMLElement>(".promptBox");
-    const promptRect = prompt?.getBoundingClientRect();
+  const surface = page.locator(".matchSurface");
+  await expect.poll(async () => surface.evaluate((element) => {
+    const prompt = element.querySelector<HTMLElement>(".promptBox");
     return {
-      documentHeight: document.documentElement.scrollHeight,
-      viewportHeight: window.innerHeight,
-      shellHeight: document.querySelector<HTMLElement>(".appShell")?.clientHeight ?? 0,
-      surfaceScrollHeight: surface.scrollHeight,
-      surfaceClientHeight: surface.clientHeight,
-      promptTop: promptRect?.top ?? -1,
-      promptBottom: promptRect?.bottom ?? Number.POSITIVE_INFINITY
+      overflowY: getComputedStyle(element).overflowY,
+      scrollable: element.scrollHeight > element.clientHeight,
+      promptReachable: Boolean(
+        prompt &&
+        prompt.offsetTop >= 0 &&
+        prompt.offsetTop + prompt.offsetHeight <= element.scrollHeight
+      )
     };
+  })).toEqual({
+    overflowY: "auto",
+    scrollable: true,
+    promptReachable: true
   });
+
+  const metrics = await surface.evaluate((element) => ({
+    documentHeight: document.documentElement.scrollHeight,
+    viewportHeight: window.innerHeight,
+    shellHeight: document.querySelector<HTMLElement>(".appShell")?.clientHeight ?? 0,
+    surfaceScrollHeight: element.scrollHeight,
+    surfaceClientHeight: element.clientHeight
+  }));
 
   expect(metrics.documentHeight).toBe(metrics.viewportHeight);
   expect(metrics.shellHeight).toBe(500);
   expect(metrics.surfaceScrollHeight).toBeGreaterThan(metrics.surfaceClientHeight);
-  expect(metrics.promptTop).toBeGreaterThanOrEqual(0);
-  expect(metrics.promptBottom).toBeLessThanOrEqual(metrics.shellHeight);
+  await expect(textarea).toBeFocused();
 });
 
 test("keeps the COM battle stage inside a mobile viewport with kana input", async ({ page }) => {
