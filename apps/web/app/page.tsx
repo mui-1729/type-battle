@@ -10,8 +10,6 @@ import {
   type RealtimeSocket
 } from "./_lib/realtime-client";
 import {
-  calculateAccuracy,
-  calculateWpm,
   createRoomCode,
   normalizeNickname,
   resolveTypingInputMode,
@@ -21,7 +19,6 @@ import type {
   EquipmentSelection,
   MatchRule,
   MatchResult,
-  PlayerResult,
   PromptCategory,
   QuickReaction,
   RoomState
@@ -51,9 +48,6 @@ import {
   type ProgressState
 } from "./_lib/typing-progress";
 import {
-  buildRomajiTypingPlan
-} from "./_lib/romaji-typing";
-import {
   getCanonicalProgressIndex
 } from "./_lib/looping-typing";
 import {
@@ -74,6 +68,7 @@ import {
   openRealtimeConnection
 } from "./_lib/realtime-connection-controller";
 import { bindRoomSocketHandlers } from "./_lib/room-socket-handlers";
+import { usePracticeSession } from "./_lib/use-practice-session";
 import { useStoredRoomRecovery } from "./_lib/use-stored-room-recovery";
 import { getScrollTopToRevealTarget } from "./_lib/scroll-visibility";
 import {
@@ -112,10 +107,7 @@ import {
 import { playCountdownSound, playTypingSound, primeSoundPlayback } from "../lib/sound";
 import {
   DAILY_CHALLENGE_MAX_ATTEMPTS,
-  consumeDailyChallengeAttempt,
-  getVisibleDailyChallengeRecord,
   loadDailyChallengeRecord,
-  recordDailyChallengeAttempt,
   type DailyChallengeRecord
 } from "../lib/daily-challenge";
 import {
@@ -614,192 +606,43 @@ export default function HomePage() {
     }
   });
 
-  const startPractice = useCallback(() => {
-    const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
-    const validationError = validateNickname(currentNickname);
-    const deviceKind = detectDeviceKind();
-
-    if (!realtimeConfigured || validationError || !guestId) {
-      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
-      return;
-    }
-
-    const socket = connectPracticeSocket();
-    prepareTypingInput();
-    setHomeMode(null);
-    void primeSoundPlayback();
-    socket.emit(
-      "practice:start",
-      { nickname: normalizeNickname(currentNickname), category: practiceCategory },
-      (response) => {
-        if (socketRef.current !== socket) {
-          return;
-        }
-
-        if (!response.ok) {
-          setError(response.error);
-          disconnectPracticeSocket();
-          return;
-        }
-
-        disconnectPracticeSocket();
-        setError("");
-        setPracticeSession({
-          ...response.data,
-          category: practiceCategory,
-          deviceKind,
-          mode: "practice"
-        });
-        setPracticeResult(null);
-        setPracticeProgress(createEmptyProgress());
-        resetTyping();
-      }
-    );
-  }, [connectPracticeSocket, disconnectPracticeSocket, guestId, practiceCategory, prepareTypingInput, realtimeConfigured, resetTyping]);
-
-  const consumeDailyAttempt = useCallback(() => {
-    if (!practiceSession || practiceSession.mode !== "daily" || dailyAttemptConsumedRef.current) {
-      return;
-    }
-
-    const record = consumeDailyChallengeAttempt(
-      window.localStorage,
-      practiceSession.challengeKey ?? dailyChallengeInfo.challengeKey,
-      practiceSession.prompt.id,
-      Date.now()
-    );
-    if (!record) {
-      return;
-    }
-    dailyAttemptConsumedRef.current = true;
-    setDailyAttemptConsumed(true);
-    setDailyChallengeRecord(getVisibleDailyChallengeRecord(record, dailyChallengeInfo.challengeKey));
-  }, [dailyChallengeInfo.challengeKey, practiceSession]);
-
-  const startDailyChallenge = useCallback(() => {
-    const currentNickname = nicknameInputRef.current?.value ?? nicknameRef.current;
-    const validationError = validateNickname(currentNickname);
-    const deviceKind = detectDeviceKind();
-
-    if (!realtimeConfigured || validationError || !guestId) {
-      setError(validationError ?? REALTIME_UNAVAILABLE_MESSAGE);
-      return;
-    }
-
-    const currentRecord = loadDailyChallengeRecord(window.localStorage, dailyChallengeInfo.challengeKey);
-    if ((currentRecord?.attempts ?? 0) >= DAILY_CHALLENGE_MAX_ATTEMPTS) {
-      setError("今日のデイリー挑戦回数を使い切りました。次の日付まで待ってください。");
-      return;
-    }
-
-    const socket = connectPracticeSocket();
-    prepareTypingInput();
-    setHomeMode(null);
-    void primeSoundPlayback();
-    socket.emit("practice:dailyStart", { nickname: normalizeNickname(currentNickname) }, (response) => {
-      if (socketRef.current !== socket) {
-        return;
-      }
-
-      if (!response.ok) {
-        setError(response.error);
-        disconnectPracticeSocket();
-        return;
-      }
-
-      disconnectPracticeSocket();
-      setError("");
-      setPracticeSession({
-        ...response.data,
-        category: "standard",
-        deviceKind,
-        mode: "daily",
-        ...(response.data.challengeKey ? { challengeKey: response.data.challengeKey } : {})
-      });
-        setPracticeResult(null);
-        setPracticeProgress(createEmptyProgress());
-        dailyAttemptConsumedRef.current = false;
-        setDailyAttemptConsumed(false);
-        resetTyping();
-    });
-  }, [connectPracticeSocket, dailyChallengeInfo.challengeKey, disconnectPracticeSocket, guestId, prepareTypingInput, realtimeConfigured, resetTyping]);
-
-  const finishPractice = useCallback(
-    (finalProgress: ProgressState) => {
-      if (!practiceSession) {
-        return;
-      }
-
-      if (practiceSession.mode === "daily") {
-        consumeDailyAttempt();
-      }
-
-      const finishTimeMs = Date.now() - practiceSession.startedAt;
-      const canonicalProgressIndex =
-        inputModeRef.current === "kana"
-          ? finalProgress.progressIndex
-          : getCanonicalProgressIndex(
-              buildRomajiTypingPlan(practiceSession.prompt.typing.hiragana),
-              finalProgress.progressIndex
-            );
-      const player: PlayerResult = {
-        id: practiceSession.practiceId,
-        nickname: normalizeNickname(nicknameRef.current),
-        connected: true,
-        ready: true,
-        isHost: true,
-        isBot: false,
-        progressIndex: canonicalProgressIndex,
-        correctCharacters: finalProgress.correctCharacters,
-        totalTypedCharacters: finalProgress.totalTypedCharacters,
-        mistakes: finalProgress.mistakes,
-        headAccessoryId: cosmeticProgress.headAccessoryId,
-        heldItemId: cosmeticProgress.heldItemId,
-        maxStreak: finalProgress.maxStreak,
-        currentStreak: finalProgress.currentStreak,
-        wpm: calculateWpm(finalProgress.correctCharacters, finishTimeMs),
-        accuracy: calculateAccuracy(finalProgress.correctCharacters, finalProgress.totalTypedCharacters),
-        finishedAt: Date.now(),
-        finishTimeMs,
-        rank: 1,
-        finishGap: undefined
-      };
-
-      setPracticeResult({
-        roomCode: practiceSession.practiceId,
-        prompt: practiceSession.prompt,
-        players: [player]
-      });
-
-      if (practiceSession.mode === "daily" && practiceSession.challengeKey) {
-        const { visibleRecord } = recordDailyChallengeAttempt(
-          window.localStorage,
-          {
-            challengeKey: practiceSession.challengeKey,
-            promptId: practiceSession.prompt.id,
-            wpm: player.wpm,
-            accuracy: player.accuracy,
-            mistakes: player.mistakes,
-            finishTimeMs,
-            completedAt: player.finishedAt ?? Date.now(),
-            attemptConsumed: dailyAttemptConsumedRef.current
-          },
-          dailyChallengeInfo.challengeKey
-        );
-        setDailyChallengeRecord(visibleRecord);
-      }
-
-      disconnectPracticeSocket();
+  const {
+    consumeDailyAttempt,
+    finishPractice,
+    startDailyChallenge,
+    startPractice
+  } = usePracticeSession({
+    refs: {
+      socketRef,
+      nicknameInputRef,
+      nicknameRef,
+      inputModeRef,
+      dailyAttemptConsumedRef
     },
-    [
-      consumeDailyAttempt,
-      cosmeticProgress.headAccessoryId,
-      cosmeticProgress.heldItemId,
-      dailyChallengeInfo.challengeKey,
-      disconnectPracticeSocket,
+    state: {
       practiceSession,
-    ]
-  );
+      practiceCategory,
+      dailyChallengeKey: dailyChallengeInfo.challengeKey,
+      guestId,
+      realtimeConfigured,
+      headAccessoryId: cosmeticProgress.headAccessoryId,
+      heldItemId: cosmeticProgress.heldItemId
+    },
+    actions: {
+      connectPracticeSocket,
+      disconnectPracticeSocket,
+      prepareTypingInput,
+      setHomeMode,
+      setError,
+      setPracticeSession,
+      setPracticeResult,
+      setPracticeProgress,
+      setDailyAttemptConsumed,
+      setDailyChallengeRecord,
+      resetTyping
+    },
+    realtimeUnavailableMessage: REALTIME_UNAVAILABLE_MESSAGE
+  });
 
   useEffect(() => {
     if (typeof window === "undefined") {
