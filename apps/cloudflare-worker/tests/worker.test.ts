@@ -9,6 +9,7 @@ import type { Env } from "../src/worker.js";
 import worker, { RoomAuthorityDurableObject, RoomDurableObject } from "../src/worker.js";
 import { GATEWAY_ROOM_RATE_LIMIT_PATH } from "../src/realtime-gateway.js";
 import { readCloudflareClientIp } from "../src/client-ip.js";
+import { createPersistedRoomSnapshot } from "../src/room-persistence.js";
 
 class FakeStorage {
   readonly values = new Map<string, unknown>();
@@ -553,6 +554,84 @@ describe("cloudflare gateway", () => {
 });
 
 describe("room authority", () => {
+  it("restores a snapshot produced by the exported serializer", async () => {
+    const storage = new FakeStorage();
+    const publicRoom: RoomState = {
+      roomCode: "RT23AB",
+      hostPlayerId: "player-1",
+      status: "waiting",
+      matchRule: "race",
+      botDifficulty: "normal",
+      promptCategory: "short",
+      players: [{
+        id: "player-1",
+        nickname: "Alice",
+        connected: true,
+        ready: true,
+        isHost: true,
+        isBot: false,
+        progressIndex: 0,
+        typingProgressIndex: 0,
+        pendingInput: "",
+        inputMode: "kana",
+        correctCharacters: 0,
+        totalTypedCharacters: 0,
+        mistakes: 0,
+        maxStreak: 0,
+        currentStreak: 0,
+        wpm: 0,
+        accuracy: 100
+      }],
+      maxPlayers: 2,
+      round: 1,
+      timeAttackPromptIds: []
+    };
+    storage.values.set("room", createPersistedRoomSnapshot({
+      room: {
+        roomCode: "RT23AB",
+        round: 1,
+        promptHistory: [],
+        createdAt: 0,
+        lastActivityAt: 0,
+        finishedAt: 0,
+        players: new Map([[
+          "player-1",
+          {
+            disconnectedAt: 0,
+            typingProgressIndex: 0,
+            pendingInput: "",
+            inputMode: "kana",
+            lastInputSequence: 0,
+            typingRateTokens: 0,
+            typingRateLastRefillAt: 0
+          }
+        ]])
+      },
+      publicRoom,
+      playerSessions: new Map([["player-1", "session-1"]])
+    }));
+
+    const restoredRoom = new RoomAuthorityDurableObject(
+      new FakeDurableObjectState(storage) as unknown as DurableObjectState
+    );
+    await restoredRoom.ready;
+
+    const response = await restoredRoom.fetch(new Request("https://example.com/health"));
+    const body = await response.json() as { room: RoomState | null };
+    expect(body.room).toMatchObject({
+      roomCode: "RT23AB",
+      timeAttackPromptIds: [],
+      players: [expect.objectContaining({
+        id: "player-1",
+        connected: false,
+        ready: false,
+        typingProgressIndex: 0,
+        pendingInput: "",
+        inputMode: "kana"
+      })]
+    });
+  });
+
   it("prevents one client IP from exhausting a room's socket capacity", async () => {
     const roomAuthority = new RoomAuthorityDurableObject(
       new FakeDurableObjectState(new FakeStorage()) as unknown as DurableObjectState
