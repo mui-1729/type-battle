@@ -65,7 +65,6 @@ import { advanceTypingProgress } from "./_lib/typing-input-strategy";
 import { createTypingMessageBatch } from "./_lib/typing-message-batch";
 import { shouldHandleDesktopTypingKey } from "./_lib/desktop-typing-input";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
-import { resolveRoomSnapshot } from "./_lib/room-state-order";
 import { copyText } from "./_lib/clipboard";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
 import {
@@ -74,6 +73,7 @@ import {
   getRoomRealtimeUrl,
   openRealtimeConnection
 } from "./_lib/realtime-connection-controller";
+import { bindRoomSocketHandlers } from "./_lib/room-socket-handlers";
 import { getScrollTopToRevealTarget } from "./_lib/scroll-visibility";
 import {
   INITIAL_REACTION_FEEDBACK,
@@ -84,13 +84,11 @@ import {
   createReactionErrorFeedback,
   createSendingReactionFeedback,
   createSentReactionFeedback,
-  replaceReactionDisplayTimer,
   type ReactionFeedback
 } from "./_lib/reaction-feedback";
 import {
   getStoredRoomJoinFailureAction,
   getStoredRoomRejoinDelayMs,
-  getRoomDisconnectRecoveryState,
   type StoredRoomRecoveryState
 } from "./_lib/room-reconnect";
 import {
@@ -520,179 +518,37 @@ export default function HomePage() {
   }, [clearRemoteReaction, settings.reactionsEnabled]);
 
   const attachSocketHandlers = useCallback((socket: ClientSocket, kind: "practice" | "room") => {
-    const isCurrentSocket = () => socketRef.current === socket;
-    const applyRoomSnapshot = (nextRoom: RoomState, beforeApply?: () => void) => {
-      if (!isCurrentSocket()) {
-        return false;
+    bindRoomSocketHandlers({
+      socket,
+      mode: kind,
+      context: {
+        socketRef,
+        roomRef,
+        resultRef,
+        createPendingRef,
+        typingInputRef,
+        guestSessionRef,
+        attemptStoredRoomJoinRef,
+        nicknameRef,
+        storedRoomCodeRef,
+        reactionRequestPendingRef,
+        settingsRef,
+        playerIdRef,
+        remoteReactionTimerRef,
+        setConnected,
+        setRoom,
+        setResult,
+        setStoredRoomRecovery,
+        setError,
+        setPlayerId,
+        setReactionFeedback,
+        setCountdownMs,
+        setRemoteReaction,
+        setRematchError,
+        setRematchPending,
+        failPendingRoomCreate,
+        resetTyping
       }
-      if (kind === "room" && createPendingRef.current && !roomRef.current) {
-        return false;
-      }
-
-      const resolution = resolveRoomSnapshot(roomRef.current, resultRef.current, nextRoom);
-      if (!resolution.accepted) {
-        return false;
-      }
-      beforeApply?.();
-      roomRef.current = resolution.room;
-      resultRef.current = resolution.result;
-      setRoom(resolution.room);
-      setResult(resolution.result);
-
-      if (nextRoom.status === "finished" || resolution.result) {
-        typingInputRef.current?.blur();
-      }
-      return true;
-    };
-
-    socket.on("connect", () => {
-      if (!isCurrentSocket()) {
-        return;
-      }
-
-      setConnected(true);
-      const currentRoom = roomRef.current;
-      const currentSession = guestSessionRef.current;
-
-      if (kind !== "room") {
-        return;
-      }
-
-      if (!currentRoom || !currentSession) {
-        attemptStoredRoomJoinRef.current(socket);
-        return;
-      }
-
-      socket.emit(
-        "room:join",
-        {
-          roomCode: currentRoom.roomCode,
-          nickname: normalizeNickname(nicknameRef.current),
-          guestId: currentSession.guestId,
-          sessionId: currentSession.sessionId,
-          deviceKind: detectDeviceKind()
-        },
-        (response) => {
-          if (!isCurrentSocket()) {
-            return;
-          }
-
-          if (!response.ok) {
-            setError(response.error);
-            setStoredRoomRecovery({
-              status: "failed",
-              message: "ルームへの再接続に失敗しました。接続を確認して再試行してください。"
-            });
-            return;
-          }
-
-          setStoredRoomRecovery({ status: "idle", message: "" });
-          setError("");
-          setPlayerId(response.data.playerId);
-          storedRoomCodeRef.current = response.data.room.roomCode;
-          applyRoomSnapshot(response.data.room, resetTyping);
-        }
-      );
-    });
-    socket.on("disconnect", ({ reason, willReconnect }) => {
-      if (!isCurrentSocket()) {
-        return;
-      }
-
-      setConnected(false);
-      if (kind === "room" && createPendingRef.current && !roomRef.current) {
-        failPendingRoomCreate(
-          reason
-            ? `ルーム作成中に接続が切れました（${reason}）。接続を確認して、もう一度お試しください。`
-            : "ルーム作成中に接続が切れました。接続を確認して、もう一度お試しください。"
-        );
-      }
-      reactionRequestPendingRef.current = false;
-      setReactionFeedback((current) =>
-        current.phase === "sending"
-          ? createReactionErrorFeedback("接続が切れたため、リアクションを送信できませんでした。")
-          : current
-      );
-      if (kind === "room") {
-        setStoredRoomRecovery(getRoomDisconnectRecoveryState({ reason, willReconnect }));
-      }
-    });
-    socket.on("room:state", (nextRoom) => {
-      if (!isCurrentSocket()) {
-        return;
-      }
-      applyRoomSnapshot(nextRoom);
-    });
-    socket.on("player:progress", (nextRoom) => {
-      if (!isCurrentSocket()) {
-        return;
-      }
-      applyRoomSnapshot(nextRoom);
-    });
-    socket.on("match:countdown", ({ room: nextRoom, serverStartAt }) => {
-      if (!isCurrentSocket()) {
-        return;
-      }
-      if (!applyRoomSnapshot(nextRoom, resetTyping)) {
-        return;
-      }
-      setCountdownMs(Math.max(serverStartAt - Date.now(), 0));
-    });
-    socket.on("match:started", (nextRoom) => {
-      if (!isCurrentSocket()) {
-        return;
-      }
-      if (!applyRoomSnapshot(nextRoom, resetTyping)) {
-        return;
-      }
-      setCountdownMs(0);
-    });
-    socket.on("match:result", (nextResult) => {
-      const currentRoom = roomRef.current;
-      if (!isCurrentSocket() || !currentRoom || currentRoom.roomCode !== nextResult.roomCode) {
-        return;
-      }
-
-      resultRef.current = nextResult;
-      setResult(nextResult);
-      setCountdownMs(0);
-      const finishedRoom = {
-        ...currentRoom,
-        status: "finished" as const,
-        result: nextResult
-      };
-      roomRef.current = finishedRoom;
-      setRoom(finishedRoom);
-      typingInputRef.current?.blur();
-    });
-    socket.on("match:error", ({ message }) => {
-      if (!isCurrentSocket()) {
-        return;
-      }
-      if (kind === "room" && createPendingRef.current && !roomRef.current) {
-        failPendingRoomCreate("ルーム作成中に接続エラーが発生しました。接続を確認して、もう一度お試しください。");
-        return;
-      }
-      setError(message);
-      setRematchError(message);
-      setRematchPending(false);
-    });
-    socket.on("player:reaction", (payload) => {
-      if (
-        !isCurrentSocket() ||
-        !settingsRef.current.reactionsEnabled ||
-        payload.playerId === playerIdRef.current
-      ) {
-        return;
-      }
-      setRemoteReaction(payload);
-      remoteReactionTimerRef.current = replaceReactionDisplayTimer(
-        remoteReactionTimerRef.current,
-        () => {
-          remoteReactionTimerRef.current = null;
-          setRemoteReaction(null);
-        }
-      );
     });
   }, [failPendingRoomCreate, resetTyping]);
 
