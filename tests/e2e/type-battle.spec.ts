@@ -931,7 +931,11 @@ test("plays all three stage modes against COM and resets between rematches", asy
       await input.pressSequentially(guide.slice(splitIndex), { delay: 2 });
       if (mode.key === "hpBattle") {
         for (let attempt = 0; attempt < 12 && !(await host.locator(".resultPanel").isVisible()); attempt += 1) {
-          const nextGuide = await readInputGuide(host);
+          const nextGuide = await readInputGuide(host).catch(async (error: unknown) => {
+            if (await host.locator(".resultPanel").isVisible()) return "";
+            throw error;
+          });
+          if (!nextGuide) break;
           await input.pressSequentially(nextGuide, { delay: 2, timeout: 5_000 }).catch(async (error: unknown) => {
             if (!(await host.locator(".resultPanel").isVisible())) throw error;
           });

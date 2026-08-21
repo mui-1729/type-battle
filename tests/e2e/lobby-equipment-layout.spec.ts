@@ -11,7 +11,7 @@ async function enterLobby(page: Page, nickname: string): Promise<void> {
   await dismissTutorial(page);
   await setNickname(page, nickname);
   await selectBattleMode(page);
-  await page.locator(".roomActions .primaryButton:not(.joinButton)").click();
+  await page.getByRole("button", { name: "ルームを作成" }).click();
   await expect(page.getByTestId("lobby-prep")).toBeVisible();
 }
 
