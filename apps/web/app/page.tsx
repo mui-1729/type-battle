@@ -9,10 +9,7 @@ import {
   type RealtimeTransport,
   type RealtimeSocket
 } from "./_lib/realtime-client";
-import {
-  resolveTypingInputMode,
-  validateNickname
-} from "@type-battle/shared";
+import { validateNickname } from "@type-battle/shared";
 import type {
   EquipmentSelection,
   MatchRule,
@@ -46,15 +43,9 @@ import {
   type ProgressState
 } from "./_lib/typing-progress";
 import {
-  getCanonicalProgressIndex
-} from "./_lib/looping-typing";
-import {
   getHomePageViewModel,
   type PracticeSession
 } from "./_lib/home-page-view-model";
-import { advanceTypingProgress } from "./_lib/typing-input-strategy";
-import { createTypingMessageBatch } from "./_lib/typing-message-batch";
-import { shouldHandleDesktopTypingKey } from "./_lib/desktop-typing-input";
 import { reconcileRoomProgress } from "./_lib/reconcile-room-progress";
 import { copyText } from "./_lib/clipboard";
 import { getProgressSyncLabel } from "./_lib/progress-sync";
@@ -68,6 +59,7 @@ import { bindRoomSocketHandlers } from "./_lib/room-socket-handlers";
 import { usePracticeSession } from "./_lib/use-practice-session";
 import { useRoomLifecycle } from "./_lib/use-room-lifecycle";
 import { useStoredRoomRecovery } from "./_lib/use-stored-room-recovery";
+import { useTypingSession } from "./_lib/use-typing-session";
 import { getScrollTopToRevealTarget } from "./_lib/scroll-visibility";
 import {
   INITIAL_REACTION_FEEDBACK,
@@ -102,7 +94,7 @@ import {
   touchGuestSession,
   type GuestSession
 } from "../lib/guest-session";
-import { playCountdownSound, playTypingSound, primeSoundPlayback } from "../lib/sound";
+import { playCountdownSound, primeSoundPlayback } from "../lib/sound";
 import {
   DAILY_CHALLENGE_MAX_ATTEMPTS,
   loadDailyChallengeRecord,
@@ -1011,277 +1003,47 @@ export default function HomePage() {
     };
   }, [acceptingTextInput, activeTypingText, visualViewportHeight]);
 
-  const emitProgress = useCallback(
-    (input: string, finish: boolean) => {
-      const socket = socketRef.current;
-      const currentRoom = roomRef.current;
-
-      if (!socket || !currentRoom || !socket.isConnected()) {
-        return;
-      }
-
-      const messages = createTypingMessageBatch({
-        roomCode: currentRoom.roomCode,
-        text: input,
-        finish,
-        previousSequence: inputSequenceRef.current
-      });
-      inputSequenceRef.current = messages.at(-1)!.payload.sequence;
-      setLastProgressSentAt(Date.now());
-      setSyncClock(Date.now());
-
-      if (finish) {
-        if (currentRoom.matchRule === "race") {
-          roomFinishPendingRef.current = true;
-          setRoomFinishPending(true);
-          typingInputRef.current?.blur();
-        }
-      }
-
-      for (const message of messages) {
-        socket.emit(message.event, message.payload);
-      }
+  const { handleTypedText } = useTypingSession({
+    refs: {
+      socketRef,
+      roomRef,
+      resultRef,
+      inputSequenceRef,
+      roomFinishPendingRef,
+      typingInputRef,
+      localProgressRef,
+      practiceProgressRef,
+      inputModeRef,
+      settingsRef
     },
-    []
-  );
-
-  const handleTypedText = useCallback(
-    (typedText: string) => {
-      if (!typedText) {
-        return;
-      }
-
-      if (roomFinishPendingRef.current) {
-        return;
-      }
-
-      const currentRoom = roomRef.current;
-
-      if (currentRoom?.status === "playing" && currentRoom.prompt && !resultRef.current) {
-        const previous = localProgressRef.current;
-        const next = advanceTypingProgress({
-          previous,
-          typedText,
-          deviceKind: activeInputDeviceKind,
-          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
-          displayText: activeTypingText,
-          romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
-          progressBase: activeProgressBase,
-          progressBaseByMode: {
-            kana: activeCanonicalProgressBase,
-            romaji: activeRomajiProgressBase
-          },
-          inputMode: inputModeRef.current
-        });
-        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedText);
-        inputModeRef.current = nextInputMode;
-        setInputMode(nextInputMode);
-        const correct = next.progress.correctCharacters > previous.correctCharacters;
-
-        setLocalProgress(next.progress);
-        localProgressRef.current = next.progress;
-        recordMistakeSamples(next.mistakeSamples);
-        void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
-        emitProgress(
-          typedText,
-          !isLoopingMatchPlaying &&
-            (inputModeRef.current === "kana"
-              ? next.progress.progressIndex
-              : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
-              Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
-        );
-        return;
-      }
-
-      if (practiceSession && !practiceResult && !room) {
-        const previous = practiceProgressRef.current;
-        const next = advanceTypingProgress({
-          previous,
-          typedText,
-          deviceKind: activeInputDeviceKind,
-          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
-          displayText: activeTypingText,
-          romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
-          progressBase: activeProgressBase,
-          progressBaseByMode: {
-            kana: activeCanonicalProgressBase,
-            romaji: activeRomajiProgressBase
-          },
-          inputMode: inputModeRef.current
-        });
-        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedText);
-        inputModeRef.current = nextInputMode;
-        setInputMode(nextInputMode);
-        const correct = next.progress.correctCharacters > previous.correctCharacters;
-
-        setPracticeProgress(next.progress);
-        practiceProgressRef.current = next.progress;
-        recordMistakeSamples(next.mistakeSamples);
-
-        if (practiceSession.mode === "daily" && correct) {
-          consumeDailyAttempt();
-        }
-
-        if (
-          (inputModeRef.current === "kana"
-            ? next.progress.progressIndex
-            : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
-          Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
-        ) {
-          finishPractice(next.progress);
-        }
-
-        void playTypingSound({ enabled: settingsRef.current.soundEnabled }, correct);
-      }
-    },
-    [
-      activeTypingText,
-      emitProgress,
-      isLoopingMatchPlaying,
-      finishPractice,
-      practiceResult,
-      practiceSession,
-      consumeDailyAttempt,
-      recordMistakeSamples,
+    state: {
       activeInputDeviceKind,
-      activeProgressBase,
+      activeTypingText,
       activePrompt,
       activeRomajiTypingPlan,
+      activeProgressBase,
+      activeCanonicalProgressBase,
+      activeRomajiProgressBase,
+      isLoopingMatchPlaying,
       usesTimeAttackPromptSequence,
-      room
-    ]
-  );
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const practiceActive = Boolean(practiceSession && !practiceResult && !room);
-      const roomPlaying = room?.status === "playing";
-
-      if (!shouldHandleDesktopTypingKey({
-        roomPlaying,
-        practiceActive,
-        acceptingTextInput,
-        roomFinishPending: roomFinishPendingRef.current,
-        exitRequested: exitRequest !== null,
-        defaultPrevented: event.defaultPrevented,
-        isComposing: event.isComposing,
-        keyCode: event.keyCode,
-        ctrlKey: event.ctrlKey,
-        metaKey: event.metaKey,
-        altKey: event.altKey,
-        editableTarget: isEditableTarget(event.target),
-        key: event.key
-      })) {
-        return;
-      }
-
-      event.preventDefault();
-      const typedKey = event.key.toLowerCase();
-
-      if (room?.status === "playing" && room?.prompt) {
-        const previous = localProgressRef.current;
-        const next = advanceTypingProgress({
-          previous,
-          typedText: typedKey,
-          deviceKind: activeInputDeviceKind,
-          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
-          displayText: activeTypingText,
-          romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
-          progressBase: activeProgressBase,
-          progressBaseByMode: {
-            kana: activeCanonicalProgressBase,
-            romaji: activeRomajiProgressBase
-          },
-          inputMode: inputModeRef.current
-        });
-        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedKey);
-        inputModeRef.current = nextInputMode;
-        setInputMode(nextInputMode);
-        const correct = next.progress.correctCharacters > previous.correctCharacters;
-        const soundOptions = settingsRef.current;
-
-        setLocalProgress(next.progress);
-        localProgressRef.current = next.progress;
-        recordMistakeSamples(next.mistakeSamples);
-        void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
-        emitProgress(
-          typedKey,
-          !isLoopingMatchPlaying &&
-            (inputModeRef.current === "kana"
-              ? next.progress.progressIndex
-              : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
-              Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
-        );
-        return;
-      }
-
-      if (practiceActive && practiceSession) {
-        const previous = practiceProgressRef.current;
-        const next = advanceTypingProgress({
-          previous,
-          typedText: typedKey,
-          deviceKind: activeInputDeviceKind,
-          canonicalText: activePrompt?.typing.hiragana ?? activeTypingText,
-          displayText: activeTypingText,
-          romajiPlan: activeRomajiTypingPlan,
-          loop: isLoopingMatchPlaying && !usesTimeAttackPromptSequence,
-          progressBase: activeProgressBase,
-          progressBaseByMode: {
-            kana: activeCanonicalProgressBase,
-            romaji: activeRomajiProgressBase
-          },
-          inputMode: inputModeRef.current
-        });
-        const nextInputMode = resolveTypingInputMode(inputModeRef.current, typedKey);
-        inputModeRef.current = nextInputMode;
-        setInputMode(nextInputMode);
-        const correct = next.progress.correctCharacters > previous.correctCharacters;
-        const soundOptions = settingsRef.current;
-
-        setPracticeProgress(next.progress);
-        practiceProgressRef.current = next.progress;
-        recordMistakeSamples(next.mistakeSamples);
-
-        if (practiceSession.mode === "daily" && correct) {
-          consumeDailyAttempt();
-        }
-
-        if (
-          (inputModeRef.current === "kana"
-            ? next.progress.progressIndex
-            : getCanonicalProgressIndex(activeRomajiTypingPlan!, next.progress.progressIndex)) >=
-          Array.from(activePrompt?.typing.hiragana ?? activeTypingText).length
-        ) {
-          finishPractice(next.progress);
-        }
-
-        void playTypingSound({ enabled: soundOptions.soundEnabled }, correct);
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    activeInputDeviceKind,
-    activeProgressBase,
-    activeTypingText,
-    acceptingTextInput,
-    emitProgress,
-    finishPractice,
-    consumeDailyAttempt,
-    isLoopingMatchPlaying,
-    practiceResult,
-    practiceSession,
-    recordMistakeSamples,
-    activePrompt,
-    activeRomajiTypingPlan,
-    exitRequest,
-    usesTimeAttackPromptSequence,
-    room
-  ]);
+      practiceSession,
+      practiceResult,
+      room,
+      acceptingTextInput,
+      exitRequested: exitRequest !== null
+    },
+    actions: {
+      setLastProgressSentAt,
+      setSyncClock,
+      setRoomFinishPending,
+      setInputMode,
+      setLocalProgress,
+      setPracticeProgress,
+      recordMistakeSamples,
+      consumeDailyAttempt,
+      finishPractice
+    }
+  });
 
   const {
     createRoom,
@@ -2163,7 +1925,8 @@ export default function HomePage() {
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && target.matches("input, textarea, select, button, a, [role='button'], [contenteditable='true']");
+  return target instanceof HTMLElement
+    && target.matches("input, textarea, select, button, a, [role='button'], [contenteditable='true']");
 }
 
 function getMatchupLabel(players: RoomState["players"]): string {
