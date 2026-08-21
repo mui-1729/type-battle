@@ -1,68 +1,101 @@
-# Result Analytics
+# 結果分析
 
-試合結果を「勝った / 負けた」だけでなく、上達や再戦につながる情報として表示する機能です。
+試合結果を勝敗だけでなく、速度・正確性・streak・接戦度などから振り返れるようにする機能です。
 
-## 目的
+## 現在の状態
 
-- プレイヤーが自分の成績を理解できるようにする。
-- 接戦、ミス、速度変化などを見せて再戦したくなる体験を作る。
-- 将来のプロフィール、ランキング、リプレイの土台にする。
+Private Beta 向けの基本結果分析は実装済みです。
 
-## 対象ステージ
+現在扱っている主な情報:
 
-- Private beta: 基本結果と round summary。
-- Public beta: 履歴、比較、簡単なグラフ。
-
-## 表示項目
-
-- 順位
+- 順位 / 勝敗
 - WPM
 - accuracy
 - miss count
-- elapsed time
+- finish time / finish status
 - max streak
-- first error position
-- lead changes
 - finish gap
-- COM difficulty または opponent type
+- rule に応じた result
+- localStorage に蓄積した mistake tendency
 
-## UI
+`first error position`、`lead changes`、試合ごとの詳細な進捗グラフなどは現在の必須仕様ではありません。
 
-- Result 画面上部に順位と勝敗を表示する。
-- その下に各 player の主要 stats を横並びで表示する。
-- 自分の前回試合との差分を表示する。
-- Private beta ではグラフは簡易でよい。
+## 目的
 
-## データ
+- player が結果を理解できるようにする
+- speed だけでなく accuracy / miss / streak も振り返れるようにする
+- 接戦だったか分かる情報を出す
+- Practice の miss tendency と合わせて上達につなげる
 
-```ts
-type MatchResultStats = {
-  playerId: string;
-  rank: number;
-  wpm: number;
-  accuracy: number;
-  missCount: number;
-  elapsedMs?: number;
-  maxStreak: number;
-  finishGapMs?: number;
-};
-```
+## Result の原則
+
+- server が確定した `MatchResult` を表示する
+- client 側で勝敗を再計算して server result と競合させない
+- rematch 後に前 round の state を current result と混ぜない
+- match rule ごとの終了条件を Result 側で勝手に変更しない
+
+## 主な表示項目
+
+### 共通
+
+- rank
+- nickname
+- WPM
+- accuracy
+- mistakes
+- max streak
+- finish status
+
+### Race
+
+- finish time
+- finish gap
+
+### Time Attack
+
+- 制限時間終了時の進捗・順位に必要な情報
+
+### HP Battle
+
+- KO / eliminated 等、server が確定した battle result
+
+## Mistake tendency
+
+入力ミスの傾向は localStorage に蓄積します。
+
+- 期待していた文字ごとの miss 回数
+- 代表的な誤入力
+- よく間違える文字の可視化
+
+現時点では local device の補助データであり、server-side match history や ranking には使いません。
 
 ## 受け入れ条件
 
-- 完走者と未完走者の両方に意味のある stats が表示される。
-- COM 対戦でも opponent type が分かる。
-- rematch 後に前 round の stats と混ざらない。
-- result の数値が server の確定結果と一致する。
+- [x] server の確定 result と画面の順位が一致する
+- [x] WPM / accuracy / miss を表示できる
+- [x] max streak を表示できる
+- [x] Race の finish gap を扱える
+- [x] COM 戦でも結果を表示できる
+- [x] rematch 後に前 round の current result が混ざらない
+- [x] mistake tendency を localStorage に保存・表示できる
+
+## 将来拡張
+
+Public Beta / profile 導入後に必要性を見て追加します。
+
+- server-side match history
+- 前回 / 週間平均との比較
+- WPM 推移
+- lead change timeline
+- replay と紐づく詳細分析
+- profile stats
 
 ## テスト観点
 
-- 2 人完走時の順位と finish gap。
-- 片方未完走時の順位。
-- miss count / accuracy の表示。
-- rematch 後の stats reset。
-
-## 未決定事項
-
-- result にミスした文字位置を出すか。
-- 進捗推移グラフを Private beta で出すか。
+- 2 人完走時の rank / finish gap
+- forfeit / unfinished / eliminated を含む結果
+- COM result
+- rule ごとの result
+- rematch reset
+- server result と UI の一致
+- mistake tendency の保存 / 集計

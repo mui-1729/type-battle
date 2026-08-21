@@ -1,76 +1,104 @@
-# Prompt Library
+# 課題文ライブラリ
 
-試合で使う課題文を管理する機能です。単に文章を増やすだけでなく、長さ、難易度、カテゴリ、公平性を扱います。
+試合・Practice で使う課題文を管理します。
 
-## 目的
+## 現在の状態
 
-- 何度遊んでも同じ文章ばかりにならないようにする。
-- 初心者と上級者で極端に体験が崩れないようにする。
-- 将来の日本語、コード、記号、長文モードに拡張できるようにする。
+Private Beta では shared package 内の static prompt list を使用しています。
 
-## 対象ステージ
+現在の category:
 
-- MVP: 固定の短い英語文リスト。
-- Private beta: 難易度と長さを分ける。
-- Public beta: カテゴリ、通報、品質管理を追加する。
+- `short`
+- `standard`
+- `long`
 
-## カテゴリ案
+host は Lobby で category を選択でき、server が match start 時に prompt を決定します。
 
-- `short`: 30-60 characters
-- `standard`: 60-120 characters
-- `long`: 120-240 characters
-- `code`: 記号や大文字小文字を含むコード風文章
-- `quote`: 引用風の自然文。ただし著作権に注意する
-- `japanese-romaji`: ローマ字入力用
-- `japanese-ime`: IME 入力用。別設計が必要
+## 現在のデータモデル
 
-## データ
+型定義の正本は `packages/shared/src/game-state.ts` です。
 
 ```ts
+type PromptCategory = "short" | "standard" | "long";
+
+type PromptTyping = {
+  romaji: string;
+  hiragana: string;
+};
+
 type Prompt = {
   id: string;
-  locale: "en" | "ja";
-  mode: "plain" | "code" | "romaji" | "ime";
   text: string;
-  length: number;
-  difficulty: "easy" | "normal" | "hard";
-  tags: string[];
-  enabled: boolean;
-  createdAt: number;
+  category: PromptCategory;
+  enabled?: boolean;
+  typing: PromptTyping;
 };
 ```
 
+過去の設計案にあった `locale`、`difficulty`、`tags`、`createdAt` 等は現在の `Prompt` 型にはありません。
+
+## 目的
+
+- 全 player に同じ条件の prompt を配る
+- 長さを選べるようにする
+- 無効な prompt を試合へ出さない
+- 同じ文章ばかり続かないようにする
+- 将来の日本語・コード等へ拡張できる余地を残す
+
 ## 選択ルール
 
-- 試合開始時にサーバーが prompt を決める。
-- 同じ room session 内では直近の prompt を避ける。
-- 全 player に同じ prompt id と text を配信する。
-- クライアントから prompt text を任意指定させない。
-- Public beta では著作権・不適切表現・個人情報の混入を避ける。
+- prompt は server が選ぶ
+- client から任意の prompt text を試合条件として確定させない
+- host が `short | standard | long` を選ぶ
+- disabled / invalid prompt は選択対象にしない
+- 同じ room session では直前と同じ prompt をできるだけ避ける
+- 全 player に同じ prompt state を配信する
 
-## UI
+## Validation
 
-- Private beta では lobby で `Short / Standard / Long` を選べる。
-- ホストのみ prompt length を変更できる。
-- 将来はカテゴリ selector を追加する。
-- 試合中は prompt のカテゴリ名を小さく表示してもよい。
+現在は prompt 定義に対して最低限の validation を行います。
 
-## 受け入れ条件
+- 空文字を許可しない
+- 制御文字等の不正データを弾く
+- category / typing data の整合性を保つ
+- disabled prompt を通常選択しない
 
-- 同じ試合では全 player に同じ prompt が表示される。
-- prompt length を変更してから開始すると該当カテゴリから選ばれる。
-- 無効化された prompt は選ばれない。
-- prompt が空、短すぎる、長すぎる場合は登録時に弾く。
+細かな最小・最大文字数を仕様として固定する場合は、実装の validation と同じ PR でこのファイルを更新します。
+
+## 日本語入力との関係
+
+`PromptTyping` に `romaji` / `hiragana` を持ち、typing input 側には `romaji` / `kana` の判定基盤があります。
+
+ただし、IME 変換や複数のローマ字入力方式を含む「完成版 Japanese typing mode」は別機能です。
+
+詳細は [japanese-typing-mode.md](japanese-typing-mode.md) を参照してください。
+
+## 現在の受け入れ条件
+
+- [x] 同じ試合では全 player が同じ prompt を使う
+- [x] host が category を変更できる
+- [x] category に応じて server が prompt を選ぶ
+- [x] invalid prompt を validation する
+- [x] 直前 prompt の重複をできるだけ避ける
+
+## 将来拡張
+
+必要になった時点で設計します。
+
+- code prompt
+- quote / natural-language category
+- difficulty metadata
+- DB / CMS 管理
+- moderation workflow
+- user-submitted prompt
+- locale metadata
+
+user-submitted prompt を許可する場合は著作権・個人情報・不適切表現の moderation が前提です。
 
 ## テスト観点
 
-- prompt 選択の単体テスト。
-- 同じ room で全 player が同じ prompt を受け取る E2E。
-- disabled prompt が選ばれないこと。
-- mode ごとの入力判定との整合性。
-
-## 未決定事項
-
-- prompt をコードに埋め込むか、DB 管理にするか。
-- ユーザー投稿 prompt を許可するか。
-- 著作権チェックをどの運用で行うか。
+- category ごとの prompt 選択
+- invalid / disabled prompt の除外
+- rematch での重複回避
+- 2 client が同じ prompt を受け取ること
+- romaji / kana input と typing data の整合性

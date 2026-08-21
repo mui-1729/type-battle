@@ -1,119 +1,118 @@
-# Feature Backlog
+# 機能バックログ
 
-機能実装へ進む時に GitHub Issues へ切り出す候補です。タイトルは Conventional Commits の scope にも使いやすい粒度にしています。
+このファイルは「今後 Issue 化する候補」と「現在の主要 Open Issue」を整理するための一覧です。
 
-## P0 / Private Beta Stability
+実装済みかどうかの判断には [../current-implementation.md](../current-implementation.md) を使います。
 
-### settings / release
+## 現在の主要 Open Issue
 
-- [x] `feat(settings): wire sound playback to player settings`
-  - sound effects と countdown sound を実際の再生処理に接続する。
-  - sound off の時は再生しない。
-- [x] `feat(release): wire web deployment on Vercel`
-  - Vercel への自動 deploy と preview / production の切り替えを整える。
-  - repo 内の build 物と Cloudflare E2E 手順をつなぐ。
-  - production では Cloudflare realtime を既定接続先にする。
-- [x] `feat(beta): add private beta feedback issue flow`
-  - 不具合報告を GitHub Issue にすぐ切り出せるようにする。
-  - 再現条件のテンプレートを用意する。
-- [ ] `feat(repo): enable branch protection`
-  - main への直接 push を避ける。
-  - CI green を merge gate にする。
+### P0 / Private Beta 公開ゲート
 
-### persistence / session
+- **#167 `chore(deploy): Cloudflare本番デプロイ用Secretsを設定する`**
+  - Production deploy workflow を実際に使える状態にする
+- **#232 `test(beta): 本番環境でPrivate Beta受け入れ確認を行う`**
+  - Production で 2 人対戦・COM・reconnect・rematch・5〜10 試合連続プレイを確認する
 
-- [x] `feat(cloudflare): persist sessions and match results`
-  - match result と基本的な session を永続化する。
-  - private beta の再起動に備える。
-- [x] `feat(identity): add guest session`
-  - guest id と room code を session として扱いやすくする。
-  - reload / reconnect の基盤を整理する。
+### P1 / 開発・運用品質
 
-## P1 / Better Play Experience
+- **#168 `chore(vercel): Preview用Realtime endpointを分離する`**
+  - Preview Worker / Durable Object / Vercel 接続分離は `main` に実装済み
+  - credentials 設定、Preview Worker の実デプロイ、2 client 確認が残る
 
-### prompt library
+### P2 / Security・保守性
 
-- [ ] `feat(prompt): add prompt validation`
-  - 空、短すぎる、長すぎる、不正文字を拒否する。
-  - disabled prompt を試合に出さない。
-- [ ] `feat(prompt): avoid repeated prompts in a session`
-  - 同じ session 内で直近 prompt を避ける。
+- **#196** は Production CSP を Realtime origin へ限定する実装が `main` に merge 済み
+- **#197 `refactor(web): page.tsxのRealtime・ゲーム状態管理を責務ごとに分割する`**
+  - PR #224 / #226 で段階的に進行中
+- **#198 `refactor(worker): room-authority.tsの対戦状態遷移と永続化責務を分割する`**
+  - PR #227 で段階的に進行中
 
-### practice
+## すでに実装済みのため、新規 Issue を作らないもの
 
-- [x] `feat(practice): add daily challenge`
-  - 今日だけの固定 prompt を出して、日ごとの記録を残せるようにする。
-  - 練習モードとは別に、継続用の入口を用意する。
-- [x] `feat(analytics): add mistake tendency visualization`
-  - よくミスする文字と誤入力傾向を見える化する。
-  - localStorage に蓄積して、繰り返しの苦手箇所を確認できるようにする。
-- `feat(practice): add retry same prompt`
-  - 同じ prompt を再挑戦できる。
-  - retry と next prompt を分ける。
-- `feat(practice): add session summary`
-  - 連続試合の勝敗数を表示する。
-  - round count と直近結果をまとめる。
+過去の backlog に残っていた次の項目は現在の `main` に実装済みです。
 
-## P2 / Public Beta Readiness
+- branch protection
+- prompt validation
+- 直前 prompt の重複回避
+- daily challenge
+- mistake tendency visualization
+- player settings / sound wiring
+- Cloudflare persistence / retention
+- guest session
+- structured logging / basic monitoring
+- Worker deploy workflow
+- #193 production dependency audit gate
+- #196 Production CSP restriction
+- nickname の基本 moderation
+- report / local block flow
+- terms / privacy / contact pages
+- Quick Match queue engine（完全な #242 は進行中）
 
-### public lobby / matchmaking
+同じ目的の Issue を重複して作らないようにします。
 
+## Public Beta 向け Issue 候補
+
+Public Beta へ進む段階で、次を 1 feature / 1 acceptance criteria に近い粒度で Issue 化します。
+
+### 公開準備
+
+- `test(legal): validate terms privacy and contact in production`
+  - 実装済み pages の本番表示、リンク、問い合わせ運用を確認
+- **#238** `test(load): define and run public beta load baseline`
+  - Cloudflare Workers Free / Vercel Hobby のみを対象に、最大 20 rooms / 40 sockets で手動実行する
+  - 自動 stress test は行わず、quota 監視、受付停止、rollback 条件を記録する
+- `feat(monitoring): add abuse and service alerts`
+  - error / connection / abuse の運用アラート
+
+### Matchmaking / lobby
+
+- **#242** `feat(matchmaking): complete quick match`
+  - queue engine は実装済み。Gateway protocol、room bootstrap、Web UX、COM fallback、E2E が残る
 - `feat(lobby): add public room list`
-  - public room のみ一覧表示する。
-  - full / playing / expired room を除外する。
-- `feat(matchmaking): add quick match queue`
-  - 条件に近い waiting player を match する。
-  - timeout 後に COM fallback する。
-- `feat(lobby): add public room visibility setting`
-  - host が private / public を選べる。
+  - public room のみ表示し、full / playing / expired を除外
+- `feat(lobby): add room visibility setting`
+  - private / public の選択
 
-### moderation
+### Moderation / abuse
 
-- `feat(moderation): add nickname filtering`
-  - 長さ、禁止文字、HTML escape、NG word を扱う。
-- `feat(report): add report opponent flow`
-  - reason と room context を保存する。
-  - report spam を rate limit する。
-- `feat(block): avoid rematching blocked players`
-  - current session で block した相手と再マッチしない。
+基本 nickname filter、GitHub Issue への report 導線、local block、queue engine の block 照合は実装済みです。今後は辞書更新・審査・保存・制裁を運用要件として切り出します。
 
-### abuse prevention
+- `feat(moderation-ops): operate nickname and player reports`
+  - report のサーバー側受付、retention、審査、解除、監査を定義
+- `feat(anti-cheat): flag suspicious results`
+  - 異常 WPM / automated input 等を suspicious として扱う
 
-- `feat(anti-cheat): flag suspicious high WPM`
-  - threshold を超えた result に suspicious flag を付ける。
-- `feat(anti-cheat): reject paste progression`
-  - paste で progress が進まないようにする。
-- `feat(rate-limit): throttle progress events`
-  - player ごとの event spam を抑制する。
-
-## P3 / Long-term Engagement
-
-### identity / profile
+### Identity / ranking
 
 - `feat(profile): add optional player profile`
-  - display name と basic stats を表示する。
-
-### ranking / rating
-
+- `feat(history): persist match history for users`
 - `feat(ranking): add weekly leaderboard`
-  - rating 対象外 result を除外する。
-  - mode 別に集計する。
-- `feat(rating): add simple rating calculation`
-  - COM、practice、suspicious result を除外する。
+- `feat(rating): add simple rating`
 
-### social / event
+ranking / rating は COM、Practice、suspicious result を対象外にできる設計を前提にします。
+
+### Play experience
+
+- `feat(japanese): complete Japanese typing mode`
+  - 現在の kana / romaji 判定基盤から、IME / 表示 / E2E まで完成させる
+- `feat(spectator): add read-only spectator mode`
+- `feat(practice): add session summary`
+- `feat(practice): add retry same prompt`
+
+### Social / events
 
 - `feat(invite): add room invite link`
-  - invite link から room join へ遷移する。
-  - expired / full room の error を出す。
-- `feat(spectator): add read-only spectator mode`
-  - spectator は progress / finish event を送れない。
-- `feat(tournament): add time attack event`
-  - 最初の大会形式は bracket より time attack を優先候補にする。
+- `feat(friends): add friend flow`
+- `feat(tournament): add tournament or time attack event`
+- `feat(replay): add match replay`
 
 ## Issue 化のルール
 
-- 1 issue は 1 feature または 1 acceptance criteria に近い粒度にする。
-- 仕様 doc へのリンクを issue body の先頭に置く。
-- 実装 issue には最低 1 つの test 観点を書く。
-- Public beta 向け機能は moderation / rate limit / logging の前提を確認してから着手する。
+- 1 Issue は原則 1 つの目的にする
+- Issue 本文の先頭に「状態 / 優先度」を置く
+- 仕様がある場合は対象 docs をリンクする
+- 実装 Issue には最低 1 つの test 観点を書く
+- Open PR がある場合は Issue 本文に PR と残作業を明記する
+- 実装済みの内容を別名で重複 Issue 化しない
+- 「大きいファイルだから」だけでは refactor Issue を増やさず、変更リスクや責務の問題を具体化する
+- Public Beta 向け機能は moderation / observability / load の前提を確認してから着手する

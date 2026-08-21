@@ -1,89 +1,86 @@
-# Docs
+# ドキュメント
 
-タイピング対戦オンラインゲームを作るための準備資料です。
+Type Battle の設計・実装状況・運用方針をまとめています。
 
-## 目次
+## まず読むもの
 
-- [research.md](research.md): 調査結果と採用判断
-- [product-direction.md](product-direction.md): 内輪向けから一般公開までのプロダクト方針
-- [current-implementation.md](current-implementation.md): 現在の実装状態
-- [requirements.md](requirements.md): MVP と将来要件
-- [game-design.md](game-design.md): ルール、画面、ゲーム体験
-- [architecture.md](architecture.md): 技術構成、データ、リアルタイム同期
-- [cloudflare-migration-plan.md](cloudflare-migration-plan.md): Cloudflare realtime 移行の段階計画と free tier リスク
-- [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md): Cloudflare free tier の request / message 監査
-- [features/README.md](features/README.md): 機能別仕様
-- [features/feature-catalog.md](features/feature-catalog.md): 今後作る機能の一覧と優先度
-- [features/feature-backlog.md](features/feature-backlog.md): 実装 Issue 候補
-- [quality-ci-cd.md](quality-ci-cd.md): Test / Build / CI / CD 規定
-- [github.md](github.md): GitHub 連携、ブランチ、Issue、PR 運用
-- [roadmap.md](roadmap.md): 段階的な開発計画
+| ドキュメント | 役割 |
+| --- | --- |
+| [current-implementation.md](current-implementation.md) | **現在の `main` で何が動くかの正本** |
+| [roadmap.md](roadmap.md) | 今後どの順番で進めるか |
+| [requirements.md](requirements.md) | MVP / Private Beta / Public Beta の要件 |
+| [game-design.md](game-design.md) | ゲームルールと画面体験 |
+| [architecture.md](architecture.md) | Web / Realtime / Durable Object の技術構成 |
+| [quality-ci-cd.md](quality-ci-cd.md) | テスト・CI・デプロイ・リリース基準 |
+| [github.md](github.md) | Issue / PR / ブランチ運用 |
 
-## 方針
+## 現在の段階
 
-最初の目標は、派手な機能よりも「2 人が同じ文章で対戦し、結果が正しく同期される」ことです。
+MVP と Private Beta 向けの主要機能は `main` に実装済みです。
 
-公開方針は段階的にします。まずは内輪で遊べる private beta を目指し、安定性、ログ、最低限の安全対策が整ったら public beta を検討します。
+Private Beta を「機能がある状態」から「本番環境で公開確認済みの状態」へ進めるため、現在は次を優先します。
 
-MVP では次を優先します。
+1. **#167** Cloudflare 本番デプロイ用 Secrets / Variables を設定する
+2. **#232** Production で 5〜10 試合を含む Private Beta 受け入れ確認を行う
+3. **#168** `main` に実装済みの Preview 用 Realtime 分離を外部環境へ deploy して確認する
 
-- ルーム作成と参加
-- 同一文章でのカウントダウン開始
-- タイピング進捗のリアルタイム同期
-- WPM、正確率、順位の算出
-- 試合終了と結果表示
-- 切断時の最低限の復帰または敗北扱い
+#193 の本番依存監査と #196 の Production CSP 制限は `main` に実装済みです。#197 / #198 の責務分割は段階的に進行中です。
 
-認証、ランキング、課金、フレンド、観戦、大会機能は MVP 後に追加します。
+## ドキュメントの役割分担
 
-## 現在の実装状態
+### 現在の事実
 
-詳細は [current-implementation.md](current-implementation.md) にまとめる。このファイルを実装状態の正本とし、他の docs は重複した完了/未完了判定を増やさず、必要に応じてここへリンクする。
+[current-implementation.md](current-implementation.md) を正本にします。
 
-実装済み:
+- `main` に merge 済みの機能だけを「実装済み」とする
+- Open PR の内容は「進行中」として分けて書く
+- Issue が開いているだけの機能を実装済みにしない
 
-- room code による 2 人対戦
-- COM 対戦
-- COM difficulty selector
-- reload rejoin
-- activity 基準の waiting / abandoned / finished TTL
-- host transfer
-- rematch
-- prompt category
-- long disconnect forfeit の server 判定
-- long disconnect forfeit の room state 反映
-- result stats の finish gap と max streak
-- result analytics UI
-- practice mode
-- player settings modal / localStorage / theme / input guide / font size / reduced motion / sound wiring
-- private beta feedback issue flow
-- guest session
-- room-scoped Cloudflare Durable Object storage persistence
-- server authoritative typing validation
-- Cloudflare Worker deploy workflow
-- structured logging
-- room create / join / typing progress の軽量 rate limit
-- Cloudflare Worker E2E
+### 今後の計画
 
-部分実装:
+[roadmap.md](roadmap.md) と [features/feature-backlog.md](features/feature-backlog.md) で管理します。
 
-- production environment / secret の実設定は GitHub と Cloudflare 側で行う
+ロードマップは段階、Feature Backlog は具体的な候補タスクを扱います。
 
-## 次に仕様化・実装する機能
+### 仕様
 
-Private beta 前に優先する機能は次です。
+[features/README.md](features/README.md) 以下は機能仕様です。仕様に書かれている内容がすべて実装済みとは限りません。実装状況を判断するときは [current-implementation.md](current-implementation.md) を参照してください。
 
-1. production environment / Cloudflare secret / rollback 手順の運用確認
+## 設計・方針
 
-Public beta 以降に検討する主な機能は次です。
+- [research.md](research.md): 初期技術調査
+- [product-direction.md](product-direction.md): プロダクトの段階的な公開方針
+- [requirements.md](requirements.md): 要件定義
+- [game-design.md](game-design.md): ゲーム設計
+- [architecture.md](architecture.md): アーキテクチャ
 
-- [public lobby](features/public-lobby.md)
-- [moderation / report](features/moderation-report.md)
-- [anti-cheat / abuse prevention](features/anti-cheat-abuse.md)
-- [profiles / guest identity](features/profiles-guest-identity.md)
-- [ranking / rating](features/ranking-rating.md)
-- [Japanese typing mode](features/japanese-typing-mode.md)
-- [spectator mode](features/spectator-mode.md)
-- [friends / invites](features/friends-invites.md)
-- [tournaments](features/tournaments.md)
-- [notification / feedback](features/notification-feedback.md)
+## 機能仕様
+
+- [features/README.md](features/README.md): 機能仕様の目次
+- [features/feature-catalog.md](features/feature-catalog.md): 機能一覧と優先度
+- [features/feature-backlog.md](features/feature-backlog.md): Issue 化する候補と現在の Open Issue
+
+## 品質・運用
+
+- [quality-ci-cd.md](quality-ci-cd.md): Test / Build / CI / CD
+- [github.md](github.md): GitHub 運用
+- [git-branch-rules.md](git-branch-rules.md): 現在の推奨ブランチ / PR ルール
+- [features/deployment-private-beta.md](features/deployment-private-beta.md): Private Beta デプロイ仕様
+
+## Cloudflare 関連資料
+
+次は Cloudflare 移行時の設計・監査記録です。現在の構成は [architecture.md](architecture.md)、2026-08-22 時点で再監査した Free plan の上限と運用制約は [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md) を優先してください。
+
+- [cloudflare-migration-plan.md](cloudflare-migration-plan.md): 完了済みの Realtime 移行記録
+- [cloudflare-issue-tracker.md](cloudflare-issue-tracker.md): 移行 Issue の分担・依存関係の履歴
+- [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md): Free plan の容量監査と無課金運用の hard cap
+
+## 更新ルール
+
+実装を変更した PR では、必要に応じて同じ PR で docs も更新します。
+
+- ゲームルール変更 → `game-design.md`
+- Realtime / storage / 構成変更 → `architecture.md`
+- 実装済み機能の変更 → `current-implementation.md`
+- リリース基準や CI 変更 → `quality-ci-cd.md`
+- 今後の優先順位変更 → `roadmap.md` / `features/feature-backlog.md`

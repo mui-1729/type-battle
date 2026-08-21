@@ -7,184 +7,256 @@ Browser
   |
   | HTTPS
   v
-Next.js Web App
+Next.js Web App (Vercel)
   |
   | WebSocket
   v
 Cloudflare Worker
   |
   | Durable Object bindings
-  | - GATEWAY: practice / shared rate limit (RoomDurableObject, legacy gateway class name)
-  | - ROOMS: room authority per room code (RoomAuthorityDurableObject)
+  | - GATEWAY: practice / gateway-level control
+  | - ROOMS: room code ごとの room authority
   v
 Durable Object SQLite storage
 ```
 
-Web UI は Vercel / Next.js、realtime backend は Cloudflare Worker / Durable Object を active 構成にする。room authority、countdown、COM、forfeit、room snapshot、guest session、match result は Cloudflare 側で扱う。
+現在の active realtime backend は Cloudflare Worker / Durable Objects です。旧 Socket.IO realtime server は運用対象ではありません。
 
-`RoomDurableObject` は既存の `ROOMS.getByName("gateway")` storage を引き継ぐため、gateway class 名として維持する。新しい room scoped Durable Object は `RoomAuthorityDurableObject` として追加する。
+## 各コンポーネントの責務
 
-Cloudflare 構成と free tier リスクの整理は [docs/cloudflare-migration-plan.md](cloudflare-migration-plan.md) と [docs/cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md) にまとめる。
+### Web
 
-## 推奨ディレクトリ構成
+- Home / Lobby / Match / Result / Practice UI
+- local input の取得
+- Realtime client の接続
+- server state の表示
+- localStorage を使う user settings / local analytics
+
+最終的な進捗や勝敗は Web で確定しません。
+
+### Cloudflare Worker
+
+- WebSocket gateway
+- command envelope / ack
+- basic validation / rate limit
+- room code に応じた Durable Object への routing
+- health / readiness / metrics endpoint
+
+### RoomAuthorityDurableObject
+
+room code ごとの authoritative state を持ちます。
+
+- join / leave / reconnect
+- ready / countdown / match start
+- typing validation
+- `race` / `timeAttack` / `hpBattle` の状態遷移
+- COM
+- disconnect / forfeit
+- rematch
+- result 確定
+- room snapshot の保存・復元
+- guest session / match result persistence
+- timer / alarm
+- room-scoped broadcast
+
+### Gateway Durable Object
+
+既存 storage 互換と gateway-level の責務のために残しています。新しい room state の authority は room-scoped `RoomAuthorityDurableObject` です。
+
+## Realtime contract
+
+型定義の正本は `packages/shared/src/cloudflare-events.ts` です。
+
+### Client command
 
 ```txt
-apps/
-  web/
-    app/
-    components/
-    lib/
-  cloudflare-worker/
-    src/
-      realtime-gateway.ts
-      room-authority.ts
-      worker.ts
-packages/
-  shared/
-    src/
-      events.ts
-      game-state.ts
-      scoring.ts
-docs/
+client:room:create
+client:room:join
+client:room:leave
+client:player:ready
+client:player:reaction
+client:player:equipment
+client:room:setPromptCategory
+client:room:setBotDifficulty
+client:room:setMatchRule
+client:match:start
+client:typing:progress
+client:typing:finish
+client:match:rematch
+client:practice:start
+client:practice:dailyStart
 ```
 
-## Cloudflare realtime message
+### Server event
 
-### Client to Server
+```txt
+server:room:state
+server:player:progress
+server:match:countdown
+server:match:started
+server:match:result
+server:error
+server:player:reaction
+```
 
-- `room:create`
-- `room:join`
-- `room:leave`
-- `player:ready`
-- `room:setPromptCategory`
-- `match:start`
-- `typing:progress`
-- `typing:finish`
-- `match:rematch`
-- `practice:start`
+command には request id を付け、server は `server:ack` で対応する request へ応答します。
 
-### Server to Client
+## 主な共有 state
 
-- `room:state`
-- `match:countdown`
-- `match:started`
-- `player:progress`
-- `match:result`
-- `match:error`
-
-## Game State
+型定義の正本は `packages/shared/src/game-state.ts` です。
 
 ```ts
-type MatchStatus =
-  | "waiting"
-  | "countdown"
-  | "playing"
-  | "finished";
-
+type MatchStatus = "waiting" | "countdown" | "playing" | "finished";
+type MatchRule = "race" | "timeAttack" | "hpBattle";
 type BotDifficulty = "easy" | "normal" | "hard";
-
 type PromptCategory = "short" | "standard" | "long";
+type TypingInputMode = "kana" | "romaji";
+```
 
-type PlayerState = {
-  id: string;
-  nickname: string;
-  connected: boolean;
-  ready: boolean;
-  isHost: boolean;
-  isBot: boolean;
-  progressIndex: number;
-  correctCharacters: number;
-  totalTypedCharacters: number;
-  mistakes: number;
-  wpm: number;
-  accuracy: number;
-  finishedAt?: number;
-  finishTimeMs?: number;
-};
+`RoomState` には match rule、prompt、server start / end time、players、round、result 等を持ちます。HP Battle 用 HP や typing 内部 state など、ルール・復旧に必要な値も shared state / persistence 側で扱います。
 
-type RoomState = {
+## Server-authoritative typing
+
+現在は client が `currentIndex`、WPM、accuracy などの結果値を信用させる方式ではありません。
+
+client が送る基本 payload は次です。
+
+```ts
+type TypingProgress = {
   roomCode: string;
-  hostPlayerId: string;
-  status: MatchStatus;
-  botDifficulty: BotDifficulty;
-  promptCategory: PromptCategory;
-  prompt?: Prompt;
-  serverStartAt?: number;
-  players: PlayerState[];
-  maxPlayers: number;
-  result?: MatchResult;
+  input: string;
+  sequence: number;
 };
 ```
 
-## 現在の実装メモ
+server 側で:
 
-- room state は Cloudflare Durable Object 内の room engine と storage snapshot で管理する。
-- waiting room は TTL cleanup される。
-- reload rejoin は localStorage の guest id / room code を使う。
-- playing 中の long disconnect は server state で forfeit 判定できる。
-- practice は Cloudflare command で prompt を発行し、UI も実装済み。
-- Web 側は Cloudflare WebSocket adapter を使う。
+1. player / room / match status を確認する
+2. sequence の stale / duplicate を確認する
+3. input を prompt に対して検証する
+4. progress、correct count、total input、miss、streak を更新する
+5. WPM / accuracy を計算する
+6. ルール固有の状態遷移を行う
+7. 終了条件を満たした場合だけ result を確定する
 
-## サーバー authoritative 方針
+このため、client が forged progress や finish 値を送っても、その値をそのまま結果には使用しません。
 
-クライアントは「入力した」というイベントを送るだけにし、最終的な進捗・完走・勝敗はサーバーが確定する。
+## Persistence
 
-ただし、1 キーごとに完全検証すると通信量が増える。MVP では次の折衷にする。
+Durable Object SQLite storage を使います。
 
-- クライアントは currentIndex、correctCharacters、totalTypedCharacters、mistakes を送る。
-- サーバーは room の prompt length と単調増加チェックを行う。
-- finish event では currentIndex が prompt length に到達しているか検証する。
-- 不自然な進捗ジャンプや高すぎる WPM を suspicious として記録する。
+保存対象:
 
-## スケール
+- room snapshot
+- player session / reconnect に必要な情報
+- match result
+- guest session
+- timer / round 復元に必要な情報
 
-### MVP
+期限切れ record は retention cleanup の対象です。
 
-- Cloudflare Worker
-- Durable Object room state
-- guest id を発行
-- room code 参加
-- 基本ログ
+永続化の責務分割は #198 で段階的に進めています。
 
-### Private Beta
+## Reconnect / lifecycle
 
-- Durable Object storage に guest session / match result 保存
-- 軽い rate limit
-- デプロイ環境
-- エラー、切断、試合 lifecycle のログ
-- 管理者だけがログを確認できる運用
+- guest id と room code は Web の localStorage に保存
+- disconnect 直後は room / player を即破棄しない
+- short disconnect / reload では同じ player として復帰可能
+- playing 中の long disconnect は server が forfeit 判定
+- waiting / finished room は activity と connection 状態を考慮して TTL cleanup
+- host 不在時は human player へ host を移譲
 
-### Public Beta
+## Observability
 
-- room 単位 Durable Object または gateway sharding
-- D1 / Analytics 用 storage の導入検討
-- 公開ロビーまたはランダムマッチ
-- 荒らし対策、禁止語、通報導線
+Worker は次を持ちます。
 
-### Production
+- structured logging
+- match terminal transition log
+- `/health`
+- `/ready`
+- `/metrics`
+- rate limit / socket limit / message size limit
 
-- matchmaking queue を Durable Object / Queue / Redis などで管理
-- replay / audit 用に match events を保存
-- observability: logs, metrics, tracing
-- バックアップ、障害対応、コスト監視
+Private Beta では「問題が起きた room / match の流れを追える」ことを重視します。
 
-## セキュリティ
+## Deployment
 
-- room code は推測しにくい 6-8 文字にする。
-- nickname は長さ制限、禁止文字、HTML escape を行う。
-- Cloudflare WebSocket command で session id と guest id を確認する。
-- rate limit を room creation、join、progress events に設定する。
-- paste、tab switch、異常 WPM を検知する。
+```txt
+Web        -> Vercel
+Realtime   -> Cloudflare Worker
+Room state -> Durable Objects
+CI         -> GitHub Actions
+```
+
+Worker は CI 成功済み commit SHA を指定する deploy workflow を持ちます。
+
+2026-08-22 時点の運用上の残件:
+
+- #167 Production 用 Cloudflare Secrets / Variables
+- #232 Production 受け入れ確認
+- #168 実装済み Preview 専用 Realtime 環境の実デプロイ・確認
+- Production Worker は `ae61854` で `main` より 34 commits 遅れている
+- Preview Worker は未デプロイ
+
+## Security
+
+### 実装済みの基盤
+
+- server-authoritative typing validation
+- identifier / payload validation
+- room create / join / typing の軽量 rate limit
+- socket / message size / idle 制限
+- guest session
+- retention cleanup
+- branch protection / CI
+
+### Public Beta 前に強化するもの
+
+- nickname 基本 moderation、report / local block、terms / privacy / contact は実装済み
+- report のサーバー側受付・審査運用
+- suspicious result / automated input 対応
+- load / abuse monitoring
+
+Production CSP の Realtime origin 制限（#196）は実装済みです。
+
+## Scaling
+
+Redis を前提にはしません。
+
+現在は room code ごとの Durable Object が state authority なので、まず次を実測します。
+
+- simultaneous rooms
+- WebSocket connections
+- typing message rate
+- Durable Object request / storage cost
+- gateway bottleneck
+
+Cloudflare Workers Free / Vercel Hobby のみを使い、paid-only feature は前提にしません。load harness は手動実行・最大 20 rooms / 40 sockets とし、quota 監視、受付停止、rollback を枯渇前に行います。別の storage / queue を検討する場合も、無課金条件と公式上限を再確認します。
 
 ## テスト戦略
 
-- Unit: scoring、progress validation、room state transition
-- Integration: Cloudflare Worker / Durable Object gateway
-- E2E: Playwright で 2 context を使った room 作成・参加・対戦・結果表示
-- Load: k6 または autocannon で同時 room と progress events を確認
+- Unit: scoring、typing validation、pure helpers
+- Integration: Worker / Durable Object / room protocol
+- Runtime: persistence / restart recovery
+- E2E: Playwright による 2 client、COM、reconnect、practice、mobile 等
+- Production acceptance: #232
+- Load: #238 で手動 harness を追加（自動 stress test なし、最大 20 rooms / 40 sockets）
 
-## Cloudflare 移行メモ
+## 保守上の課題
 
-- shared の Cloudflare event contract、web adapter、Cloudflare Worker backend は実装済み。
-- 旧 Node realtime server は削除済み。
-- Web は現時点では Vercel 維持を前提にし、Cloudflare Pages への web 移行は別判断にする。
+機能追加とは分けて次を進めています。
+
+- #197 Web `page.tsx` の Realtime / game state 責務分割
+- #198 Worker `room-authority.ts` の lifecycle / persistence 責務分割
+
+大きさだけを理由に全面書き換えせず、挙動を維持しながら段階的に分離します。
+
+## Cloudflare 移行資料
+
+移行時の設計・Free Tier 監査は次に残しています。
+
+- [cloudflare-migration-plan.md](cloudflare-migration-plan.md)
+- [cloudflare-free-tier-audit.md](cloudflare-free-tier-audit.md)
+- [cloudflare-issue-tracker.md](cloudflare-issue-tracker.md)
+
+現在の構成についてはこのファイルを優先してください。

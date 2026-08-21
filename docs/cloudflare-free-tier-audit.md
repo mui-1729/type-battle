@@ -1,177 +1,84 @@
-# Cloudflare Free Tier Audit
+# Free Tier 容量・運用監査
 
-## 目的
+**監査日時:** 2026-08-22 JST
+**対象:** Cloudflare Workers Free / Durable Objects Free、Vercel Hobby
+**方針:** このプロジェクトは **Cloudflare Workers Free と Vercel Hobby/free tier のみ**を使用し、paid-only feature や超過課金を前提にしません。
 
-Cloudflare へ realtime を移す場合に、無料枠で private beta まで耐えられるかを見積もる。
+料金・上限は変更され得ます。以下は監査日時点で取得した公式文書に基づく値であり、load baseline や公開判定の直前にリンク先を再確認します。
 
-この監査は issue #22 の成果物であり、issue #21 の移行追跡にぶら下がる。
+## 公式 hard limits
 
-## 監査対象
+| Service / dimension | Free tier limit verified on 2026-08-22 | Exhaustion behavior / note | Official source |
+| --- | ---: | --- | --- |
+| Cloudflare Workers requests | 100,000 requests/day | 00:00 UTC reset。超過時は Error 1027 | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/#request-limits) |
+| Workers CPU per HTTP request | 10 ms | 継続的超過は実行終了、Error 1102 | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/#cpu-time) |
+| Workers memory | 128 MB/isolate | 超過時に request cancellation / Error 1102 の可能性 | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/#memory) |
+| Workers subrequests | 50/invocation | Free plan hard limit | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/#subrequests) |
+| Durable Objects requests | 100,000/day | HTTP、RPC session、WebSocket message、alarm を含む。超過した種類の操作は失敗し、00:00 UTC reset | [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/#durable-objects) |
+| Durable Objects duration | 13,000 GB-s/day | Free allocation。超過した種類の操作は失敗 | [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/#durable-objects) |
+| Durable Objects SQLite reads | 5,000,000 rows/day | Free plan は SQLite-backed Durable Objects のみ | [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/#sqlite-storage-backend) |
+| Durable Objects SQLite writes | 100,000 rows/day | alarm と delete も write として数える | [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/#sqlite-storage-backend) |
+| Durable Objects SQLite stored data | 5 GB/account、1 GB/object | object 上限到達後は write が `SQLITE_FULL`、read / delete は継続可能 | [DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/#sqlite-storage-backend) / [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/#sqlite-storage-backend) |
+| Vercel Hobby Edge Requests | 1,000,000/month | Hobby は included usage 超過時に pause | [Vercel Hobby](https://vercel.com/docs/plans/hobby) / [Account plans](https://vercel.com/docs/plans#managing-plan-usage) |
+| Vercel Hobby Fast Data Transfer | 100 GB | Hobby included resource | [Account plans](https://vercel.com/docs/plans#hobby) |
+| Vercel Hobby deployments | 100/day | Hobby plan limit | [Vercel Hobby](https://vercel.com/docs/plans/hobby) |
 
-- Workers Free plan
-- Durable Objects on Workers Free plan
-- Durable Object SQLite storage
+Vercel Hobby は公式に **non-commercial, personal use only** とされています。超過時は通常、その機能を再利用できるまで 30 日待つ必要があり、Hobby plan は free-tier usage 超過時に pause されます。商用利用や継続可用性が必要になった場合、無料枠のまま可能とは判断せず、公開範囲を縮小または停止して方針を再検討します。
 
-## 参照した現状実装
+Durable Objects の WebSocket は接続作成に request が必要です。incoming message は compute request の計算で 20:1、outgoing message と protocol ping は request 課金対象外ですが、この比率だけから容量を保証しません。application message、接続時間、hibernation、storage write を dashboard の実測で確認します。
 
-- `apps/web/app/page.tsx` は `typing:progress` / `typing:finish` を keydown ごとに送る。
-- `packages/shared/src/cloudflare-events.ts` は command ごとに ack を返す前提になっている。
-- `packages/shared/src/room-engine.ts` の `BOT_TICK_MS` は 500 ms。
-- `apps/cloudflare-worker/src/worker.ts` は practice / shared rate limit を `GATEWAY` Durable Object、room state / room socket を room code ごとの `ROOMS` Durable Object へ振り分ける。既存storage継承のため、`GATEWAY` は legacy gateway class 名の `RoomDurableObject` に binding し、`ROOMS` は `RoomAuthorityDurableObject` に binding する。
+## Project hard caps
 
-## 公式ドキュメントの要点
+公式上限より十分低い段階で停止するため、#238 の load harness に次の **project hard cap** を適用します。
 
-以下は Cloudflare 公式ドキュメントの現時点の上限。
+| Item | Project cap |
+| --- | ---: |
+| Simultaneous rooms | 20 |
+| WebSocket connections | 40 |
+| Execution | 明示 URL + confirmation を指定した手動実行のみ |
+| Automation | CI / cron / Nightly からの実行禁止 |
+| Test type | baseline のみ。自動 stress / soak / unbounded test 禁止 |
 
-- Workers Free: `100,000` requests / day、CPU `10 ms` / HTTP request、Subrequests `50` / request、Memory `128 MB`。
-- Durable Objects Free: SQLite-backed Durable Objects のみ利用可、最大 class 数 `100`、account storage `5 GB`、WebSocket message size `32 MiB`、CPU per request `30 s`（WebSocket messages を含む）、単一 DO の soft limit は `1,000 requests / sec`。
-- D1: database size `10 GB`、Worker invocation あたりの D1 同時接続 `6`。現時点では D1 は未使用で、guest session / match result は Durable Object SQLite storage に保存する。
+この 20 rooms / 40 sockets は Free tier の安全容量を保証する数値ではなく、誤実行の被害を限定するための上限です。1 match 当たりの requests、messages、duration、rows read / written が未計測なので、この cap 内でも quota を使い切る可能性があります。
 
-参考:
+## Monitoring and rollback before exhaustion
 
-- Workers limits: https://developers.cloudflare.com/workers/platform/limits/
-- Durable Objects limits: https://developers.cloudflare.com/durable-objects/platform/limits/
-- D1 limits: https://developers.cloudflare.com/d1/platform/limits/
+1. 実行前に Cloudflare / Vercel dashboard の当日・当月 usage と error を記録します。
+2. 対象 URL、commit SHA、rooms、sockets、試合数、開始・終了時刻を結果へ保存します。
+3. request、DO duration、rows written、Edge Requests、Fast Data Transfer、error rate の異常増加を確認したら追加実行を止めます。
+4. quota 枯渇を待たず、新規対戦受付を停止するか公開範囲を縮小します。
+5. Worker は直前の既知 commit、Web は既知の正常 deployment へ rollback し、health / WebSocket smoke を再確認します。
+6. paid-only alerting、Log Drains、Spend Management、自動 scale-up は利用可能と仮定しません。Free dashboard / email notification と手動 runbook で運用します。
 
-## 見積もりの前提
+## Current deployment risk
 
-以下はこの repo の current implementation からの推定。
+2026-08-22 時点で Production Worker は `ae61854`、current `main` は `0eb93af` で、**34 commits の drift** があります。Preview Worker は未デプロイです。
 
-- 1 keydown = 1 `typing:progress` または `typing:finish`
-- 1 accepted typing update = 1 room authoritative update
-- 1 room authoritative update = 1 room authority DO message 相当
-- 1 update につき、少なくとも 1 ack と 1 room broadcast が発生する
-- 2 人対戦が基本で、room 1 つあたりの同時接続は最大 2 人
-- room gameplay は room code ごとの DO に分散し、create / join の共有 rate limit は gateway DO に集約する
+したがって現時点では容量試験より先に次を完了します。
 
-## 1 試合あたりの概算モデル
+1. #167 Production deploy credentials / variables
+2. current `main` の deploy と `/health.commitSha` 照合
+3. #232 Production acceptance
+4. #168 Preview Worker deploy / 2 client validation
 
-### Human-only race
+Production / Preview の外部状態は repository 内のコードだけでは更新できません。credential 値は docs、Issue、PR、log に記録しません。
 
-保守的に、1 試合あたり 1 人 150 回前後の keydown を見込む。
+## Workload model to measure
 
-- 2 人対戦
-- 1 人あたり 150 keydown
-- 1 試合あたりの client command は約 `300` 件
-- `match:start` / countdown / result / rematch などの制御メッセージを足しても、合計はおおむね `310` から `340` 件程度
+- 1 match 当たりの Worker / Durable Object requests
+- incoming WebSocket messages と connection churn
+- Durable Object duration と hibernation
+- room snapshot / result / guest session の rows read / written
+- COM timer の invocation / duration
+- singleton Gateway の queue latency
+- Vercel Edge Requests / Fast Data Transfer
 
-この値は「1 request = 1 authoritative update」とみなした概算。
-WebSocket の ack や broadcast を含めた message 数はこれより多いが、Workers / DO の制約を見るときはまず authoritative update 数を数えるのが実用的。
+過去の「2 人 × 約 150 keydown、約 310〜340 command」という値は粗い設計モデルにすぎず、Cloudflare の課金 request と 1:1 ではありません。容量判断には dashboard の実測を使います。
 
-### COM match
+## Related documents
 
-COM ありの試合では、人間の typing update に加えて bot tick が入る。
-
-- `BOT_TICK_MS = 500 ms`
-- 30 秒試合なら bot tick は最大 `60` 回
-- 60 秒試合なら bot tick は最大 `120` 回
-
-したがって、COM 試合の request 負荷は human-only より明確に重い。
-
-### Persistence
-
-理想は次の通り。
-
-- guest session: room create / join 時に 1 回ずつ
-- match result: 1 試合につき 1 回
-
-逆に、room snapshot を typing update ごとに D1 へ書くのは避けるべき。Cloudflare gateway では DO storage への snapshot 保存を debounce し、typing hot path の write 回数を間引く。
-
-## 想定上限
-
-### Workers Free
-
-Requests は `100,000 / day` が上限。
-
-human-only の試合を `320` requests / match とみなすと、1 日あたりの上限は概算で次の通り。
-
-- `100,000 / 320 ≒ 312` matches / day
-
-COM ありで `380` requests / match 程度まで膨らむと、概算は次の通り。
-
-- `100,000 / 380 ≒ 263` matches / day
-
-つまり、無料枠は private beta の小規模利用には足りるが、継続的な public beta には余裕が薄い。
-
-### Durable Objects Free
-
-DO 単体の soft limit は `1,000 requests / sec`。現在の実装は room code ごとの Room Authority DO に gameplay を分散するため、typing hot path は 1 room 単位の負荷で見る。
-
-この repo の 2 人対戦で、1 room が 1 人あたり毎秒 5 〜 10 回程度更新すると、1 room あたり最大 `10` 〜 `20` message / sec 程度になる。room 単位 DO ではこの負荷が room ごとに分かれるため、単一 gateway 集約時より per-object soft limit への接近は遅い。
-
-ただし、private beta 規模では Workers Free の daily request が先に効く可能性が高い。public beta 前には progress broadcast の coalescing と gateway 側 shared rate limit の計測を優先する。
-
-### Persistence storage
-
-guest session と match result は低頻度イベントとして Durable Object storage に保存する。room create / join と match result のみが対象なので、typing hot path には入れない。
-
-永続化が危険になるのは次のケース。
-
-- typing update ごとに長期保存へ書く
-- room state snapshot を毎回永続化する
-- イベントログを storage に積み続ける
-
-そのため、初期 persistence は「低頻度の永続化」に限定するのが前提。横断検索や集計が必要になった段階で D1 へ移す。
-
-## ボトルネック判定
-
-現状の想定では、最初に詰まりやすいのは次の順。
-
-1. Workers の daily request 100k
-2. room authority DO / gateway shared rate limit の局所的な message 集中
-3. COM tick の無駄打ち
-4. DO storage / D1 による hot path 化
-
-DO の per-object soft limit は、2 人対戦中心の private beta ならすぐには優先ボトルネックになりにくい。ただし room create / join の shared rate limit は gateway DO に集約されるため、abuse 対策の計測対象にする。
-
-## throttling / coalescing 方針
-
-### 必須
-
-- 永続レコード書き込みは room create / join / match result などの低頻度イベントに限定する
-- room snapshot を keydown ごとに即時永続化せず、DO storage 書き込みを debounce する
-- `server:room:state` の完全な再送は必要時のみ行う
-
-### 推奨
-
-- `player:progress` は 1 keydown = 1 update のままでもよいが、公開 beta 前に 50 〜 100 ms の coalescing を検討する
-- bot tick は free-tier では 500 ms 固定ではなく、`750 ms` 〜 `1,000 ms` に落とせるようにする
-- progress が変わらない update は broadcast しない
-
-## COM tick の結論
-
-結論として、**free tier では COM tick を 1,000 ms 前後まで落とす方が安全**。
-
-理由:
-
-- bot tick は人間の入力と違って、負荷が使用量に比例せず一定間隔で発生する
-- 500 ms のままだと、30 秒試合で 60 回、60 秒試合で 120 回の追加 invocation が出る
-- private beta では許容できても、room 数が増えたときに request budget を食いやすい
-
-したがって:
-
-- local/dev や paid plan: 500 ms でもよい
-- free tier の private beta: 1,000 ms を既定にした方が無難
-
-## 必要な follow-up
-
-この監査結果から、追加で切るべき issue は次の 2 つ。
-
-1. `feat(cloudflare): coalesce progress broadcasts`
-2. `feat(cloudflare): make bot tick interval adaptive`
-
-ただし、private beta の範囲では「必須」ではなく、計測後の後追いで十分。
-
-## 結論
-
-- private beta 規模なら Cloudflare Free で realtime を試す余地はある
-- ただし request/day が最初の上限なので、hot path の永続化は最小限に絞る
-- public beta を見据えるなら、progress broadcast の coalescing と COM tick の適応化はほぼ必須
-
-## 関連
-
-- [docs/cloudflare-migration-plan.md](cloudflare-migration-plan.md)
-- [docs/architecture.md](architecture.md)
-- [docs/current-implementation.md](current-implementation.md)
-- issue #21
-- issue #22
+- [architecture.md](architecture.md): current architecture
+- [current-implementation.md](current-implementation.md): current `main` implementation
+- [features/deployment-private-beta.md](features/deployment-private-beta.md): deploy / rollback runbook
+- [quality-ci-cd.md](quality-ci-cd.md): test and release gates
+- [roadmap.md](roadmap.md): #167 / #168 / #232 / #238 / #242 status
