@@ -37,13 +37,29 @@ type PersistablePlayer = {
 };
 
 type PersistableRoom = {
+  roomCode: string;
   round: number;
   promptHistory: string[];
   createdAt: number;
   lastActivityAt: number;
   finishedAt?: number;
-  players: Map<string, PersistablePlayer>;
+  players: ReadonlyMap<string, PersistablePlayer>;
 };
+
+function assertMatchingRoomIdentity(room: PersistableRoom, publicRoom: RoomState): void {
+  if (room.roomCode !== publicRoom.roomCode) {
+    throw new Error("Persisted room snapshot roomCode mismatch");
+  }
+
+  const publicPlayerIds = new Set(publicRoom.players.map((player) => player.id));
+  if (
+    publicPlayerIds.size !== publicRoom.players.length
+    || publicPlayerIds.size !== room.players.size
+    || [...room.players.keys()].some((playerId) => !publicPlayerIds.has(playerId))
+  ) {
+    throw new Error("Persisted room snapshot player ID mismatch");
+  }
+}
 
 export function createPersistedRoomSnapshot({
   room,
@@ -54,6 +70,8 @@ export function createPersistedRoomSnapshot({
   publicRoom: RoomState;
   playerSessions: ReadonlyMap<string, string>;
 }): PersistedRoomSnapshot {
+  assertMatchingRoomIdentity(room, publicRoom);
+
   const disconnectedAt: Record<string, number> = {};
   const typingState: Record<string, PersistedPlayerTypingState> = {};
 
@@ -74,7 +92,7 @@ export function createPersistedRoomSnapshot({
 
   return {
     schemaVersion: ROOM_SNAPSHOT_SCHEMA_VERSION,
-    room: publicRoom,
+    room: structuredClone(publicRoom),
     playerSessions: Object.fromEntries(playerSessions.entries()),
     disconnectedAt,
     internal: {
