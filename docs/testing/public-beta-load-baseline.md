@@ -2,13 +2,14 @@
 
 Public Beta 前に、Cloudflare Realtime backend の基本的な同時利用を同じ条件で再計測するための手順です。
 
-この script は **stress test ではありません**。1 room 2 clients の通常操作を少数 room で並列実行し、room setup の成功率と latency を記録します。
+この script は **stress test ではありません**。1 room 2 clients の通常操作を少数 room で並列実行し、room setup とシナリオ全体の成功率・latency を記録します。
 
 ## 安全ルール
 
 - 自分が管理・許可している Worker にだけ実行する。
 - `localhost` / `127.0.0.1` / `::1` / `*.workers.dev` 以外には script 自体が接続しない。
-- `TYPE_BATTLE_LOAD_CONFIRM=I_OWN_THIS_TARGET` を明示しない限り実行しない。
+- `TYPE_BATTLE_LOAD_CONFIRM=I_OWN_THIS_TARGET` を明示しない限り実行しない。この値は意図的な実行確認であり、target の所有権を技術的に証明するものではない。
+- remote `*.workers.dev` は HTTPS/WSS の標準portだけを許可する。
 - `LOAD_ROOMS` は最大20。最大でも40 WebSocket接続に制限する。
 - CI から自動実行しない。
 - 第三者サービスや許可を得ていない環境には実行しない。
@@ -24,7 +25,7 @@ Public Beta 前に、Cloudflare Realtime backend の基本的な同時利用を�
 5. host が match start
 6. `server:match:started` を確認
 7. 両 client が短い typing input を送信
-8. server-authoritative progress が進むことを確認
+8. **host / guest 両方**の server-authoritative progress が進むことを確認
 9. room から退出し socket を閉じる
 
 room 同士は並列ですが、同一 room 内の create → join は順序化しています。
@@ -60,7 +61,7 @@ npm run load:baseline --workspace @type-battle/cloudflare-worker
 
 | 変数 | 必須 | 既定値 | 制限 |
 | --- | --- | --- | --- |
-| `CLOUDFLARE_WORKER_URL` | yes | なし | localhost または `*.workers.dev` |
+| `CLOUDFLARE_WORKER_URL` | yes | なし | loopback、または HTTPSの `*.workers.dev` 標準port |
 | `TYPE_BATTLE_LOAD_CONFIRM` | yes | なし | `I_OWN_THIS_TARGET` 固定 |
 | `LOAD_ROOMS` | no | `5` | `1..20` |
 | `LOAD_TIMEOUT_MS` | no | `20000` | `5000..60000` |
@@ -74,9 +75,10 @@ summary には最低限次が含まれます。
 - 開始 / 終了時刻
 - requested / succeeded / failed room 数
 - 最大接続試行数
-- setup latency の min / p50 / p95 / max
-- failure reason ごとの件数
-- 成功 room ごとの room code / setup latency
+- setup latency（socket open → create / join 完了）の min / p50 / p95 / max
+- scenario latency（socket open → 両playerのauthoritative progress確認）の min / p50 / p95 / max
+- stableな stage / code ごとの failure 集計
+- 成功・失敗を含む各roomの構造化結果
 
 失敗 room が1件でもある場合は exit code 1 にします。
 
@@ -103,4 +105,4 @@ summary には最低限次が含まれます。
 - 長期 storage / cost
 - abuse traffic
 
-まず小さい再現可能な基準値を作り、実測に応じて試験条件を段階的に増やします。
+まず `LOAD_ROOMS=1` から開始し、Cloudflare Workers Free の利用量を確認しながら必要な場合だけ段階的に増やします。20 rooms / 40 sockets は安全容量の保証ではなく、誤実行時の上限です。
