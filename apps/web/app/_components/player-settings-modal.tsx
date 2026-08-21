@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import { useId, type Dispatch, type SetStateAction } from "react";
 import type { PlayerSettings } from "../../lib/player-settings";
 import { FONT_SIZE_LABELS, THEME_LABELS } from "../_lib/ui-labels";
+import { BlockedPlayersSettings } from "./blocked-players-settings";
 import { DialogOverlay } from "./dialog-overlay";
 
 type PlayerSettingsModalProps = {
@@ -174,6 +175,8 @@ export function PlayerSettingsModal({
               </label>
             </div>
           </div>
+
+          <BlockedPlayersSettings />
         </div>
       </div>
 

@@ -1,0 +1,234 @@
+.legalPage {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.legalScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 2px 28px;
+  scrollbar-gutter: stable;
+}
+
+.legalCard {
+  display: grid;
+  gap: 26px;
+  width: min(880px, 100%);
+  margin: 0 auto;
+  padding: clamp(22px, 4vw, 38px);
+}
+
+.legalUpdated {
+  margin: -6px 0 0;
+  color: var(--game-body-subtle);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.legalSection {
+  display: grid;
+  gap: 10px;
+}
+
+.legalSection h2 {
+  margin: 0;
+  color: var(--game-heading-muted);
+  font-size: clamp(18px, 2.4vw, 24px);
+  line-height: 1.35;
+}
+
+.legalSection p,
+.legalSection li {
+  color: var(--game-body-muted);
+  font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.8;
+}
+
+.legalSection p {
+  margin: 0;
+}
+
+.legalSection ul,
+.legalSection ol {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 1.4rem;
+}
+
+.legalNotice {
+  margin: 0;
+  padding: 14px 16px;
+  color: var(--game-body-muted);
+  border: 1px solid var(--game-soft-border);
+  border-radius: 14px;
+  background: var(--game-soft-card);
+  font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.7;
+}
+
+.publicInfoLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.publicInfoLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 8px 12px;
+  color: var(--game-accent-strong);
+  border: 1px solid var(--game-soft-border);
+  border-radius: 999px;
+  background: var(--game-card);
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.publicInfoLink:hover,
+.publicInfoLink:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.homeModeMenu {
+  position: relative;
+}
+
+.homePublicInfoFooter {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: min(1160px, 100%);
+  transform: translateX(-50%);
+}
+
+.homePublicInfoFooter .homeNicknameNote {
+  font-size: clamp(11px, 1.1vw, 14px);
+  white-space: nowrap;
+}
+
+.homePublicInfoLinks {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 6px;
+  margin: 0;
+}
+
+.homePublicInfoLinks .publicInfoLink {
+  min-height: 30px;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+.contactActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.contactActions a {
+  text-decoration: none;
+}
+
+@media (max-width: 520px) {
+  .legalPage {
+    gap: 10px;
+  }
+
+  .legalScroll {
+    padding-bottom: 18px;
+  }
+
+  .legalCard {
+    gap: 22px;
+    padding: 20px 16px;
+  }
+
+  .legalSection p,
+  .legalSection li {
+    font-size: 14px;
+  }
+
+  .publicInfoLinks {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .publicInfoLink {
+    width: 100%;
+  }
+
+  /* The game shell is normally a fixed viewport. On narrow home screens the
+     public links must participate in layout instead of overlapping the mode
+     cards, so the home screen becomes the single scroll container. */
+  .appShell.isHome {
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+
+  .isHome .homeModeMenu {
+    align-content: start;
+    min-height: auto;
+    margin-top: 0;
+    padding-bottom: 14px;
+  }
+
+  .homePublicInfoFooter {
+    position: static;
+    left: auto;
+    flex-direction: column;
+    gap: 3px;
+    width: 100%;
+    transform: none;
+  }
+
+  .homePublicInfoFooter .homeNicknameNote {
+    font-size: 10px;
+    line-height: 1.2;
+  }
+
+  .homePublicInfoLinks {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 4px;
+    width: auto;
+    max-width: 100%;
+  }
+
+  .homePublicInfoLinks .publicInfoLink {
+    width: auto;
+    min-height: 26px;
+    padding: 4px 7px;
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  .homePublicInfoLinks .publicInfoLink svg {
+    display: none;
+  }
+
+  .contactActions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
